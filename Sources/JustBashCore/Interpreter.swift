@@ -34,10 +34,11 @@ public final class ShellInterpreter: @unchecked Sendable {
             combined.stdout += result.stdout
             combined.stderr += result.stderr
             combined.exitCode = result.exitCode
-            session.lastExitCode = result.exitCode
+            combined = enforceOutputLimit(combined)
+            session.lastExitCode = combined.exitCode
 
-            if session.options.errexit && result.exitCode != 0 {
-                throw ControlFlow.exit(result.exitCode)
+            if session.options.errexit && combined.exitCode != 0 {
+                throw ControlFlow.exit(combined.exitCode)
             }
         }
         return combined
@@ -80,19 +81,24 @@ public final class ShellInterpreter: @unchecked Sendable {
         var pipedInput = stdin
         var allStderr = ""
         var lastResult = ExecResult()
+        var pipelineExitCodes: [Int] = []
 
         for command in pipeline.commands {
             session.commandCount += 1
             if session.commandCount > limits.maxCommandCount {
                 return ExecResult.failure("maximum command count exceeded", exitCode: 1)
             }
-            let result = try await executeCommand(command, session: &session, stdin: pipedInput)
+            let result = enforceOutputLimit(try await executeCommand(command, session: &session, stdin: pipedInput))
             allStderr += result.stderr
             pipedInput = result.stdout
             lastResult = result
+            pipelineExitCodes.append(result.exitCode)
         }
 
         var exitCode = lastResult.exitCode
+        if session.options.pipefail {
+            exitCode = pipelineExitCodes.last(where: { $0 != 0 }) ?? 0
+        }
         if pipeline.negated {
             exitCode = exitCode == 0 ? 1 : 0
         }
@@ -108,7 +114,7 @@ public final class ShellInterpreter: @unchecked Sendable {
             return try await executeSimple(simple, session: &session, stdin: stdin)
         case .compound(let compound, let redirects):
             let result = try await executeCompound(compound, session: &session, stdin: stdin)
-            return try await applyRedirections(result, redirects: redirects, session: &session)
+            return try await applyRedirections(result, redirects: redirects, session: &session, stdin: stdin)
         case .functionDef(let funcDef):
             session.functions[funcDef.name] = funcDef.body
             return ExecResult.success()
@@ -151,7 +157,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         if cmd.words.isEmpty {
             // Only assignments and/or redirections
             if !cmd.redirections.isEmpty {
-                return try await applyRedirections(ExecResult.success(), redirects: cmd.redirections, session: &session)
+                return try await applyRedirections(ExecResult.success(), redirects: cmd.redirections, session: &session, stdin: stdin)
             }
             return ExecResult.success()
         }
@@ -174,7 +180,11 @@ public final class ShellInterpreter: @unchecked Sendable {
                     effectiveStdin = try await expandWord(redir.target, session: &session, stdin: stdin) + "\n"
                 case .heredoc, .heredocStripTabs:
                     let body = redir.target.rawText
-                    effectiveStdin = try await expandHeredoc(body, session: &session)
+                    if redir.heredocSuppressExpansion {
+                        effectiveStdin = body
+                    } else {
+                        effectiveStdin = try await expandHeredoc(body, session: &session)
+                    }
                 default: break
                 }
             }
@@ -201,7 +211,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         session.lastExitCode = result.exitCode
 
         // Apply output redirections
-        return try applyOutputRedirections(result, redirects: cmd.redirections, commandName: commandName, session: &session)
+        return try await applyOutputRedirections(result, redirects: cmd.redirections, commandName: commandName, session: &session, stdin: stdin)
     }
 
     // MARK: - Compound commands
@@ -1083,18 +1093,24 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     // MARK: - Redirections
 
-    private func applyRedirections(_ result: ExecResult, redirects: [Redirection], session: inout ShellSession) throws -> ExecResult {
-        return try applyOutputRedirections(result, redirects: redirects, commandName: nil, session: &session)
+    private func applyRedirections(_ result: ExecResult, redirects: [Redirection], session: inout ShellSession, stdin: String) async throws -> ExecResult {
+        return try await applyOutputRedirections(result, redirects: redirects, commandName: nil, session: &session, stdin: stdin)
     }
 
-    private func applyOutputRedirections(_ result: ExecResult, redirects: [Redirection], commandName: String?, session: inout ShellSession) throws -> ExecResult {
+    private func applyOutputRedirections(
+        _ result: ExecResult,
+        redirects: [Redirection],
+        commandName: String?,
+        session: inout ShellSession,
+        stdin: String
+    ) async throws -> ExecResult {
         var stdout = result.stdout
         var stderr = result.stderr
 
         for redir in redirects {
             switch redir.op {
             case .output, .clobber:
-                let target = redir.target.rawText
+                let target = try await expandWord(redir.target, session: &session, stdin: stdin)
                 if redir.effectiveFD == 1 {
                     try fileSystem.writeFile(stdout, to: target, relativeTo: session.cwd)
                     stdout = ""
@@ -1103,7 +1119,7 @@ public final class ShellInterpreter: @unchecked Sendable {
                     stderr = ""
                 }
             case .append:
-                let target = redir.target.rawText
+                let target = try await expandWord(redir.target, session: &session, stdin: stdin)
                 if redir.effectiveFD == 1 {
                     try fileSystem.writeFile(stdout, to: target, relativeTo: session.cwd, append: true)
                     stdout = ""
@@ -1112,7 +1128,7 @@ public final class ShellInterpreter: @unchecked Sendable {
                     stderr = ""
                 }
             case .duplicateOutput:
-                let target = redir.target.rawText
+                let target = try await expandWord(redir.target, session: &session, stdin: stdin)
                 if target == "1" && redir.fd == 2 {
                     stdout += stderr; stderr = ""
                 } else if target == "2" && (redir.fd == nil || redir.fd == 1) {
@@ -1126,6 +1142,14 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
 
         return ExecResult(stdout: stdout, stderr: stderr, exitCode: result.exitCode)
+    }
+
+    private func enforceOutputLimit(_ result: ExecResult) -> ExecResult {
+        let outputLength = result.stdout.utf8.count + result.stderr.utf8.count
+        guard outputLength <= limits.maxOutputLength else {
+            return ExecResult.failure("maximum output length exceeded", exitCode: 1)
+        }
+        return result
     }
 
     // MARK: - Shell Builtins

@@ -320,6 +320,17 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "hello world\n")
     }
 
+    func testQuotedHeredocDoesNotExpandVariables() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        value=world
+        cat <<'EOF'
+        hello $value
+        EOF
+        """)
+        XCTAssertEqual(result.stdout, "hello $value\n")
+    }
+
     // MARK: - Pipeline Negation
 
     func testPipelineNegation() async {
@@ -330,11 +341,43 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "negated\n")
     }
 
+    func testPipefailUsesRightmostNonZeroExitCode() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        set -o pipefail
+        false | true
+        echo $?
+        """)
+        XCTAssertEqual(result.stdout, "1\n")
+    }
+
     // MARK: - Tilde Expansion
 
     func testTildeExpansion() async {
         let bash = Bash()
         let result = await bash.exec("echo ~")
         XCTAssertEqual(result.stdout, "/home/user\n")
+    }
+
+    // MARK: - Redirection And Limits
+
+    func testOutputRedirectionExpandsTargetPath() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        path=/tmp/out.txt
+        echo hi > $path
+        cat /tmp/out.txt
+        """)
+        XCTAssertEqual(result.stdout, "hi\n")
+    }
+
+    func testMaxOutputLengthFailsWhenVisibleOutputExceedsLimit() async {
+        let bash = Bash(options: .init(
+            executionLimits: .init(maxOutputLength: 4)
+        ))
+        let result = await bash.exec("printf hello")
+        XCTAssertEqual(result.exitCode, 1)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "maximum output length exceeded\n")
     }
 }

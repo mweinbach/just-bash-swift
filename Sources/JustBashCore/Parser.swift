@@ -179,27 +179,32 @@ private struct Tokenizer {
                 continue
             }
 
-            // Newline — also process pending heredocs
+            // Newline — pending heredoc bodies must appear before the logical newline
             if ch == "\n" {
-                tokens.append(.newline)
                 pos += 1
                 try processPendingHeredocs()
+                tokens.append(.newline)
                 continue
             }
 
             // Operators
             if let tok = try scanOperator() {
                 // Check if this was a heredoc operator — record pending heredoc
-                if case .dless = tok {
-                    let stripped = peek() == "-"
-                    if stripped { pos += 1 }
+                switch tok {
+                case .dless, .dlessDash:
+                    let stripped: Bool
+                    if case .dlessDash = tok {
+                        stripped = true
+                    } else {
+                        stripped = false
+                    }
+                    tokens.append(tok)
                     skipSpacesAndTabs()
                     let (delim, quoted) = try scanHeredocDelimiter()
                     pendingHeredocs.append((delim, stripped, quoted))
-                    if stripped {
-                        tokens[tokens.count - 1] = .dlessDash
-                    }
                     continue
+                default:
+                    break
                 }
                 if case .tless = tok {
                     // Here-string: next word is the string value
@@ -1302,9 +1307,14 @@ private struct ParserState {
 
         // For heredoc, the next token should be the heredoc body
         if op == .heredoc || op == .heredocStripTabs {
-            if case .heredocBody(let body, _) = current {
+            if case .heredocBody(let body, let quoted) = current {
                 advance()
-                return Redirection(fd: fd, op: op, target: ShellWord(literal: body))
+                return Redirection(
+                    fd: fd,
+                    op: op,
+                    target: ShellWord(literal: body),
+                    heredocSuppressExpansion: quoted
+                )
             }
             // If no body yet (might happen), use empty
             return Redirection(fd: fd, op: op, target: .empty)

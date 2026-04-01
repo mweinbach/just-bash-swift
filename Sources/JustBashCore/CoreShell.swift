@@ -138,11 +138,13 @@ public struct Redirection: Sendable {
     public var fd: Int?
     public var op: RedirectionOp
     public var target: ShellWord
+    public var heredocSuppressExpansion: Bool
 
-    public init(fd: Int? = nil, op: RedirectionOp, target: ShellWord) {
+    public init(fd: Int? = nil, op: RedirectionOp, target: ShellWord, heredocSuppressExpansion: Bool = false) {
         self.fd = fd
         self.op = op
         self.target = target
+        self.heredocSuppressExpansion = heredocSuppressExpansion
     }
 
     public var effectiveFD: Int {
