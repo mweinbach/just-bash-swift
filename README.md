@@ -84,7 +84,7 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
 | **test / [** | Unary and binary operators |
 | **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
-| **Variables** | `$var`, `${var}`, assignment, command-scoped (`VAR=x cmd`) |
+| **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`) |
 | **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
 | **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}` |
 | **Tilde expansion** | `~`, `~user` |
@@ -92,7 +92,7 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping), quoted delimiters suppress expansion |
 | **Here-strings** | `<<<` |
 | **Comments** | `# ...` |
-| **Shell options** | enforced: `set -e`, `set -f`, `set -o pipefail`; tracked but not fully enforced yet: `-u`, `-x`, `-C` |
+| **Shell options** | enforced: `set -e`, `set -f`, `set -C`, `set -o pipefail`; tracked but not fully enforced yet: `-u`, `-x` |
 | **Aliases** | `alias`/`unalias` (stored; expansion not yet wired into parser) |
 
 ### Commands
@@ -188,7 +188,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-56 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, redirections, output limits, filesystem persistence, session isolation, and curated parity cases.
+58 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, redirections, output limits, noclobber, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

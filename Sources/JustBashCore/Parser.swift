@@ -32,7 +32,7 @@ public enum ParseError: Error, LocalizedError {
 
 private enum Token: CustomStringConvertible {
     case word(ShellWord)
-    case assignment(String, ShellWord)  // name=value
+    case assignment(String, ShellWord, Bool)  // name=value or name+=value
     case newline
     case semi           // ;
     case amp            // &
@@ -63,7 +63,8 @@ private enum Token: CustomStringConvertible {
     var description: String {
         switch self {
         case .word(let w): return w.rawText
-        case .assignment(let n, let v): return "\(n)=\(v.rawText)"
+        case .assignment(let n, let v, let append):
+            return append ? "\(n)+=\(v.rawText)" : "\(n)=\(v.rawText)"
         case .newline: return "newline"
         case .semi: return ";"
         case .amp: return "&"
@@ -237,8 +238,7 @@ private struct Tokenizer {
             let word = try scanWord()
             // Check if it's an assignment (name=value or name+=value)
             if let (name, value, append) = detectAssignment(word) {
-                tokens.append(.assignment(name, value))
-                _ = append // TODO: store append flag
+                tokens.append(.assignment(name, value, append))
                 continue
             }
             tokens.append(.word(word))
@@ -1242,8 +1242,8 @@ private struct ParserState {
         var redirections: [Redirection] = []
 
         // Leading assignments
-        while case .assignment(let name, let value) = current {
-            assignments.append(Assignment(name: name, value: value))
+        while case .assignment(let name, let value, let append) = current {
+            assignments.append(Assignment(name: name, value: value, append: append))
             advance()
         }
 
@@ -1262,12 +1262,13 @@ private struct ParserState {
                 words.append(w)
                 advance()
 
-            case .assignment(let name, let value):
+            case .assignment(let name, let value, let append):
                 if words.isEmpty {
-                    assignments.append(Assignment(name: name, value: value))
+                    assignments.append(Assignment(name: name, value: value, append: append))
                 } else {
                     // After the first word, treat as a regular word
-                    words.append(ShellWord(literal: "\(name)=\(value.rawText)"))
+                    let operatorText = append ? "+=" : "="
+                    words.append(ShellWord(literal: "\(name)\(operatorText)\(value.rawText)"))
                 }
                 advance()
 

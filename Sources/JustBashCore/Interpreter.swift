@@ -1111,6 +1111,11 @@ public final class ShellInterpreter: @unchecked Sendable {
             switch redir.op {
             case .output, .clobber:
                 let target = try await expandWord(redir.target, session: &session, stdin: stdin)
+                if case .output = redir.op,
+                   session.options.noclobber,
+                   fileSystem.exists(target, relativeTo: session.cwd) {
+                    return ExecResult.failure("cannot overwrite existing file: \(target)")
+                }
                 if redir.effectiveFD == 1 {
                     try fileSystem.writeFile(stdout, to: target, relativeTo: session.cwd)
                     stdout = ""

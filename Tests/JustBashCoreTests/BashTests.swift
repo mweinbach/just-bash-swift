@@ -241,6 +241,16 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "HELLO\nworld\n")
     }
 
+    func testAppendAssignment() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        x=hello
+        x+=world
+        echo $x
+        """)
+        XCTAssertEqual(result.stdout, "helloworld\n")
+    }
+
     // MARK: - Conditional Expressions
 
     func testConditionalExpression() async {
@@ -379,5 +389,19 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "maximum output length exceeded\n")
+    }
+
+    func testNoclobberPreventsOverwrite() async {
+        let bash = Bash(options: .init(files: ["/tmp/existing.txt": "old\n"]))
+        let result = await bash.exec("""
+        set -C
+        echo new > /tmp/existing.txt
+        """)
+        XCTAssertEqual(result.exitCode, 1)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "cannot overwrite existing file: /tmp/existing.txt\n")
+
+        let readBack = await bash.exec("cat /tmp/existing.txt")
+        XCTAssertEqual(readBack.stdout, "old\n")
     }
 }

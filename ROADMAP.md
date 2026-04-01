@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 56 passing tests
+- Current verification baseline: `swift test` with 58 passing tests
 
 ## Recently Completed
 
@@ -24,6 +24,8 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - Quoted heredoc delimiters now suppress variable expansion
 - `set -o pipefail` now affects pipeline exit status
 - `maxOutputLength` is now enforced for visible shell output
+- `set -C` / `noclobber` now prevents overwriting existing files via `>`
+- `+=` assignments now survive parsing into runtime evaluation
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -43,10 +45,8 @@ This is the only active milestone.
 ### 2. Finish The Remaining High-Confidence Runtime Fixes
 
 - `|&` should actually pipe stderr instead of only parsing the token
-- `noclobber` should make `>` fail unless `>|` is used
 - `nounset` should fail unset-variable expansion where the option requires it
 - field splitting should apply to unquoted expansions, not only `read`
-- assignment append handling (`+=`) should survive parsing into the runtime
 - glob character classes (`[abc]`, `[a-z]`) should match correctly
 - `xtrace` should either produce real trace output or stay clearly documented as partial
 
