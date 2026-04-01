@@ -598,6 +598,70 @@ final class BuiltinCommandTests: XCTestCase {
         )
     }
 
+    func testJQOperatorsAndTypeConversion() async {
+        let bash = Bash()
+
+        let addNumbers = await bash.exec(#"echo '5' | jq '. + 3'"#)
+        XCTAssertEqual(addNumbers.stdout, "8\n")
+
+        let subtract = await bash.exec(#"echo '10' | jq '. - 4'"#)
+        XCTAssertEqual(subtract.stdout, "6\n")
+
+        let multiply = await bash.exec(#"echo '6' | jq '. * 7'"#)
+        XCTAssertEqual(multiply.stdout, "42\n")
+
+        let divide = await bash.exec(#"echo '20' | jq '. / 4'"#)
+        XCTAssertEqual(divide.stdout, "5\n")
+
+        let modulo = await bash.exec(#"echo '17' | jq '. % 5'"#)
+        XCTAssertEqual(modulo.stdout, "2\n")
+
+        let stringConcat = await bash.exec(#"echo '{"a":"foo","b":"bar"}' | jq '.a + .b'"#)
+        XCTAssertEqual(stringConcat.stdout, #""foobar""# + "\n")
+
+        let arrayConcat = await bash.exec(#"echo '[[1,2],[3,4]]' | jq -c '.[0] + .[1]'"#)
+        XCTAssertEqual(arrayConcat.stdout, "[1,2,3,4]\n")
+
+        let objectMerge = await bash.exec(#"echo '[{"a":1},{"b":2}]' | jq -c '.[0] + .[1]'"#)
+        XCTAssertEqual(objectMerge.stdout, #"{"a":1,"b":2}"# + "\n")
+
+        let andValue = await bash.exec(#"echo 'true' | jq '. and true'"#)
+        XCTAssertEqual(andValue.stdout, "true\n")
+
+        let orValue = await bash.exec(#"echo 'false' | jq '. or true'"#)
+        XCTAssertEqual(orValue.stdout, "true\n")
+
+        let notValue = await bash.exec(#"echo 'true' | jq 'not'"#)
+        XCTAssertEqual(notValue.stdout, "false\n")
+
+        let fallback = await bash.exec(#"echo '{"a":null}' | jq '.a // "default"'"#)
+        XCTAssertEqual(fallback.stdout, #""default""# + "\n")
+
+        let keepValue = await bash.exec(#"echo '{"a":42}' | jq '.a // "default"'"#)
+        XCTAssertEqual(keepValue.stdout, "42\n")
+
+        let floorValue = await bash.exec(#"echo '3.7' | jq 'floor'"#)
+        XCTAssertEqual(floorValue.stdout, "3\n")
+
+        let ceilValue = await bash.exec(#"echo '3.2' | jq 'ceil'"#)
+        XCTAssertEqual(ceilValue.stdout, "4\n")
+
+        let roundValue = await bash.exec(#"echo '3.5' | jq 'round'"#)
+        XCTAssertEqual(roundValue.stdout, "4\n")
+
+        let sqrtValue = await bash.exec(#"echo '16' | jq 'sqrt'"#)
+        XCTAssertEqual(sqrtValue.stdout, "4\n")
+
+        let absValue = await bash.exec(#"echo '-5' | jq 'abs'"#)
+        XCTAssertEqual(absValue.stdout, "5\n")
+
+        let toString = await bash.exec(#"echo '42' | jq 'tostring'"#)
+        XCTAssertEqual(toString.stdout, #""42""# + "\n")
+
+        let toNumber = await bash.exec(#"echo '"42"' | jq 'tonumber'"#)
+        XCTAssertEqual(toNumber.stdout, "42\n")
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
@@ -666,7 +730,7 @@ final class BuiltinCommandTests: XCTestCase {
 
     func testYQInheritsSharedJQFunctions() async {
         let bash = Bash(options: .init(files: [
-            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}],"message":"hello world"}"#
+            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}],"message":"hello world","a":null}"#
         ]))
 
         let transpose = await bash.exec("yq -p json '.matrix | transpose' /tmp/data.json -o json -c")
@@ -677,6 +741,9 @@ final class BuiltinCommandTests: XCTestCase {
 
         let startsWith = await bash.exec("yq -p json '.message | startswith(\"hello\")' /tmp/data.json")
         XCTAssertEqual(startsWith.stdout, "true\n")
+
+        let fallback = await bash.exec("yq -p json '.a // \"default\"' /tmp/data.json")
+        XCTAssertEqual(fallback.stdout, "default\n")
     }
 
 }

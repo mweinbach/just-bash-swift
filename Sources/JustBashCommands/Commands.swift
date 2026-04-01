@@ -3074,8 +3074,40 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return jqIsNumber(input) ? [input] : []
     }
 
+    if trimmed == "not" {
+        return [!jqTruthy(input)]
+    }
+
     if trimmed == "length" {
         return [jqLength(input)]
+    }
+
+    if trimmed == "floor" {
+        return [jqUnaryNumeric(input) { Foundation.floor($0) }]
+    }
+
+    if trimmed == "ceil" {
+        return [jqUnaryNumeric(input) { Foundation.ceil($0) }]
+    }
+
+    if trimmed == "round" {
+        return [jqUnaryNumeric(input) { Foundation.round($0) }]
+    }
+
+    if trimmed == "sqrt" {
+        return [jqUnaryNumeric(input) { Foundation.sqrt($0) }]
+    }
+
+    if trimmed == "abs" {
+        return [jqUnaryNumeric(input) { Swift.abs($0) }]
+    }
+
+    if trimmed == "tostring" {
+        return [jqToStringValue(input)]
+    }
+
+    if trimmed == "tonumber" {
+        return [jqToNumberValue(input)]
     }
 
     if trimmed == "ascii_downcase" {
@@ -3902,6 +3934,11 @@ private func jqAsciiTransform(_ value: Any, uppercased: Bool) -> Any {
     return uppercased ? string.uppercased() : string.lowercased()
 }
 
+private func jqUnaryNumeric(_ value: Any, transform: (Double) -> Double) -> Any {
+    guard let number = jqNumericValue(value) else { return NSNull() }
+    return transform(number)
+}
+
 private func jqExtremaBy(_ value: Any, filter: String, pickMax: Bool) throws -> Any {
     guard let array = value as? [Any], !array.isEmpty else { return NSNull() }
     let decorated = try array.map { element -> (Any, String) in
@@ -4246,7 +4283,13 @@ private func splitTopLevelJQKeywordAll(_ text: String, keyword: String) -> [Stri
 }
 
 private func parseJQBinaryOperator(_ text: String) -> (left: String, op: String, right: String)? {
-    for op in ["==", "!=", ">=", "<=", ">", "<", "*", "/", "+", "-"] {
+    if let split = splitTopLevelJQKeyword(text, keyword: " and ") {
+        return (split.left, "and", split.right)
+    }
+    if let split = splitTopLevelJQKeyword(text, keyword: " or ") {
+        return (split.left, "or", split.right)
+    }
+    for op in ["//", "==", "!=", ">=", "<=", ">", "<", "%", "*", "/", "+", "-"] {
         if let split = splitTopLevelJQOperator(text, op: op) {
             return split
         }
@@ -4316,11 +4359,22 @@ private func evaluateJQBinary(lhs: Any, rhs: Any, op: String) throws -> Any {
     case "*":
         return jqDouble(lhs) * jqDouble(rhs)
     case "+":
+        if let left = lhs as? String, let right = rhs as? String {
+            return left + right
+        }
+        if let left = lhs as? [Any], let right = rhs as? [Any] {
+            return left + right
+        }
+        if jqObjectDictionary(lhs) != nil, jqObjectDictionary(rhs) != nil {
+            return jqMergeObjects(lhs, rhs)
+        }
         return jqDouble(lhs) + jqDouble(rhs)
     case "-":
         return jqDouble(lhs) - jqDouble(rhs)
     case "/":
         return jqDouble(lhs) / jqDouble(rhs)
+    case "%":
+        return jqDouble(lhs).truncatingRemainder(dividingBy: jqDouble(rhs))
     case ">":
         return jqDouble(lhs) > jqDouble(rhs)
     case "<":
@@ -4330,9 +4384,15 @@ private func evaluateJQBinary(lhs: Any, rhs: Any, op: String) throws -> Any {
     case "<=":
         return jqDouble(lhs) <= jqDouble(rhs)
     case "==":
-        return String(describing: lhs) == String(describing: rhs)
+        return jqEqual(lhs, rhs)
     case "!=":
-        return String(describing: lhs) != String(describing: rhs)
+        return !jqEqual(lhs, rhs)
+    case "and":
+        return jqTruthy(lhs) && jqTruthy(rhs)
+    case "or":
+        return jqTruthy(lhs) || jqTruthy(rhs)
+    case "//":
+        return jqTruthy(lhs) ? lhs : rhs
     default:
         throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported operator: \(op)"])
     }
@@ -4348,6 +4408,19 @@ private func jqDouble(_ value: Any) -> Double {
 private func jqNumericValue(_ value: Any) -> Double? {
     guard jqIsNumber(value) else { return nil }
     return jqDouble(value)
+}
+
+private func jqToStringValue(_ value: Any) -> Any {
+    if let string = value as? String { return string }
+    return renderJQValue(value, compact: true, raw: false)
+}
+
+private func jqToNumberValue(_ value: Any) -> Any {
+    if jqIsNumber(value) { return value }
+    guard let string = value as? String else { return NSNull() }
+    if let int = Int(string) { return int }
+    if let double = Double(string) { return double }
+    return NSNull()
 }
 
 private func jqIntegerValue(_ value: Any) -> Int? {
@@ -4368,6 +4441,18 @@ private func jqPathIndex(_ value: Any) -> Int? {
         return Int(truncating: number)
     }
     return nil
+}
+
+private func jqMergeObjects(_ lhs: Any, _ rhs: Any) -> Any {
+    var entries = jqObjectEntries(lhs)
+    for (key, value) in jqObjectEntries(rhs) {
+        if let existingIndex = entries.firstIndex(where: { $0.0 == key }) {
+            entries[existingIndex].1 = value
+        } else {
+            entries.append((key, value))
+        }
+    }
+    return OrderedJSONObject(entries: entries)
 }
 
 private func parseJQLiteral(_ text: String) -> Any? {
