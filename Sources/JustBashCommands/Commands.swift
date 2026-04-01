@@ -3078,6 +3078,14 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return [jqLength(input)]
     }
 
+    if trimmed == "ascii_downcase" {
+        return [jqAsciiTransform(input, uppercased: false)]
+    }
+
+    if trimmed == "ascii_upcase" {
+        return [jqAsciiTransform(input, uppercased: true)]
+    }
+
     if trimmed == "keys" {
         return [jqKeys(input)]
     }
@@ -3148,6 +3156,48 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
 
     if trimmed == "transpose" {
         return [jqTranspose(input)]
+    }
+
+    if trimmed.hasPrefix("split("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        let separator = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqSplit(input, separator: separator)]
+    }
+
+    if trimmed.hasPrefix("join("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(5).dropLast())
+        let separator = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqJoin(input, separator: separator)]
+    }
+
+    if trimmed.hasPrefix("test("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(5).dropLast())
+        let pattern = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqTest(input, pattern: pattern)]
+    }
+
+    if trimmed.hasPrefix("startswith("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(11).dropLast())
+        let prefix = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqStartsWith(input, prefix: prefix)]
+    }
+
+    if trimmed.hasPrefix("endswith("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(9).dropLast())
+        let suffix = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqEndsWith(input, suffix: suffix)]
+    }
+
+    if trimmed.hasPrefix("ltrimstr("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(9).dropLast())
+        let prefix = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqTrimString(input, needle: prefix, fromStart: true)]
+    }
+
+    if trimmed.hasPrefix("rtrimstr("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(9).dropLast())
+        let suffix = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqTrimString(input, needle: suffix, fromStart: false)]
     }
 
     if trimmed.hasPrefix("min_by("), trimmed.hasSuffix(")") {
@@ -3231,6 +3281,40 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         let rhs = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first ?? NSNull()
         guard let y = jqNumericValue(lhs), let x = jqNumericValue(rhs) else { return [NSNull()] }
         return [NSNumber(value: Foundation.atan2(y, x))]
+    }
+
+    if trimmed.hasPrefix("sub("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast())
+        let arguments = splitTopLevelJQ(inner, separator: ";") ?? []
+        guard arguments.count == 2 else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid sub arguments"])
+        }
+        let pattern = try evaluateJQFilter(arguments[0], input: input, bindings: bindings).first as? String ?? ""
+        let replacement = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first as? String ?? ""
+        return [jqSubstitute(input, pattern: pattern, replacement: replacement, global: false)]
+    }
+
+    if trimmed.hasPrefix("gsub("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(5).dropLast())
+        let arguments = splitTopLevelJQ(inner, separator: ";") ?? []
+        guard arguments.count == 2 else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid gsub arguments"])
+        }
+        let pattern = try evaluateJQFilter(arguments[0], input: input, bindings: bindings).first as? String ?? ""
+        let replacement = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first as? String ?? ""
+        return [jqSubstitute(input, pattern: pattern, replacement: replacement, global: true)]
+    }
+
+    if trimmed.hasPrefix("index("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        let needle = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqIndex(input, needle: needle)]
+    }
+
+    if trimmed.hasPrefix("indices("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(8).dropLast())
+        let needle = try evaluateJQFilter(inner, input: input, bindings: bindings).first as? String ?? ""
+        return [jqIndices(input, needle: needle)]
     }
 
     if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
@@ -3771,6 +3855,53 @@ private func jqTranspose(_ value: Any) -> Any {
     return result
 }
 
+private func jqSplit(_ value: Any, separator: String) -> Any {
+    guard let string = value as? String else { return [] }
+    return string.components(separatedBy: separator)
+}
+
+private func jqJoin(_ value: Any, separator: String) -> Any {
+    guard let array = value as? [Any] else { return NSNull() }
+    return array.map {
+        if $0 is NSNull { return "" }
+        return ($0 as? String) ?? String(describing: $0)
+    }.joined(separator: separator)
+}
+
+private func jqTest(_ value: Any, pattern: String) -> Any {
+    guard let string = value as? String else { return false }
+    return (try? NSRegularExpression(pattern: pattern).firstMatch(
+        in: string,
+        range: NSRange(string.startIndex..<string.endIndex, in: string)
+    )) != nil
+}
+
+private func jqStartsWith(_ value: Any, prefix: String) -> Any {
+    guard let string = value as? String else { return false }
+    return string.hasPrefix(prefix)
+}
+
+private func jqEndsWith(_ value: Any, suffix: String) -> Any {
+    guard let string = value as? String else { return false }
+    return string.hasSuffix(suffix)
+}
+
+private func jqTrimString(_ value: Any, needle: String, fromStart: Bool) -> Any {
+    guard let string = value as? String else { return NSNull() }
+    if fromStart, string.hasPrefix(needle) {
+        return String(string.dropFirst(needle.count))
+    }
+    if !fromStart, string.hasSuffix(needle) {
+        return String(string.dropLast(needle.count))
+    }
+    return string
+}
+
+private func jqAsciiTransform(_ value: Any, uppercased: Bool) -> Any {
+    guard let string = value as? String else { return NSNull() }
+    return uppercased ? string.uppercased() : string.lowercased()
+}
+
 private func jqExtremaBy(_ value: Any, filter: String, pickMax: Bool) throws -> Any {
     guard let array = value as? [Any], !array.isEmpty else { return NSNull() }
     let decorated = try array.map { element -> (Any, String) in
@@ -3890,6 +4021,34 @@ private func jqLimit(_ arguments: String, input: Any, bindings: [String: Any]) t
     guard count > 0 else { return [] }
     let values = try evaluateJQFilter(parts[1], input: input, bindings: bindings)
     return Array(values.prefix(count))
+}
+
+private func jqSubstitute(_ value: Any, pattern: String, replacement: String, global: Bool) -> Any {
+    guard let string = value as? String,
+          let regex = try? NSRegularExpression(pattern: pattern) else { return NSNull() }
+    let range = NSRange(string.startIndex..<string.endIndex, in: string)
+    if global {
+        return regex.stringByReplacingMatches(in: string, range: range, withTemplate: replacement)
+    }
+    guard let match = regex.firstMatch(in: string, range: range) else { return string }
+    return regex.stringByReplacingMatches(in: string, options: [], range: match.range, withTemplate: replacement)
+}
+
+private func jqIndex(_ value: Any, needle: String) -> Any {
+    guard let string = value as? String,
+          let range = string.range(of: needle) else { return NSNull() }
+    return string.distance(from: string.startIndex, to: range.lowerBound)
+}
+
+private func jqIndices(_ value: Any, needle: String) -> Any {
+    guard let string = value as? String, !needle.isEmpty else { return [] }
+    var indices: [Int] = []
+    var start = string.startIndex
+    while let range = string[start...].range(of: needle) {
+        indices.append(string.distance(from: string.startIndex, to: range.lowerBound))
+        start = range.upperBound
+    }
+    return indices
 }
 
 private func jqGetPath(_ value: Any, path: [Any]) -> Any {

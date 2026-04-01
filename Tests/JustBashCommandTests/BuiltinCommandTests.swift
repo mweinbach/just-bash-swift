@@ -549,6 +549,55 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(atan2.stdout, "0.6435011087932844\n")
     }
 
+    func testJQStringFunctions() async {
+        let bash = Bash()
+
+        let split = await bash.exec(#"echo '"a,b,c"' | jq 'split(",")'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(split.stdout.utf8)) as? [String],
+            ["a", "b", "c"]
+        )
+
+        let join = await bash.exec(#"echo '["a","b","c"]' | jq 'join("-")'"#)
+        XCTAssertEqual(join.stdout, #""a-b-c""# + "\n")
+
+        let testRegex = await bash.exec(#"echo '"foobar"' | jq 'test("bar")'"#)
+        XCTAssertEqual(testRegex.stdout, "true\n")
+
+        let startsWith = await bash.exec(#"echo '"hello world"' | jq 'startswith("hello")'"#)
+        XCTAssertEqual(startsWith.stdout, "true\n")
+
+        let endsWith = await bash.exec(#"echo '"hello world"' | jq 'endswith("world")'"#)
+        XCTAssertEqual(endsWith.stdout, "true\n")
+
+        let leftTrim = await bash.exec(#"echo '"hello world"' | jq 'ltrimstr("hello ")'"#)
+        XCTAssertEqual(leftTrim.stdout, #""world""# + "\n")
+
+        let rightTrim = await bash.exec(#"echo '"hello world"' | jq 'rtrimstr(" world")'"#)
+        XCTAssertEqual(rightTrim.stdout, #""hello""# + "\n")
+
+        let downcase = await bash.exec(#"echo '"HELLO"' | jq 'ascii_downcase'"#)
+        XCTAssertEqual(downcase.stdout, #""hello""# + "\n")
+
+        let upcase = await bash.exec(#"echo '"hello"' | jq 'ascii_upcase'"#)
+        XCTAssertEqual(upcase.stdout, #""HELLO""# + "\n")
+
+        let sub = await bash.exec(#"echo '"foobar"' | jq 'sub("o"; "0")'"#)
+        XCTAssertEqual(sub.stdout, #""f0obar""# + "\n")
+
+        let gsub = await bash.exec(#"echo '"foobar"' | jq 'gsub("o"; "0")'"#)
+        XCTAssertEqual(gsub.stdout, #""f00bar""# + "\n")
+
+        let index = await bash.exec(#"echo '"foobar"' | jq 'index("bar")'"#)
+        XCTAssertEqual(index.stdout, "3\n")
+
+        let indices = await bash.exec(#"echo '"abcabc"' | jq 'indices("bc")'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(indices.stdout.utf8)) as? [Int],
+            [1, 4]
+        )
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
@@ -617,7 +666,7 @@ final class BuiltinCommandTests: XCTestCase {
 
     func testYQInheritsSharedJQFunctions() async {
         let bash = Bash(options: .init(files: [
-            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}]}"#
+            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}],"message":"hello world"}"#
         ]))
 
         let transpose = await bash.exec("yq -p json '.matrix | transpose' /tmp/data.json -o json -c")
@@ -625,6 +674,9 @@ final class BuiltinCommandTests: XCTestCase {
 
         let groupBy = await bash.exec("yq -p json '.items | group_by(.type) | length' /tmp/data.json")
         XCTAssertEqual(groupBy.stdout, "2\n")
+
+        let startsWith = await bash.exec("yq -p json '.message | startswith(\"hello\")' /tmp/data.json")
+        XCTAssertEqual(startsWith.stdout, "true\n")
     }
 
 }
