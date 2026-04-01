@@ -4,6 +4,8 @@ A pure Swift bash interpreter for AI agent sandboxing on iOS, macOS, and iPadOS.
 
 Inspired by [Vercel's just-bash](https://github.com/vercel-labs/just-bash) (TypeScript). This is a ground-up Swift rewrite targeting Apple platforms where `Process`/`NSTask` aren't available (iOS/iPadOS).
 
+This repo is intentionally library-first. The current goal is a correct, embeddable shell sandbox for Apple platforms; broader parity work and any example host app stay secondary until the runtime contract is tighter. [ROADMAP.md](ROADMAP.md) tracks that staged backlog.
+
 ## Quick Start
 
 Add to your `Package.swift`:
@@ -56,7 +58,16 @@ Four modules, zero dependencies beyond Foundation:
 - The **interpreter** is a tree-walking executor with word expansion, arithmetic evaluation, and control flow
 - The **filesystem** is a tree-based in-memory VFS with a seeded Linux-like layout (`/proc`, `/dev`, `/home/user`, etc.)
 
+## Current Scope
+
+- Fully in-process execution through the Swift parser, interpreter, builtins, and virtual commands
+- Shared in-memory filesystem across `exec()` calls, with fresh shell state per call
+- One filesystem backend today: `VirtualFileSystem`
+- Selective, test-driven parity with upstream `just-bash`, not line-for-line feature parity yet
+
 ## What's Supported
+
+Everything in this section is intended to describe implemented behavior in the current package, not future roadmap work.
 
 ### Shell Features
 
@@ -73,22 +84,22 @@ Four modules, zero dependencies beyond Foundation:
 | **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
 | **test / [** | Unary and binary operators |
 | **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
-| **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`) |
+| **Variables** | `$var`, `${var}`, assignment, command-scoped (`VAR=x cmd`) |
 | **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
 | **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}` |
 | **Tilde expansion** | `~`, `~user` |
 | **Glob patterns** | `*`, `?` via virtual filesystem |
-| **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping) |
+| **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping), quoted delimiters suppress expansion |
 | **Here-strings** | `<<<` |
 | **Comments** | `# ...` |
-| **Shell options** | `set -e/-u/-x/-f/-C`, `set -o pipefail` |
+| **Shell options** | enforced: `set -e`, `set -f`, `set -o pipefail`; tracked but not fully enforced yet: `-u`, `-x`, `-C` |
 | **Aliases** | `alias`/`unalias` (stored; expansion not yet wired into parser) |
 
-### Commands (69 total)
+### Commands
 
-**Shell builtins (34):** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`
+**Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`
 
-**External commands (35):** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `cp`, `mv`, `ln`, `chmod`, `stat`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `grep`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `wc`, `head`, `tail`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `seq`, `yes`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`
+**External commands:** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `cp`, `mv`, `ln`, `chmod`, `stat`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `grep`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `wc`, `head`, `tail`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `seq`, `yes`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`
 
 ### Execution Limits
 
@@ -177,7 +188,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-52 tests covering: control flow, functions, command substitution, variable operations, arithmetic, conditionals, pipes, redirections, all commands, filesystem persistence, session isolation, and bash parity.
+56 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, redirections, output limits, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 
