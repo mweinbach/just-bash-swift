@@ -41,6 +41,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - a tar subset now exists in the Swift port: create/list/extract, `-f`, `-C`, `--strip-components`, and gzip-compressed `.tar.gz` archives
 - readonly variables and `shopt` alias toggling now exist in the Swift port
 - the first associative-array slice now exists in the Swift port: `declare -A`, keyed assignment, keyed expansion, length, and keyed unset
+- basic `curl` and `html-to-markdown` commands now exist in the Swift port with local-only verification coverage
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -76,7 +77,6 @@ The next command wave is the part of upstream parity that still materially chang
 - `jq`
 - `yq`
 - `xan`
-- `curl` / `html-to-markdown`
 
 Rationale:
 

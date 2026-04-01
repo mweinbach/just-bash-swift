@@ -291,4 +291,25 @@ final class BuiltinCommandTests: XCTestCase {
         let cat = await bash.exec("cat /tmp/compress.txt")
         XCTAssertEqual(cat.stdout, "Compressed content\n")
     }
+
+    func testCurlDataUrlAndOutputFile() async {
+        let bash = Bash()
+
+        let direct = await bash.exec("curl data:text/plain,hello%20world")
+        XCTAssertEqual(direct.stdout, "hello world\n")
+
+        let headed = await bash.exec("curl -I data:text/plain,hello")
+        XCTAssertTrue(headed.stdout.contains("HTTP/1.1 200 OK"))
+
+        let output = await bash.exec("curl -o /tmp/curl.txt data:text/plain,stored")
+        XCTAssertEqual(output.exitCode, 0)
+        let cat = await bash.exec("cat /tmp/curl.txt")
+        XCTAssertEqual(cat.stdout, "stored")
+    }
+
+    func testHtmlToMarkdown() async {
+        let bash = Bash()
+        let result = await bash.exec(#"echo '<h1>Title</h1><p>Hello <strong>world</strong> <a href="https://example.com">link</a></p>' | html-to-markdown"#)
+        XCTAssertEqual(result.stdout, "# Title\n\nHello **world** [link](https://example.com)\n")
+    }
 }
