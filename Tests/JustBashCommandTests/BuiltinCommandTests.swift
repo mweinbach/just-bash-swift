@@ -373,4 +373,21 @@ final class BuiltinCommandTests: XCTestCase {
         let hasArray = await bash.exec(#"echo '[1,2,3]' | jq 'has(1)'"#)
         XCTAssertEqual(hasArray.stdout, "true\n")
     }
+
+    func testJQContainsAnyAndAll() async {
+        let bash = Bash()
+
+        let containsArray = await bash.exec(#"echo '[1,2,3]' | jq 'contains([2])'"#)
+        XCTAssertEqual(containsArray.stdout, "true\n")
+
+        let containsObject = await bash.exec(#"echo '{"a":1,"b":2}' | jq 'contains({"a":1})'"#)
+        XCTAssertEqual(containsObject.stdout, "true\n")
+
+        let any = await bash.exec(#"echo '[1,2,3,4,5]' | jq 'any(. > 3)'"#)
+        XCTAssertEqual(any.stdout, "true\n")
+
+        let all = await bash.exec(#"echo '[1,2,3]' | jq 'all(. > 0)'"#)
+        XCTAssertEqual(all.stdout, "true\n")
+    }
+
 }

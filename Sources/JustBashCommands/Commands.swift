@@ -2964,6 +2964,28 @@ private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
         return iterateJQValues(input)
     }
 
+    if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
+        return [try evaluateJQConditional(trimmed, input: input)]
+    }
+
+    if trimmed.hasPrefix("any("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast())
+        guard let array = input as? [Any] else { return [false] }
+        return [try array.contains { try evaluateJQFilter(inner, input: $0).contains(where: jqTruthy) }]
+    }
+
+    if trimmed.hasPrefix("all("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast())
+        guard let array = input as? [Any] else { return [false] }
+        return [try array.allSatisfy { try evaluateJQFilter(inner, input: $0).contains(where: jqTruthy) }]
+    }
+
+    if trimmed.hasPrefix("contains("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(9).dropLast())
+        let rhs = try evaluateJQFilter(inner, input: input).first ?? NSNull()
+        return [jqContains(input, rhs)]
+    }
+
     if let op = parseJQBinaryOperator(trimmed) {
         let lhsValues = try evaluateJQFilter(op.left, input: input)
         let rhsValues = try evaluateJQFilter(op.right, input: input)
@@ -3103,9 +3125,13 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
         }
         let key = String(filter[start..<index])
         if !key.isEmpty {
+            let normalizedKey = key.hasSuffix("?") ? String(key.dropLast()) : key
             currentValues = currentValues.map { value in
                 if let object = value as? [String: Any] {
-                    return object[key] ?? NSNull()
+                    return object[normalizedKey] ?? NSNull()
+                }
+                if let object = value as? NSDictionary {
+                    return object.object(forKey: normalizedKey) ?? NSNull()
                 }
                 return NSNull()
             }
@@ -3184,6 +3210,148 @@ private func jqTruthy(_ value: Any) -> Bool {
     if value is NSNull { return false }
     if let bool = value as? Bool { return bool }
     return true
+}
+
+private func jqContains(_ lhs: Any, _ rhs: Any) -> Bool {
+    if let lhsArray = lhs as? [Any], let rhsArray = rhs as? [Any] {
+        return rhsArray.allSatisfy { rhsValue in lhsArray.contains(where: { jqEqual($0, rhsValue) }) }
+    }
+    if let lhsObject = lhs as? [String: Any], let rhsObject = rhs as? [String: Any] {
+        return rhsObject.allSatisfy { key, rhsValue in
+            guard let lhsValue = lhsObject[key] else { return false }
+            return jqEqual(lhsValue, rhsValue)
+        }
+    }
+    return jqEqual(lhs, rhs)
+}
+
+private func jqEqual(_ lhs: Any, _ rhs: Any) -> Bool {
+    switch (lhs, rhs) {
+    case (_ as NSNull, _ as NSNull):
+        return true
+    case let (l as NSNumber, r as NSNumber):
+        return l == r
+    case let (l as String, r as String):
+        return l == r
+    case let (l as [Any], r as [Any]):
+        return l.count == r.count && zip(l, r).allSatisfy { jqEqual($0, $1) }
+    case let (l as [String: Any], r as [String: Any]):
+        return l.keys == r.keys && l.keys.allSatisfy { key in jqEqual(l[key] as Any, r[key] as Any) }
+    default:
+        return false
+    }
+}
+
+private func evaluateJQConditional(_ filter: String, input: Any) throws -> Any {
+    let patterns = [
+        #"^if\s+(.+?)\s+then\s+(.+?)\s+elif\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+?)\s+end$"#,
+        #"^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+?)\s+end$"#
+    ]
+
+    for pattern in patterns {
+        let regex = try NSRegularExpression(pattern: pattern)
+        let range = NSRange(filter.startIndex..<filter.endIndex, in: filter)
+        guard let match = regex.firstMatch(in: filter, options: [], range: range) else { continue }
+        let captures = (1..<match.numberOfRanges).compactMap { idx -> String? in
+            guard let range = Range(match.range(at: idx), in: filter) else { return nil }
+            return String(filter[range]).trimmingCharacters(in: .whitespaces)
+        }
+        print("JQ-COND-CAPTURES", captures)
+
+        let branches: [(String, String)]
+        let elseExpr: String
+        if captures.count == 5 {
+            branches = [(captures[0], captures[1]), (captures[2], captures[3])]
+            elseExpr = captures[4]
+        } else if captures.count == 3 {
+            branches = [(captures[0], captures[1])]
+            elseExpr = captures[2]
+        } else {
+            break
+        }
+
+        for (condition, valueExpr) in branches {
+            let conditionValue = try evaluateJQFilter(condition, input: input).first ?? NSNull()
+            if jqTruthy(conditionValue) {
+                return try evaluateJQFilter(valueExpr, input: input).first ?? NSNull()
+            }
+        }
+        return try evaluateJQFilter(elseExpr, input: input).first ?? NSNull()
+    }
+
+    throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid conditional"])
+}
+
+private func splitTopLevelJQKeyword(_ text: String, keyword: String) -> (left: String, right: String)? {
+    let parts = splitTopLevelJQKeywordAll(text, keyword: keyword)
+    guard parts.count >= 2 else { return nil }
+    return (parts[0], parts[1...].joined(separator: keyword).trimmingCharacters(in: .whitespaces))
+}
+
+private func splitTopLevelJQKeywordAll(_ text: String, keyword: String) -> [String] {
+    var depthParen = 0
+    var depthBracket = 0
+    var depthBrace = 0
+    var inString = false
+    var escaped = false
+    var current = ""
+    var parts: [String] = []
+    let chars = Array(text)
+    let keywordChars = Array(keyword)
+    var index = 0
+
+    while index < chars.count {
+        let ch = chars[index]
+        if escaped {
+            current.append(ch)
+            escaped = false
+            index += 1
+            continue
+        }
+        if ch == "\\" {
+            current.append(ch)
+            escaped = true
+            index += 1
+            continue
+        }
+        if ch == "\"" {
+            inString.toggle()
+            current.append(ch)
+            index += 1
+            continue
+        }
+        if !inString {
+            switch ch {
+            case "(":
+                depthParen += 1
+            case ")":
+                depthParen -= 1
+            case "[":
+                depthBracket += 1
+            case "]":
+                depthBracket -= 1
+            case "{":
+                depthBrace += 1
+            case "}":
+                depthBrace -= 1
+            default:
+                break
+            }
+            if depthParen == 0, depthBracket == 0, depthBrace == 0,
+               index + keywordChars.count <= chars.count,
+               Array(chars[index..<(index + keywordChars.count)]) == keywordChars {
+                parts.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+                index += keywordChars.count
+                continue
+            }
+        }
+        current.append(ch)
+        index += 1
+    }
+
+    parts.append(current.trimmingCharacters(in: .whitespaces))
+    return parts
 }
 
 private func parseJQBinaryOperator(_ text: String) -> (left: String, op: String, right: String)? {
@@ -3292,6 +3460,12 @@ private func parseJQLiteral(_ text: String) -> Any? {
     if text == "false" { return false }
     if let int = Int(text) { return int }
     if let double = Double(text) { return double }
+    if (text.hasPrefix("{") && text.hasSuffix("}")) || (text.hasPrefix("[") && text.hasSuffix("]")) {
+        if let data = text.data(using: .utf8),
+           let value = try? JSONSerialization.jsonObject(with: data) {
+            return value
+        }
+    }
     if text.hasPrefix("\""), text.hasSuffix("\"") {
         return String(text.dropFirst().dropLast())
             .replacingOccurrences(of: "\\\"", with: "\"")
