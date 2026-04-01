@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 87 passing tests
+- Current verification baseline: `swift test` with 90 passing tests
 
 ## Recently Completed
 
@@ -38,6 +38,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - the indexed-array subset now works in the Swift port: `arr=(...)`, `arr[n]=...`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `unset arr[n]`, `local arr=(...)`, and `declare -a arr=(...)`
 - a larger shell-builtin parity block now exists in the Swift port: `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, and sandbox-friendly `exec`
 - a native `sqlite3` command now exists in the Swift port for `:memory:`, stdin-driven SQL, file-backed databases, and `-json` output
+- a tar subset now exists in the Swift port: create/list/extract, `-f`, `-C`, `--strip-components`, and gzip-compressed `.tar.gz` archives
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -73,13 +74,17 @@ The next command wave is the part of upstream parity that still materially chang
 - `jq`
 - `yq`
 - `xan`
-- `tar`
 - `curl` / `html-to-markdown`
 
 Rationale:
 
 - These are the biggest remaining upstream command families still absent from the Swift port
 - They also represent the point where parity work starts colliding with larger dependency and security decisions
+
+Tar follow-on still remains:
+- verbose tar listing/output parity
+- security checks and path sanitization hardening
+- binary-heavy/archive-metadata edge cases
 
 ## Later: Data Model And Shell Completeness
 

@@ -244,4 +244,51 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(syntax.exitCode, 0)
         XCTAssertTrue(syntax.stdout.contains("Error:"))
     }
+
+    func testTarCreateListAndExtract() async {
+        let bash = Bash(options: .init(files: ["/tmp/hello.txt": "Hello, World!\n"]))
+
+        let create = await bash.exec("tar -cf /tmp/archive.tar /tmp/hello.txt")
+        XCTAssertEqual(create.exitCode, 0)
+
+        let list = await bash.exec("tar -tf /tmp/archive.tar")
+        XCTAssertEqual(list.stdout, "tmp/hello.txt\n")
+
+        _ = await bash.exec("rm /tmp/hello.txt")
+        let extract = await bash.exec("tar -xf /tmp/archive.tar -C /")
+        XCTAssertEqual(extract.exitCode, 0)
+
+        let cat = await bash.exec("cat /tmp/hello.txt")
+        XCTAssertEqual(cat.stdout, "Hello, World!\n")
+    }
+
+    func testTarDirectoryAndStripComponents() async {
+        let bash = Bash()
+
+        _ = await bash.exec("mkdir -p /tmp/deep/path && echo 'Deep content' > /tmp/deep/path/file.txt")
+        _ = await bash.exec("tar -cf /tmp/archive.tar /tmp/deep/path/file.txt")
+        _ = await bash.exec("mkdir /tmp/out")
+        let extract = await bash.exec("tar -xf /tmp/archive.tar -C /tmp/out --strip-components=3")
+        XCTAssertEqual(extract.exitCode, 0)
+
+        let cat = await bash.exec("cat /tmp/out/file.txt")
+        XCTAssertEqual(cat.stdout, "Deep content\n")
+    }
+
+    func testTarGzipRoundTrip() async {
+        let bash = Bash(options: .init(files: ["/tmp/compress.txt": "Compressed content\n"]))
+
+        let create = await bash.exec("tar -czf /tmp/archive.tar.gz /tmp/compress.txt")
+        XCTAssertEqual(create.exitCode, 0)
+
+        let list = await bash.exec("tar -tzf /tmp/archive.tar.gz")
+        XCTAssertEqual(list.stdout, "tmp/compress.txt\n")
+
+        _ = await bash.exec("rm /tmp/compress.txt")
+        let extract = await bash.exec("tar -xzf /tmp/archive.tar.gz -C /")
+        XCTAssertEqual(extract.exitCode, 0)
+
+        let cat = await bash.exec("cat /tmp/compress.txt")
+        XCTAssertEqual(cat.stdout, "Compressed content\n")
+    }
 }
