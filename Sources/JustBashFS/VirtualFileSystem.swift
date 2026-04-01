@@ -307,7 +307,7 @@ public final class VirtualFileSystem: @unchecked Sendable {
                 descend(node: root, remaining: remaining.dropFirst(), built: [])
                 return
             }
-            if !segment.contains("*") && !segment.contains("?") {
+            if !segment.contains("*") && !segment.contains("?") && !segment.contains("[") {
                 guard let child = node.children[segment] else { return }
                 descend(node: child, remaining: remaining.dropFirst(), built: built + [segment])
                 return
@@ -331,25 +331,48 @@ public final class VirtualFileSystem: @unchecked Sendable {
     }
 
     public static func globMatch(name: String, pattern: String) -> Bool {
-        let nameChars = Array(name)
-        let patternChars = Array(pattern)
-        if patternChars.isEmpty { return nameChars.isEmpty }
-        var dp = Array(repeating: Array(repeating: false, count: nameChars.count + 1), count: patternChars.count + 1)
-        dp[0][0] = true
-        for i in 1...patternChars.count where patternChars[i - 1] == "*" {
-            dp[i][0] = dp[i - 1][0]
-        }
-        for i in 1...patternChars.count {
-            for j in 1...max(1, nameChars.count) where j <= nameChars.count {
-                let patternChar = patternChars[i - 1]
-                if patternChar == "*" {
-                    dp[i][j] = dp[i - 1][j] || dp[i][j - 1]
-                } else if patternChar == "?" || patternChar == nameChars[j - 1] {
-                    dp[i][j] = dp[i - 1][j - 1]
+        let chars = Array(pattern)
+        var regex = "^"
+        var index = 0
+
+        while index < chars.count {
+            let character = chars[index]
+            switch character {
+            case "*":
+                regex += ".*"
+                index += 1
+            case "?":
+                regex += "."
+                index += 1
+            case "[":
+                if let endIndex = chars[index...].firstIndex(of: "]") {
+                    regex += String(chars[index...endIndex])
+                    index = endIndex + 1
+                } else {
+                    regex += "\\["
+                    index += 1
                 }
+            default:
+                regex += escapeRegex(character)
+                index += 1
             }
         }
-        return dp[patternChars.count][nameChars.count]
+
+        regex += "$"
+
+        guard let expression = try? NSRegularExpression(pattern: regex) else {
+            return false
+        }
+        let range = NSRange(name.startIndex..<name.endIndex, in: name)
+        return expression.firstMatch(in: name, options: [], range: range) != nil
+    }
+
+    private static func escapeRegex(_ character: Character) -> String {
+        let regexMeta = "\\.^$+(){}|"
+        if regexMeta.contains(character) {
+            return "\\\(character)"
+        }
+        return String(character)
     }
 
     private func seedDefaultLayout(processInfo: VirtualProcessInfo) {

@@ -1274,7 +1274,7 @@ private struct ParserState {
                 } else {
                     // After the first word, treat as a regular word
                     let operatorText = append ? "+=" : "="
-                    words.append(ShellWord(literal: "\(name)\(operatorText)\(value.rawText)"))
+                    words.append(ShellWord([.literal("\(name)\(operatorText)")] + value.parts))
                 }
                 advance()
 

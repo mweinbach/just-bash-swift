@@ -60,6 +60,22 @@ public struct ShellWord: Sendable {
             return false
         }
     }
+
+    public var suppressesFieldSplitting: Bool {
+        parts.contains { part in
+            switch part {
+            case .singleQuoted, .doubleQuoted, .escapedChar, .dollarSingleQuoted:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    public var simpleLiteralText: String? {
+        guard parts.count == 1, case .literal(let text) = parts[0] else { return nil }
+        return text
+    }
 }
 
 /// Individual components of a shell word
@@ -345,6 +361,7 @@ public struct ShellSession: Sendable {
     public var localScopes: [[String: String?]] = []
     public var shellName: String = "bash"
     public var callDepth: Int = 0
+    public var aliasExpansionDepth: Int = 0
     public var options: ShellOptions = .init()
     public var aliases: [String: String] = [:]
 
@@ -435,4 +452,18 @@ public enum ControlFlow: Error {
     case `continue`(Int)
     case `return`(Int)
     case exit(Int)
+}
+
+public enum ShellRuntimeError: Error, LocalizedError {
+    case unboundVariable(String)
+    case aliasExpansionTooDeep
+
+    public var errorDescription: String? {
+        switch self {
+        case .unboundVariable(let name):
+            return "\(name): unbound variable"
+        case .aliasExpansionTooDeep:
+            return "alias expansion too deep"
+        }
+    }
 }

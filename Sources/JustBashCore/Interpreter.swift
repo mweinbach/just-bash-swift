@@ -129,6 +129,19 @@ public final class ShellInterpreter: @unchecked Sendable {
     // MARK: - Simple command
 
     private func executeSimple(_ cmd: SimpleCommand, session: inout ShellSession, stdin: String) async throws -> ExecResult {
+        if let aliasName = cmd.words.first?.simpleLiteralText,
+           let aliasValue = session.aliases[aliasName] {
+            guard session.aliasExpansionDepth < 16 else {
+                throw ShellRuntimeError.aliasExpansionTooDeep
+            }
+            session.aliasExpansionDepth += 1
+            defer { session.aliasExpansionDepth -= 1 }
+
+            var expandedCommand = cmd
+            expandedCommand.words = try parseAliasWords(aliasValue) + Array(cmd.words.dropFirst())
+            return try await executeSimple(expandedCommand, session: &session, stdin: stdin)
+        }
+
         var environment = session.environment
         // Merge local scopes for expansion
         for scope in session.localScopes {
@@ -161,16 +174,25 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         if cmd.words.isEmpty {
             // Only assignments and/or redirections
-            if !cmd.redirections.isEmpty {
-                return try await applyRedirections(ExecResult.success(), redirects: cmd.redirections, session: &session, stdin: stdin)
+            let assignmentTrace = cmd.assignments.map { assignment -> String in
+                let value = session.getVariable(assignment.name) ?? ""
+                return assignment.append ? "\(assignment.name)+=\(value)" : "\(assignment.name)=\(value)"
             }
-            return ExecResult.success()
+            if !cmd.redirections.isEmpty {
+                let result = try await applyRedirections(ExecResult.success(), redirects: cmd.redirections, session: &session, stdin: stdin)
+                return addXtraceIfNeeded(result, traceComponents: assignmentTrace, session: session)
+            }
+            return addXtraceIfNeeded(ExecResult.success(), traceComponents: assignmentTrace, session: session)
         }
 
         // Expand words
         let expandedWords = try await expandWords(cmd.words, session: &session, stdin: stdin)
         guard let commandName = expandedWords.first else { return ExecResult.success() }
         let arguments = Array(expandedWords.dropFirst())
+        let traceComponents = cmd.assignments.map { assignment -> String in
+            let value = environment[assignment.name] ?? session.getVariable(assignment.name) ?? ""
+            return assignment.append ? "\(assignment.name)+=\(value)" : "\(assignment.name)=\(value)"
+        } + expandedWords
 
         // Handle stdin redirection
         var effectiveStdin = stdin
@@ -216,7 +238,8 @@ public final class ShellInterpreter: @unchecked Sendable {
         session.lastExitCode = result.exitCode
 
         // Apply output redirections
-        return try await applyOutputRedirections(result, redirects: cmd.redirections, commandName: commandName, session: &session, stdin: stdin)
+        let redirected = try await applyOutputRedirections(result, redirects: cmd.redirections, commandName: commandName, session: &session, stdin: stdin)
+        return addXtraceIfNeeded(redirected, traceComponents: traceComponents, session: session)
     }
 
     // MARK: - Compound commands
@@ -754,17 +777,25 @@ public final class ShellInterpreter: @unchecked Sendable {
         var result: [String] = []
         for word in words {
             let expanded = try await expandWord(word, session: &session, stdin: stdin)
-            // Glob expansion for unquoted words
-            if word.mayContainGlob && !session.options.noglob {
-                let matches = fileSystem.glob(expanded, relativeTo: session.cwd)
-                if matches.isEmpty {
-                    result.append(expanded)
-                } else {
-                    result.append(contentsOf: matches)
-                }
+            let fields: [String]
+            if word.suppressesFieldSplitting {
+                fields = [expanded]
             } else {
-                // Field splitting for unquoted expansions
-                result.append(expanded)
+                let ifs = session.getVariable("IFS") ?? " \t\n"
+                fields = splitByIFS(expanded, ifs: ifs)
+            }
+
+            for field in fields {
+                if word.mayContainGlob && !session.options.noglob {
+                    let matches = fileSystem.glob(field, relativeTo: session.cwd)
+                    if matches.isEmpty {
+                        result.append(field)
+                    } else {
+                        result.append(contentsOf: matches)
+                    }
+                } else {
+                    result.append(field)
+                }
             }
         }
         return result
@@ -806,24 +837,50 @@ public final class ShellInterpreter: @unchecked Sendable {
     private func expandVariable(_ ref: VarRef, session: inout ShellSession) throws -> String {
         switch ref {
         case .named(let name):
-            return session.getVariable(name) ?? ""
+            if let value = session.getVariable(name) {
+                return value
+            }
+            if session.options.nounset {
+                throw ShellRuntimeError.unboundVariable(name)
+            }
+            return ""
         case .special(let ch):
             return expandSpecialVar(ch, session: session)
         case .positional(let n):
             if n > 0 && n <= session.positionalParams.count {
                 return session.positionalParams[n - 1]
             }
+            if session.options.nounset {
+                throw ShellRuntimeError.unboundVariable(String(n))
+            }
             return ""
         case .length(let name):
-            let val = session.getVariable(name) ?? ""
+            guard let val = session.getVariable(name) else {
+                if session.options.nounset {
+                    throw ShellRuntimeError.unboundVariable(name)
+                }
+                return "0"
+            }
             return String(val.count)
         case .withOp(let name, let op):
             return try expandVarOp(name: name, op: op, session: &session)
         case .arrayElement(let name, _):
             // Simplified: treat as regular variable
-            return session.getVariable(name) ?? ""
+            if let value = session.getVariable(name) {
+                return value
+            }
+            if session.options.nounset {
+                throw ShellRuntimeError.unboundVariable(name)
+            }
+            return ""
         case .arrayAll(let name, _):
-            return session.getVariable(name) ?? ""
+            if let value = session.getVariable(name) {
+                return value
+            }
+            if session.options.nounset {
+                throw ShellRuntimeError.unboundVariable(name)
+            }
+            return ""
         }
     }
 
@@ -1498,6 +1555,29 @@ public final class ShellInterpreter: @unchecked Sendable {
         return fields
     }
 
+    private func addXtraceIfNeeded(_ result: ExecResult, traceComponents: [String], session: ShellSession) -> ExecResult {
+        guard session.options.xtrace, !traceComponents.isEmpty else { return result }
+        let traceLine = "+ " + traceComponents.joined(separator: " ") + "\n"
+        return ExecResult(stdout: result.stdout, stderr: traceLine + result.stderr, exitCode: result.exitCode)
+    }
+
+    private func parseAliasWords(_ aliasValue: String) throws -> [ShellWord] {
+        let parsed = try ShellParser(limits: limits).parse(aliasValue)
+        guard parsed.entries.count == 1,
+              parsed.entries[0].andOr.rest.isEmpty else {
+            return [ShellWord(literal: aliasValue)]
+        }
+        let pipeline = parsed.entries[0].andOr.first
+        guard pipeline.commands.count == 1,
+              case .simple(let simple) = pipeline.commands[0],
+              simple.assignments.isEmpty,
+              simple.redirections.isEmpty,
+              !simple.words.isEmpty else {
+            return [ShellWord(literal: aliasValue)]
+        }
+        return simple.words
+    }
+
     private func builtinSet(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
         if args.isEmpty {
             // Print all variables
@@ -1667,7 +1747,8 @@ public final class ShellInterpreter: @unchecked Sendable {
         for arg in args {
             if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
-                let value = String(arg[arg.index(after: eq)...])
+                let rawValue = String(arg[arg.index(after: eq)...])
+                let value = stripMatchingQuotes(rawValue)
                 session.aliases[name] = value
             } else {
                 if let val = session.aliases[arg] {
@@ -1677,6 +1758,21 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         return ExecResult.success()
+    }
+
+    private func stripMatchingQuotes(_ text: String) -> String {
+        var result = text
+        if result.count >= 2,
+           ((result.hasPrefix("'") && result.hasSuffix("'")) || (result.hasPrefix("\"") && result.hasSuffix("\""))) {
+            return String(result.dropFirst().dropLast())
+        }
+        if let first = result.first, first == "'" || first == "\"" {
+            result.removeFirst()
+        }
+        if let last = result.last, last == "'" || last == "\"" {
+            result.removeLast()
+        }
+        return result
     }
 
     private func builtinCommand(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {

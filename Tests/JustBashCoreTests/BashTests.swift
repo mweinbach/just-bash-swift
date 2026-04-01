@@ -131,6 +131,15 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "local\nglobal\n")
     }
 
+    func testAliasExpansion() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        alias hi='echo hello'
+        hi world
+        """)
+        XCTAssertEqual(result.stdout, "hello world\n")
+    }
+
     // MARK: - Command Substitution
 
     func testCommandSubstitution() async {
@@ -209,6 +218,17 @@ final class BashTests: XCTestCase {
         echo ${x:-fallback}
         """)
         XCTAssertEqual(result.stdout, "default\nhello\n")
+    }
+
+    func testNounsetFailsOnUnsetVariableExpansion() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        set -u
+        echo $missing
+        """)
+        XCTAssertEqual(result.exitCode, 1)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "bash: missing: unbound variable\n")
     }
 
     func testStringLength() async {
@@ -377,6 +397,42 @@ final class BashTests: XCTestCase {
         let bash = Bash()
         let result = await bash.exec("echo ~")
         XCTAssertEqual(result.stdout, "/home/user\n")
+    }
+
+    func testFieldSplittingForUnquotedExpansion() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        value='alpha  beta gamma'
+        for item in $value; do
+            echo $item
+        done
+        """)
+        XCTAssertEqual(result.stdout, "alpha\nbeta\ngamma\n")
+    }
+
+    func testGlobCharacterClasses() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/a.txt": "a\n",
+            "/tmp/b.txt": "b\n",
+            "/tmp/c.log": "c\n",
+        ]))
+        let result = await bash.exec("""
+        for file in /tmp/[ab].txt; do
+            basename $file
+        done
+        """)
+        XCTAssertEqual(result.stdout, "a.txt\nb.txt\n")
+    }
+
+    func testXtraceWritesExpandedCommandToStderr() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        set -x
+        name=world
+        echo hello $name
+        """)
+        XCTAssertEqual(result.stdout, "hello world\n")
+        XCTAssertEqual(result.stderr, "+ set -x\n+ name=world\n+ echo hello world\n")
     }
 
     // MARK: - Redirection And Limits

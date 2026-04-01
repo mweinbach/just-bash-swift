@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 59 passing tests
+- Current verification baseline: `swift test` with 64 passing tests
 
 ## Recently Completed
 
@@ -27,6 +27,11 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - `set -C` / `noclobber` now prevents overwriting existing files via `>`
 - `+=` assignments now survive parsing into runtime evaluation
 - `|&` now pipes stderr into the next command instead of only parsing the token
+- `set -u` now fails on unset variable expansion
+- unquoted expansion now performs `IFS` field splitting
+- glob character classes like `[ab]` and `[a-z]` now match in the virtual filesystem
+- basic command-position alias expansion is now active
+- `set -x` now emits xtrace lines to stderr
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -45,10 +50,9 @@ This is the only active milestone.
 
 ### 2. Finish The Remaining High-Confidence Runtime Fixes
 
-- `nounset` should fail unset-variable expansion where the option requires it
-- field splitting should apply to unquoted expansions, not only `read`
-- glob character classes (`[abc]`, `[a-z]`) should match correctly
-- `xtrace` should either produce real trace output or stay clearly documented as partial
+- decide whether alias expansion needs to grow beyond basic command-position replacement semantics
+- tighten `nounset` / `xtrace` edge-case parity against bash-specific corners
+- expand parity fixtures around the newly completed runtime behavior so regressions do not slip back in
 
 ### 3. Keep The Docs Honest
 

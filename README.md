@@ -88,12 +88,13 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
 | **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}` |
 | **Tilde expansion** | `~`, `~user` |
-| **Glob patterns** | `*`, `?` via virtual filesystem |
+| **Field splitting** | Unquoted expansion splits on `IFS` |
+| **Glob patterns** | `*`, `?`, `[abc]`, `[a-z]` via virtual filesystem |
 | **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping), quoted delimiters suppress expansion |
 | **Here-strings** | `<<<` |
 | **Comments** | `# ...` |
-| **Shell options** | enforced: `set -e`, `set -f`, `set -C`, `set -o pipefail`; tracked but not fully enforced yet: `-u`, `-x` |
-| **Aliases** | `alias`/`unalias` (stored; expansion not yet wired into parser) |
+| **Shell options** | enforced: `set -e`, `set -u`, `set -x`, `set -f`, `set -C`, `set -o pipefail` |
+| **Aliases** | `alias`/`unalias`, basic command-position alias expansion |
 
 ### Commands
 
@@ -188,7 +189,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-59 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, noclobber, filesystem persistence, session isolation, and curated parity cases.
+64 tests covering: control flow, functions, alias expansion, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 
