@@ -768,4 +768,38 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(keywordShorthand.stdout, "{\"and\":1}\n")
     }
 
+    func testYQFormatStrings() async {
+        let bash = Bash()
+
+        let base64 = await bash.exec(#"echo '"hello"' | yq -p json -o json '@base64'"#)
+        XCTAssertEqual(base64.stdout, #""aGVsbG8=""# + "\n")
+
+        let base64d = await bash.exec(#"echo '"aGVsbG8="' | yq -p json -o json '@base64d'"#)
+        XCTAssertEqual(base64d.stdout, #""hello""# + "\n")
+
+        let uri = await bash.exec(#"echo '"hello world"' | yq -p json -o json '@uri'"#)
+        XCTAssertEqual(uri.stdout, #""hello%20world""# + "\n")
+
+        let csv = await bash.exec(#"echo '["a","b,c","d"]' | yq -p json -o json '@csv'"#)
+        XCTAssertEqual(csv.stdout, #""a,\"b,c\",d""# + "\n")
+
+        let tsv = await bash.exec(#"echo '["a","b","c"]' | yq -p json -o json '@tsv'"#)
+        XCTAssertEqual(tsv.stdout, #""a\tb\tc""# + "\n")
+
+        let json = await bash.exec(#"echo '{"a":1}' | yq -p json -o json '@json'"#)
+        XCTAssertEqual(json.stdout, #""{\"a\":1}""# + "\n")
+
+        let html = await bash.exec(#"echo '"<script>a & b</script>"' | yq -p json -o json '@html'"#)
+        XCTAssertEqual(html.stdout, #""&lt;script&gt;a &amp; b&lt;/script&gt;""# + "\n")
+
+        let shell = await bash.exec(#"echo '"it'\''s"' | yq -p json -o json '@sh'"#)
+        XCTAssertEqual(shell.stdout, #""'it'\\''s'""# + "\n")
+
+        let text = await bash.exec(#"echo '42' | yq -p json -o json '@text'"#)
+        XCTAssertEqual(text.stdout, #""42""# + "\n")
+
+        let nonString = await bash.exec(#"echo '123' | yq -p json -o json '@base64'"#)
+        XCTAssertEqual(nonString.stdout, "null\n")
+    }
+
 }

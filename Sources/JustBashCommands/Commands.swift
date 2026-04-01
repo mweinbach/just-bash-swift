@@ -3058,6 +3058,10 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return values
     }
 
+    if trimmed.hasPrefix("@") {
+        return [jqFormatString(trimmed, value: input)]
+    }
+
     if trimmed == ".." {
         return jqRecursiveDescent(input)
     }
@@ -3790,6 +3794,75 @@ private func jqRecursiveDescent(_ value: Any) -> [Any] {
         }
     }
     return values
+}
+
+private func jqFormatString(_ format: String, value: Any) -> Any {
+    switch format {
+    case "@base64":
+        guard let string = value as? String else { return NSNull() }
+        return Data(string.utf8).base64EncodedString()
+    case "@base64d":
+        guard let string = value as? String,
+              let data = Data(base64Encoded: string) else { return NSNull() }
+        return String(data: data, encoding: .utf8) ?? NSNull()
+    case "@uri":
+        guard let string = value as? String else { return NSNull() }
+        return string.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? string
+    case "@csv":
+        guard let array = value as? [Any] else { return NSNull() }
+        return array.map(jqCSVField).joined(separator: ",")
+    case "@tsv":
+        guard let array = value as? [Any] else { return NSNull() }
+        return array.map(jqTSVField).joined(separator: "\t")
+    case "@json":
+        return renderJQValue(value, compact: true, raw: false)
+    case "@html":
+        guard let string = value as? String else { return NSNull() }
+        return string
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    case "@sh":
+        guard let string = value as? String else { return NSNull() }
+        return "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    case "@text":
+        if value is NSNull { return "" }
+        if let string = value as? String { return string }
+        return String(describing: jqToStringValue(value))
+    default:
+        return NSNull()
+    }
+}
+
+private func jqCSVField(_ value: Any) -> String {
+    let rendered = jqPlainTextValue(value)
+    let needsQuotes = rendered.contains(",") || rendered.contains("\"") || rendered.contains("\n")
+    let escaped = rendered.replacingOccurrences(of: "\"", with: "\"\"")
+    return needsQuotes ? "\"\(escaped)\"" : escaped
+}
+
+private func jqTSVField(_ value: Any) -> String {
+    jqPlainTextValue(value)
+        .replacingOccurrences(of: "\t", with: "\\t")
+        .replacingOccurrences(of: "\n", with: "\\n")
+}
+
+private func jqPlainTextValue(_ value: Any) -> String {
+    if value is NSNull { return "" }
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+        if floor(number.doubleValue) == number.doubleValue {
+            return String(number.intValue)
+        }
+        return String(number.doubleValue)
+    }
+    if let bool = value as? Bool { return bool ? "true" : "false" }
+    if let int = value as? Int { return String(int) }
+    if let double = value as? Double { return String(double) }
+    return renderJQValue(value, compact: true, raw: true)
 }
 
 private func jqIsNumber(_ value: Any) -> Bool {
