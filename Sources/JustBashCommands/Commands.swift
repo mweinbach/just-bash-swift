@@ -2104,7 +2104,12 @@ private func yq() -> AnyBashCommand {
                 inputValue = try parseSimpleYAML(sourceText)
             }
 
-            let outputs = try evaluateJQFilter(program, input: inputValue)
+            let outputs: [Any]
+            if yqProgramUsesNavigation(program) {
+                outputs = try evaluateYQNavigationFilter(program, input: inputValue)
+            } else {
+                outputs = try evaluateJQFilter(program, input: inputValue)
+            }
             let rendered: String
             if outputJSON {
                 let separator = joinOutput ? "" : "\n"
@@ -2120,6 +2125,172 @@ private func yq() -> AnyBashCommand {
             return ExecResult.failure("yq: \(error.localizedDescription)")
         }
     }
+}
+
+private struct YQCursor {
+    let value: Any
+    let trail: [Any]
+}
+
+private enum YQPathStep {
+    case key(String)
+    case index(Int)
+    case iterate
+}
+
+private func yqProgramUsesNavigation(_ program: String) -> Bool {
+    let parts = splitTopLevelJQ(program, separator: "|") ?? [program]
+    return parts.contains { part in
+        let trimmed = part.trimmingCharacters(in: .whitespaces)
+        return trimmed == "root" || trimmed == "parents" || trimmed == "parent" || (trimmed.hasPrefix("parent(") && trimmed.hasSuffix(")"))
+    }
+}
+
+private func evaluateYQNavigationFilter(_ program: String, input: Any) throws -> [Any] {
+    let parts = splitTopLevelJQ(program, separator: "|") ?? [program]
+    var cursors = [YQCursor(value: input, trail: [input])]
+
+    for part in parts {
+        let trimmed = part.trimmingCharacters(in: .whitespaces)
+        switch trimmed {
+        case "root":
+            cursors = cursors.map { YQCursor(value: $0.trail.first ?? $0.value, trail: [$0.trail.first ?? $0.value]) }
+        case "parents":
+            cursors = cursors.map {
+                let parents = Array($0.trail.dropLast()).reversed()
+                return YQCursor(value: Array(parents), trail: [])
+            }
+        case "parent":
+            cursors = cursors.compactMap { yqParentCursor($0, levels: 1) }
+        default:
+            if trimmed.hasPrefix("parent("), trimmed.hasSuffix(")") {
+                let inner = String(trimmed.dropFirst(7).dropLast())
+                let levels = Int(inner.trimmingCharacters(in: .whitespaces)) ?? 1
+                cursors = cursors.compactMap { yqParentCursor($0, levels: levels) }
+            } else if trimmed.hasPrefix(".") {
+                cursors = try cursors.flatMap { try navigateYQPath(trimmed, from: $0) }
+            } else {
+                cursors = try cursors.flatMap { cursor in
+                    try evaluateJQFilter(trimmed, input: cursor.value).map { YQCursor(value: $0, trail: []) }
+                }
+            }
+        }
+    }
+
+    return cursors.map(\.value)
+}
+
+private func yqParentCursor(_ cursor: YQCursor, levels: Int) -> YQCursor? {
+    let currentDepth = cursor.trail.count - 1
+    let targetIndex: Int
+
+    if levels >= 0 {
+        targetIndex = currentDepth - levels
+    } else {
+        targetIndex = (-levels) - 1
+    }
+
+    guard targetIndex >= 0, targetIndex < cursor.trail.count else { return nil }
+    let value = cursor.trail[targetIndex]
+    let trail = Array(cursor.trail.prefix(targetIndex + 1))
+    return YQCursor(value: value, trail: trail)
+}
+
+private func navigateYQPath(_ filter: String, from cursor: YQCursor) throws -> [YQCursor] {
+    if filter == "." { return [cursor] }
+    let steps = try parseYQPathSteps(filter)
+    var cursors = [cursor]
+
+    for step in steps {
+        cursors = cursors.flatMap { current -> [YQCursor] in
+            switch step {
+            case let .key(key):
+                let child = jqObjectLookup(current.value, key: key)
+                guard !(child is NSNull) else { return [YQCursor]() }
+                return [YQCursor(value: child, trail: current.trail + [child])]
+            case let .index(index):
+                guard let child = jqArrayIndex(current.value, index) else { return [YQCursor]() }
+                return [YQCursor(value: child, trail: current.trail + [child])]
+            case .iterate:
+                guard let array = current.value as? [Any] else { return [YQCursor]() }
+                return array.map { YQCursor(value: $0, trail: current.trail + [$0]) }
+            }
+        }
+    }
+
+    return cursors
+}
+
+private func parseYQPathSteps(_ filter: String) throws -> [YQPathStep] {
+    guard filter.first == "." else {
+        throw NSError(domain: "yq", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported navigation path"])
+    }
+
+    var steps: [YQPathStep] = []
+    var index = filter.index(after: filter.startIndex)
+
+    while index < filter.endIndex {
+        if filter[index] == "." {
+            index = filter.index(after: index)
+            while index < filter.endIndex, filter[index].isWhitespace {
+                index = filter.index(after: index)
+            }
+            continue
+        }
+
+        if filter[index] == "[" {
+            guard let closing = filter[index...].firstIndex(of: "]") else {
+                throw NSError(domain: "yq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad navigation path"])
+            }
+            let content = String(filter[filter.index(after: index)..<closing]).trimmingCharacters(in: .whitespaces)
+            if content.isEmpty {
+                steps.append(.iterate)
+            } else if let number = Int(content) {
+                steps.append(.index(number))
+            } else if let key = parseJQLiteral(content) as? String {
+                steps.append(.key(key))
+            } else {
+                throw NSError(domain: "yq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad navigation path"])
+            }
+            index = filter.index(after: closing)
+            continue
+        }
+
+        if filter[index] == "\"" {
+            let stringStart = index
+            index = filter.index(after: index)
+            var escaped = false
+            while index < filter.endIndex {
+                let ch = filter[index]
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    break
+                }
+                index = filter.index(after: index)
+            }
+            guard index < filter.endIndex,
+                  let key = parseJQLiteral(String(filter[stringStart...index])) as? String else {
+                throw NSError(domain: "yq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad navigation path"])
+            }
+            steps.append(.key(key))
+            index = filter.index(after: index)
+            continue
+        }
+
+        let start = index
+        while index < filter.endIndex, filter[index] != ".", filter[index] != "[" {
+            index = filter.index(after: index)
+        }
+        let key = String(filter[start..<index]).trimmingCharacters(in: .whitespaces)
+        if !key.isEmpty {
+            steps.append(.key(key))
+        }
+    }
+
+    return steps
 }
 
 // MARK: - Misc

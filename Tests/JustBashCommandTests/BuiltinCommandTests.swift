@@ -850,4 +850,54 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(combined.stdout, "12")
     }
 
+    func testYQNavigationOperators() async throws {
+        let bash = Bash(options: .init(files: [
+            "/tmp/nav.yaml": """
+            a:
+              b:
+                c: value
+            items:
+              - name: foo
+                val: 1
+              - name: bar
+                val: 2
+            """
+        ]))
+
+        let parent = await bash.exec("yq -o json '.a.b.c | parent' /tmp/nav.yaml")
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(parent.stdout.utf8)) as? [String: String],
+            ["c": "value"]
+        )
+
+        let grandparent = await bash.exec("yq -o json '.a.b.c | parent(2)' /tmp/nav.yaml")
+        let grandparentObject = try JSONSerialization.jsonObject(with: Data(grandparent.stdout.utf8)) as? [String: Any]
+        XCTAssertNotNil(grandparentObject?["b"])
+
+        let root = await bash.exec("yq -o json '.a.b.c | root' /tmp/nav.yaml")
+        let rootObject = try JSONSerialization.jsonObject(with: Data(root.stdout.utf8)) as? [String: Any]
+        XCTAssertNotNil(rootObject?["a"])
+        XCTAssertNotNil(rootObject?["items"])
+
+        let parents = await bash.exec("yq -o json '.a.b.c | parents | length' /tmp/nav.yaml")
+        XCTAssertEqual(parents.stdout, "3\n")
+
+        let parentZero = await bash.exec("yq -o json '.a.b | parent(0)' /tmp/nav.yaml")
+        let parentZeroObject = try JSONSerialization.jsonObject(with: Data(parentZero.stdout.utf8)) as? [String: String]
+        XCTAssertEqual(parentZeroObject, ["c": "value"])
+
+        let negativeParent = await bash.exec("yq -o json '.a.b.c | parent(-2)' /tmp/nav.yaml")
+        let negativeParentObject = try JSONSerialization.jsonObject(with: Data(negativeParent.stdout.utf8)) as? [String: Any]
+        XCTAssertNotNil(negativeParentObject?["b"])
+
+        let arrayParent = await bash.exec("yq -o json '.items[0].name | parent' /tmp/nav.yaml")
+        let arrayParentObject = try JSONSerialization.jsonObject(with: Data(arrayParent.stdout.utf8)) as? [String: AnyHashable]
+        XCTAssertEqual(arrayParentObject?["name"] as? String, "foo")
+        XCTAssertEqual(arrayParentObject?["val"] as? Int, 1)
+
+        let rootStandalone = await bash.exec("yq -o json 'root' /tmp/nav.yaml")
+        let rootStandaloneObject = try JSONSerialization.jsonObject(with: Data(rootStandalone.stdout.utf8)) as? [String: Any]
+        XCTAssertNotNil(rootStandaloneObject?["a"])
+    }
+
 }
