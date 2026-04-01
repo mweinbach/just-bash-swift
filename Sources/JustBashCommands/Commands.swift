@@ -3070,6 +3070,38 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return [jqAdd(input)]
     }
 
+    if trimmed == "type" {
+        return [jqType(input)]
+    }
+
+    if trimmed == "first" {
+        return [jqFirst(input)]
+    }
+
+    if trimmed == "last" {
+        return [jqLast(input)]
+    }
+
+    if trimmed == "reverse" {
+        return [jqReverse(input)]
+    }
+
+    if trimmed == "sort" {
+        return [jqSort(input)]
+    }
+
+    if trimmed == "unique" {
+        return [jqUnique(input)]
+    }
+
+    if trimmed == "min" {
+        return [jqMin(input)]
+    }
+
+    if trimmed == "max" {
+        return [jqMax(input)]
+    }
+
     if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
         return [try evaluateJQConditional(trimmed, input: input, bindings: bindings)]
     }
@@ -3462,6 +3494,81 @@ private func jqAdd(_ value: Any) -> Any {
         }
     }
     return NSNull()
+}
+
+private func jqType(_ value: Any) -> Any {
+    if value is NSNull { return "null" }
+    if value is String { return "string" }
+    if value is NSNumber {
+        if let value = value as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() {
+            return "boolean"
+        }
+        return "number"
+    }
+    if value is [Any] { return "array" }
+    if jqObjectDictionary(value) != nil { return "object" }
+    return "unknown"
+}
+
+private func jqFirst(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        return array.first ?? NSNull()
+    }
+    return NSNull()
+}
+
+private func jqLast(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        return array.last ?? NSNull()
+    }
+    return NSNull()
+}
+
+private func jqReverse(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        return Array(array.reversed())
+    }
+    return NSNull()
+}
+
+private func jqSort(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        return array.sorted { jqSortableString($0) < jqSortableString($1) }
+    }
+    return NSNull()
+}
+
+private func jqUnique(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        var result: [Any] = []
+        for item in array {
+            if !result.contains(where: { jqEqual($0, item) }) {
+                result.append(item)
+            }
+        }
+        return result
+    }
+    return NSNull()
+}
+
+private func jqMin(_ value: Any) -> Any {
+    if let array = value as? [Any], let min = array.min(by: { jqSortableString($0) < jqSortableString($1) }) {
+        return min
+    }
+    return NSNull()
+}
+
+private func jqMax(_ value: Any) -> Any {
+    if let array = value as? [Any], let max = array.max(by: { jqSortableString($0) < jqSortableString($1) }) {
+        return max
+    }
+    return NSNull()
+}
+
+private func jqSortableString(_ value: Any) -> String {
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber { return String(number.doubleValue) }
+    return String(describing: value)
 }
 
 private func jqObjectDictionary(_ value: Any) -> [String: Any]? {

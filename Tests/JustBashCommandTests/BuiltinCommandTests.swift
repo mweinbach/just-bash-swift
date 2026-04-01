@@ -440,6 +440,41 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(addStrings.stdout, "\"abc\"\n")
     }
 
+    func testJQFunctionsTypeFirstLastReverseSortUniqueMinMax() async {
+        let bash = Bash()
+
+        let typeObject = await bash.exec(#"echo '{"a":1}' | jq 'type'"#)
+        XCTAssertEqual(typeObject.stdout, "\"object\"\n")
+
+        let typeArray = await bash.exec(#"echo '[1,2]' | jq 'type'"#)
+        XCTAssertEqual(typeArray.stdout, "\"array\"\n")
+
+        let first = await bash.exec(#"echo '[5,10,15]' | jq 'first'"#)
+        XCTAssertEqual(first.stdout, "5\n")
+
+        let last = await bash.exec(#"echo '[5,10,15]' | jq 'last'"#)
+        XCTAssertEqual(last.stdout, "15\n")
+
+        let reverse = await bash.exec(#"echo '[1,2,3]' | jq 'reverse'"#)
+        XCTAssertTrue(reverse.stdout.contains("3"))
+        XCTAssertTrue(reverse.stdout.contains("1"))
+
+        let sort = await bash.exec(#"echo '[3,1,2]' | jq 'sort'"#)
+        XCTAssertTrue(sort.stdout.contains("1"))
+        XCTAssertTrue(sort.stdout.contains("3"))
+
+        let unique = await bash.exec(#"echo '[1,2,1,3,2]' | jq 'unique'"#)
+        XCTAssertTrue(unique.stdout.contains("1"))
+        XCTAssertTrue(unique.stdout.contains("2"))
+        XCTAssertTrue(unique.stdout.contains("3"))
+
+        let min = await bash.exec(#"echo '[5,2,8,1]' | jq 'min'"#)
+        XCTAssertEqual(min.stdout, "1\n")
+
+        let max = await bash.exec(#"echo '[5,2,8,1]' | jq 'max'"#)
+        XCTAssertEqual(max.stdout, "8\n")
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
