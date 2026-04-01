@@ -79,6 +79,7 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Functions** | `name() { ... }`, `function name { ... }`, local scoping, `return` |
 | **Subshells** | `( ... )` — isolated environment |
 | **Brace groups** | `{ ...; }` |
+| **Brace expansion** | `{a,b}`, `{1..5}`, `{1..9..2}`, `{a..z}`, nested brace expansion in literal word segments |
 | **Command substitution** | `$(...)`, `` `...` `` |
 | **Arithmetic** | `$(( ))`, `(( ))` — full precedence: `**`, `*/%`, `+-`, shifts, bitwise, comparison, logical, ternary |
 | **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
@@ -189,7 +190,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-71 tests covering: control flow, functions, alias expansion, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, filesystem persistence, session isolation, and curated parity cases.
+74 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

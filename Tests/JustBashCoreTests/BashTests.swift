@@ -340,6 +340,27 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "2\n")
     }
 
+    func testBraceExpansionCommaAndPreamble() async {
+        let bash = Bash()
+        let result = await bash.exec("echo pre{a,b}post")
+        XCTAssertEqual(result.stdout, "preapost prebpost\n")
+    }
+
+    func testBraceExpansionSequences() async {
+        let bash = Bash()
+        let numeric = await bash.exec("echo {1..5..2}")
+        XCTAssertEqual(numeric.stdout, "1 3 5\n")
+
+        let alpha = await bash.exec("echo {a..c}")
+        XCTAssertEqual(alpha.stdout, "a b c\n")
+    }
+
+    func testBraceExpansionNested() async {
+        let bash = Bash()
+        let result = await bash.exec("echo {a,b{1,2}}")
+        XCTAssertEqual(result.stdout, "a b1 b2\n")
+    }
+
     // MARK: - Here String
 
     func testHereString() async {

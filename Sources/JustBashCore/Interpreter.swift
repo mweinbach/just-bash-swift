@@ -775,7 +775,7 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     func expandWords(_ words: [ShellWord], session: inout ShellSession, stdin: String) async throws -> [String] {
         var result: [String] = []
-        for word in words {
+        for word in words.flatMap(braceExpand) {
             let expanded = try await expandWord(word, session: &session, stdin: stdin)
             let fields: [String]
             if word.suppressesFieldSplitting {
@@ -799,6 +799,157 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         return result
+    }
+
+    private func braceExpand(_ word: ShellWord) -> [ShellWord] {
+        let expandedParts = word.parts.reduce([[WordPart]]([[]])) { partials, part in
+            let partExpansions: [WordPart]
+            if case .literal(let text) = part {
+                partExpansions = braceExpandLiteral(text).map(WordPart.literal)
+            } else {
+                partExpansions = [part]
+            }
+            return partials.flatMap { partial in
+                partExpansions.map { partial + [$0] }
+            }
+        }
+        return expandedParts.map(ShellWord.init)
+    }
+
+    private func braceExpandLiteral(_ text: String) -> [String] {
+        let chars = Array(text)
+        var index = 0
+        while index < chars.count {
+            guard chars[index] == "{" else {
+                index += 1
+                continue
+            }
+            guard let end = matchingBrace(in: chars, from: index) else {
+                index += 1
+                continue
+            }
+            let prefix = String(chars[..<index])
+            let body = String(chars[(index + 1)..<end])
+            let suffix = String(chars[(end + 1)...])
+            let replacements = parseBraceAlternatives(body)
+            if replacements.isEmpty {
+                index += 1
+                continue
+            }
+            return replacements.flatMap { replacement in
+                braceExpandLiteral(prefix + replacement + suffix)
+            }
+        }
+        return [text]
+    }
+
+    private func matchingBrace(in chars: [Character], from start: Int) -> Int? {
+        var depth = 0
+        var index = start
+        while index < chars.count {
+            if chars[index] == "{" {
+                depth += 1
+            } else if chars[index] == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return index
+                }
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private func parseBraceAlternatives(_ body: String) -> [String] {
+        if let alternatives = splitTopLevelComma(body), !alternatives.isEmpty {
+            return alternatives
+        }
+        if let sequence = parseBraceSequence(body) {
+            return sequence
+        }
+        return []
+    }
+
+    private func splitTopLevelComma(_ body: String) -> [String]? {
+        var depth = 0
+        var current = ""
+        var parts: [String] = []
+        var sawComma = false
+
+        for ch in body {
+            switch ch {
+            case "{":
+                depth += 1
+                current.append(ch)
+            case "}":
+                depth -= 1
+                current.append(ch)
+            case "," where depth == 0:
+                parts.append(current)
+                current = ""
+                sawComma = true
+            default:
+                current.append(ch)
+            }
+        }
+
+        guard sawComma else { return nil }
+        parts.append(current)
+        return parts
+    }
+
+    private func parseBraceSequence(_ body: String) -> [String]? {
+        let parts = body.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 5 || parts.count == 3 else { return nil }
+        guard parts[1].isEmpty else { return nil }
+        if parts.count == 5, !parts[3].isEmpty { return nil }
+
+        let start = parts[0]
+        let end = parts[2]
+        let stepText = parts.count == 5 ? parts[4] : nil
+
+        if let startInt = Int(start), let endInt = Int(end) {
+            let step = Int(stepText ?? "") ?? (startInt <= endInt ? 1 : -1)
+            guard step != 0 else { return nil }
+            var values: [String] = []
+            var current = startInt
+            if step > 0 {
+                while current <= endInt {
+                    values.append(String(current))
+                    current += step
+                }
+            } else {
+                while current >= endInt {
+                    values.append(String(current))
+                    current += step
+                }
+            }
+            return values
+        }
+
+        guard start.count == 1, end.count == 1,
+              let startScalar = start.unicodeScalars.first,
+              let endScalar = end.unicodeScalars.first else {
+            return nil
+        }
+
+        let step = Int(stepText ?? "") ?? (startScalar.value <= endScalar.value ? 1 : -1)
+        guard step != 0 else { return nil }
+        var values: [String] = []
+        var current = Int(startScalar.value)
+        let target = Int(endScalar.value)
+        if step > 0 {
+            while current <= target {
+                values.append(String(UnicodeScalar(current)!))
+                current += step
+            }
+        } else {
+            while current >= target {
+                values.append(String(UnicodeScalar(current)!))
+                current += step
+            }
+        }
+        return values
     }
 
     private func expandPart(_ part: WordPart, session: inout ShellSession, stdin: String) async throws -> String {
