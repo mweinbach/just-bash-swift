@@ -998,4 +998,50 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(autodetect.stdout, "localhost\n")
     }
 
+    func testYQTOMLInputAndOutput() async throws {
+        let bash = Bash(options: .init(files: [
+            "/tmp/Cargo.toml": """
+            [package]
+            name = "my-app"
+            version = "1.0.0"
+
+            [dependencies]
+            serde = "1.0"
+            """,
+            "/tmp/config.toml": """
+            [server]
+            host = "localhost"
+            port = 8080
+
+            [database.pool]
+            max_size = 50
+            """,
+            "/tmp/data.yaml": """
+            server:
+              host: localhost
+              port: 8080
+            """,
+            "/tmp/data.json": #"{"app":{"name":"test","version":"2.0"}}"#
+        ]))
+
+        let packageName = await bash.exec("yq -p toml '.package.name' /tmp/Cargo.toml")
+        XCTAssertEqual(packageName.stdout, "my-app\n")
+
+        let dependencyVersion = await bash.exec("yq -p toml '.dependencies.serde' /tmp/Cargo.toml")
+        XCTAssertEqual(dependencyVersion.stdout, "1.0\n")
+
+        let nested = await bash.exec("yq '.database.pool.max_size' /tmp/config.toml")
+        XCTAssertEqual(nested.stdout, "50\n")
+
+        let tomlOut = await bash.exec("yq -o toml '.' /tmp/data.yaml")
+        XCTAssertTrue(tomlOut.stdout.contains("[server]"))
+        XCTAssertTrue(tomlOut.stdout.contains(#"host = "localhost""#))
+        XCTAssertTrue(tomlOut.stdout.contains("port = 8080"))
+
+        let jsonToTOML = await bash.exec("yq -p json -o toml '.' /tmp/data.json")
+        XCTAssertTrue(jsonToTOML.stdout.contains("[app]"))
+        XCTAssertTrue(jsonToTOML.stdout.contains(#"name = "test""#))
+        XCTAssertTrue(jsonToTOML.stdout.contains(#"version = "2.0""#))
+    }
+
 }

@@ -1993,9 +1993,11 @@ private func yq() -> AnyBashCommand {
         var outputJSON = false
         var outputCSV = false
         var outputINI = false
+        var outputTOML = false
         var parseJSON = false
         var parseCSV = false
         var parseINI = false
+        var parseTOML = false
         var explicitInputFormat = false
         var nullInput = false
         var slurp = false
@@ -2011,7 +2013,7 @@ private func yq() -> AnyBashCommand {
             let arg = args[index]
             switch arg {
             case "--help":
-                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -o csv    output CSV\n  -o ini    output INI\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -p csv    parse CSV input\n  -p ini    parse INI input\n  --csv-delimiter=CHAR\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
+                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -o csv    output CSV\n  -o ini    output INI\n  -o toml   output TOML\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -p csv    parse CSV input\n  -p ini    parse INI input\n  -p toml   parse TOML input\n  --csv-delimiter=CHAR\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
             case "-c":
                 compact = true
             case "-r":
@@ -2039,6 +2041,8 @@ private func yq() -> AnyBashCommand {
                         outputCSV = true
                     case "ini":
                         outputINI = true
+                    case "toml":
+                        outputTOML = true
                     default:
                         break
                     }
@@ -2054,6 +2058,8 @@ private func yq() -> AnyBashCommand {
                         parseCSV = true
                     case "ini":
                         parseINI = true
+                    case "toml":
+                        parseTOML = true
                     default:
                         break
                     }
@@ -2127,6 +2133,8 @@ private func yq() -> AnyBashCommand {
                     csvDelimiter = "\\t"
                 } else if lowercased.hasSuffix(".ini") {
                     parseINI = true
+                } else if lowercased.hasSuffix(".toml") {
+                    parseTOML = true
                 }
             }
 
@@ -2140,6 +2148,8 @@ private func yq() -> AnyBashCommand {
                     inputValue = [try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))]
                 } else if parseINI {
                     inputValue = [try parseINIInput(sourceText)]
+                } else if parseTOML {
+                    inputValue = [try parseTOMLInput(sourceText)]
                 } else {
                     inputValue = try parseYAMLDocuments(sourceText)
                 }
@@ -2149,6 +2159,8 @@ private func yq() -> AnyBashCommand {
                 inputValue = try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))
             } else if parseINI {
                 inputValue = try parseINIInput(sourceText)
+            } else if parseTOML {
+                inputValue = try parseTOMLInput(sourceText)
             } else {
                 inputValue = try parseSimpleYAML(sourceText)
             }
@@ -2169,6 +2181,9 @@ private func yq() -> AnyBashCommand {
             } else if outputINI {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map(renderINIValue).joined(separator: separator)
+            } else if outputTOML {
+                let separator = joinOutput ? "" : "\n"
+                rendered = outputs.map(renderTOMLValue).joined(separator: separator)
             } else {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map { renderYAMLValue($0) }.joined(separator: separator)
@@ -5107,6 +5122,29 @@ private func parseINIInput(_ text: String) throws -> [String: Any] {
     return result
 }
 
+private func parseTOMLInput(_ text: String) throws -> [String: Any] {
+    var result: [String: Any] = [:]
+    var currentPath: [String] = []
+
+    for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty || line.hasPrefix("#") {
+            continue
+        }
+        if line.hasPrefix("["), line.hasSuffix("]") {
+            let section = String(line.dropFirst().dropLast())
+            currentPath = section.split(separator: ".").map { $0.trimmingCharacters(in: .whitespaces) }
+            continue
+        }
+        guard let equal = line.firstIndex(of: "=") else { continue }
+        let key = String(line[..<equal]).trimmingCharacters(in: .whitespaces)
+        let value = parseTOMLScalar(String(line[line.index(after: equal)...]).trimmingCharacters(in: .whitespaces))
+        setNestedObjectValue(&result, path: currentPath + [key], value: value)
+    }
+
+    return result
+}
+
 private func parseYAMLBlock(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> Any {
     guard index < lines.count else { return NSNull() }
     if lines[index].text.hasPrefix("- ") {
@@ -5215,6 +5253,25 @@ private func parseINIScalar(_ text: String) -> Any {
     return text
 }
 
+private func parseTOMLScalar(_ text: String) -> Any {
+    if text == "true" { return true }
+    if text == "false" { return false }
+    if let int = Int(text) { return int }
+    if let double = Double(text) { return double }
+    if text.hasPrefix("\""), text.hasSuffix("\"") {
+        return String(text.dropFirst().dropLast())
+    }
+    if text.hasPrefix("'"), text.hasSuffix("'") {
+        return String(text.dropFirst().dropLast())
+    }
+    if text.hasPrefix("[") && text.hasSuffix("]") {
+        let inner = String(text.dropFirst().dropLast())
+        let parts = splitTopLevelList(inner)
+        return parts.map { parseTOMLScalar($0.trimmingCharacters(in: .whitespaces)) }
+    }
+    return text
+}
+
 private func renderYAMLValue(_ value: Any, indent: Int = 0) -> String {
     let indentText = String(repeating: "  ", count: indent)
     if value is NSNull { return "null" }
@@ -5311,6 +5368,107 @@ private func renderINIValue(_ value: Any) -> String {
         lines.removeLast()
     }
     return lines.joined(separator: "\n")
+}
+
+private func renderTOMLValue(_ value: Any) -> String {
+    guard let object = jqObjectDictionary(value) else { return "" }
+    var lines: [String] = []
+    renderTOMLObject(object, path: [], lines: &lines)
+    return lines.joined(separator: "\n")
+}
+
+private func renderTOMLObject(_ object: [String: Any], path: [String], lines: inout [String]) {
+    let scalarKeys = object.keys.sorted().filter { !(jqObjectDictionary(object[$0] as Any) != nil) }
+    let objectKeys = object.keys.sorted().filter { jqObjectDictionary(object[$0] as Any) != nil }
+
+    if !path.isEmpty {
+        if !lines.isEmpty { lines.append("") }
+        lines.append("[\(path.joined(separator: "."))]")
+    }
+
+    for key in scalarKeys {
+        lines.append("\(key) = \(renderTOMLScalar(object[key] as Any))")
+    }
+
+    for key in objectKeys {
+        if let child = jqObjectDictionary(object[key] as Any) {
+            renderTOMLObject(child, path: path + [key], lines: &lines)
+        }
+    }
+}
+
+private func renderTOMLScalar(_ value: Any) -> String {
+    if value is NSNull { return "\"\"" }
+    if let string = value as? String { return "\"\(escapeJSONString(string))\"" }
+    if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+        if floor(number.doubleValue) == number.doubleValue {
+            return String(number.intValue)
+        }
+        return String(number.doubleValue)
+    }
+    if let bool = value as? Bool { return bool ? "true" : "false" }
+    if let int = value as? Int { return String(int) }
+    if let double = value as? Double { return String(double) }
+    if let array = value as? [Any] {
+        return "[" + array.map(renderTOMLScalar).joined(separator: ", ") + "]"
+    }
+    return "\"\(escapeJSONString(String(describing: value)))\""
+}
+
+private func splitTopLevelList(_ text: String) -> [String] {
+    var parts: [String] = []
+    var current = ""
+    var depth = 0
+    var inString = false
+    var escaped = false
+
+    for ch in text {
+        if escaped {
+            current.append(ch)
+            escaped = false
+            continue
+        }
+        if ch == "\\" {
+            current.append(ch)
+            escaped = true
+            continue
+        }
+        if ch == "\"" {
+            inString.toggle()
+            current.append(ch)
+            continue
+        }
+        if !inString {
+            if ch == "[" { depth += 1 }
+            if ch == "]" { depth -= 1 }
+            if ch == ",", depth == 0 {
+                parts.append(current)
+                current = ""
+                continue
+            }
+        }
+        current.append(ch)
+    }
+
+    if !current.isEmpty || text.isEmpty {
+        parts.append(current)
+    }
+    return parts
+}
+
+private func setNestedObjectValue(_ object: inout [String: Any], path: [String], value: Any) {
+    guard let key = path.first else { return }
+    if path.count == 1 {
+        object[key] = value
+        return
+    }
+
+    var child = (object[key] as? [String: Any]) ?? [:]
+    setNestedObjectValue(&child, path: Array(path.dropFirst()), value: value)
+    object[key] = child
 }
 
 extension Array {
