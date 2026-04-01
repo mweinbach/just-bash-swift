@@ -900,4 +900,43 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertNotNil(rootStandaloneObject?["a"])
     }
 
+    func testYQCSVInputAndOutput() async throws {
+        let bash = Bash(options: .init(files: [
+            "/tmp/data.csv": "name,age,city\nalice,30,NYC\nbob,25,LA\ncharlie,35,NYC\n",
+            "/tmp/data.tsv": "name\tage\nalice\t30\nbob\t25\n",
+            "/tmp/people.yaml": """
+            - name: alice
+              age: 30
+            - name: bob
+              age: 25
+            """,
+            "/tmp/data.json": #"[{"name":"alice","score":95},{"name":"bob","score":87}]"#
+        ]))
+
+        let firstName = await bash.exec("yq -p csv '.[0].name' /tmp/data.csv")
+        XCTAssertEqual(firstName.stdout, "alice\n")
+
+        let allNames = await bash.exec("yq -p csv '.[].name' /tmp/data.csv")
+        XCTAssertEqual(allNames.stdout, "alice\nbob\ncharlie\n")
+
+        let filtered = await bash.exec(#"yq -p csv '[.[] | select(.city == "NYC") | .name]' /tmp/data.csv -o json"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(filtered.stdout.utf8)) as? [String],
+            ["alice", "charlie"]
+        )
+
+        let yamlToCSV = await bash.exec("yq -o csv '.' /tmp/people.yaml")
+        XCTAssertTrue(yamlToCSV.stdout.contains("age,name"))
+        XCTAssertTrue(yamlToCSV.stdout.contains("30,alice"))
+        XCTAssertTrue(yamlToCSV.stdout.contains("25,bob"))
+
+        let jsonToCSV = await bash.exec("yq -p json -o csv '.' /tmp/data.json")
+        XCTAssertTrue(jsonToCSV.stdout.contains("name,score"))
+        XCTAssertTrue(jsonToCSV.stdout.contains("alice,95"))
+        XCTAssertTrue(jsonToCSV.stdout.contains("bob,87"))
+
+        let tsv = await bash.exec(#"yq -p csv --csv-delimiter='\t' '.[0].name' /tmp/data.tsv"#)
+        XCTAssertEqual(tsv.stdout, "alice\n")
+    }
+
 }

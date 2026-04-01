@@ -1991,12 +1991,15 @@ private func yq() -> AnyBashCommand {
         var rawOutput = false
         var compact = false
         var outputJSON = false
+        var outputCSV = false
         var parseJSON = false
+        var parseCSV = false
         var nullInput = false
         var slurp = false
         var joinOutput = false
         var exitStatusMode = false
         var indent = 2
+        var csvDelimiter = ","
         var filter: String?
         var files: [String] = []
         var index = 0
@@ -2005,7 +2008,7 @@ private func yq() -> AnyBashCommand {
             let arg = args[index]
             switch arg {
             case "--help":
-                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
+                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -o csv    output CSV\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -p csv    parse CSV input\n  --csv-delimiter=CHAR\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
             case "-c":
                 compact = true
             case "-r":
@@ -2025,14 +2028,30 @@ private func yq() -> AnyBashCommand {
                 }
             case "-o":
                 index += 1
-                if index < args.count, args[index] == "json" {
-                    outputJSON = true
+                if index < args.count {
+                    switch args[index] {
+                    case "json":
+                        outputJSON = true
+                    case "csv":
+                        outputCSV = true
+                    default:
+                        break
+                    }
                 }
             case "-p":
                 index += 1
-                if index < args.count, args[index] == "json" {
-                    parseJSON = true
+                if index < args.count {
+                    switch args[index] {
+                    case "json":
+                        parseJSON = true
+                    case "csv":
+                        parseCSV = true
+                    default:
+                        break
+                    }
                 }
+            case let option where option.hasPrefix("--csv-delimiter="):
+                csvDelimiter = String(option.dropFirst("--csv-delimiter=".count))
             case let option where option.hasPrefix("-") && option.count > 2:
                 let flags = Array(option.dropFirst())
                 var handled = true
@@ -2095,11 +2114,15 @@ private func yq() -> AnyBashCommand {
             } else if slurp {
                 if parseJSON {
                     inputValue = try parseJQInputValues(sourceText)
+                } else if parseCSV {
+                    inputValue = [try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))]
                 } else {
                     inputValue = try parseYAMLDocuments(sourceText)
                 }
             } else if parseJSON {
                 inputValue = try parseJQInputValues(sourceText).first ?? NSNull()
+            } else if parseCSV {
+                inputValue = try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))
             } else {
                 inputValue = try parseSimpleYAML(sourceText)
             }
@@ -2114,6 +2137,9 @@ private func yq() -> AnyBashCommand {
             if outputJSON {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map { renderYQJSONValue($0, compact: compact, raw: rawOutput, indent: indent) }.joined(separator: separator)
+            } else if outputCSV {
+                let separator = joinOutput ? "" : "\n"
+                rendered = outputs.map { renderCSVValue($0, delimiter: decodeYQDelimiter(csvDelimiter)) }.joined(separator: separator)
             } else {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map { renderYAMLValue($0) }.joined(separator: separator)
@@ -4968,6 +4994,57 @@ private func parseYAMLDocuments(_ text: String) throws -> [Any] {
     return try documents.map(parseSimpleYAML)
 }
 
+private func parseCSVInput(_ text: String, delimiter: Character) throws -> [[String: Any]] {
+    let lines = text
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init)
+        .filter { !$0.isEmpty }
+    guard let headerLine = lines.first else { return [] }
+
+    let headers = parseCSVRow(headerLine, delimiter: delimiter)
+    return lines.dropFirst().map { line in
+        let fields = parseCSVRow(line, delimiter: delimiter)
+        var row: [String: Any] = [:]
+        for (index, header) in headers.enumerated() {
+            row[header] = index < fields.count ? parseYQCSVScalar(fields[index]) : NSNull()
+        }
+        return row
+    }
+}
+
+private func parseCSVRow(_ line: String, delimiter: Character) -> [String] {
+    var fields: [String] = []
+    var current = ""
+    var inQuotes = false
+    let chars = Array(line)
+    var index = 0
+
+    while index < chars.count {
+        let ch = chars[index]
+        if ch == "\"" {
+            if inQuotes, index + 1 < chars.count, chars[index + 1] == "\"" {
+                current.append("\"")
+                index += 2
+                continue
+            }
+            inQuotes.toggle()
+            index += 1
+            continue
+        }
+        if ch == delimiter, !inQuotes {
+            fields.append(current)
+            current = ""
+            index += 1
+            continue
+        }
+        current.append(ch)
+        index += 1
+    }
+
+    fields.append(current)
+    return fields
+}
+
 private func parseYAMLBlock(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> Any {
     guard index < lines.count else { return NSNull() }
     if lines[index].text.hasPrefix("- ") {
@@ -5056,6 +5133,14 @@ private func parseYAMLScalar(_ text: String) -> Any {
     return text
 }
 
+private func parseYQCSVScalar(_ text: String) -> Any {
+    if let int = Int(text) { return int }
+    if let double = Double(text) { return double }
+    if text == "true" { return true }
+    if text == "false" { return false }
+    return text
+}
+
 private func renderYAMLValue(_ value: Any, indent: Int = 0) -> String {
     let indentText = String(repeating: "  ", count: indent)
     if value is NSNull { return "null" }
@@ -5096,6 +5181,40 @@ private func renderYAMLValue(_ value: Any, indent: Int = 0) -> String {
         }.joined(separator: "\n")
     }
     return String(describing: value)
+}
+
+private func renderCSVValue(_ value: Any, delimiter: Character) -> String {
+    let delimiterString = String(delimiter)
+
+    if let rows = value as? [Any] {
+        if rows.isEmpty { return "" }
+
+        if let firstObject = jqObjectDictionary(rows[0]) {
+            let headers = Array(firstObject.keys).sorted()
+            let headerLine = headers.map(jqCSVField).joined(separator: delimiterString)
+            let dataLines = rows.map { row -> String in
+                let object = jqObjectDictionary(row) ?? [:]
+                return headers.map { header in
+                    jqCSVField(object[header] as Any)
+                }.joined(separator: delimiterString)
+            }
+            return ([headerLine] + dataLines).joined(separator: "\n")
+        }
+
+        return rows.map { row in
+            if let array = row as? [Any] {
+                return array.map(jqCSVField).joined(separator: delimiterString)
+            }
+            return jqCSVField(row)
+        }.joined(separator: "\n")
+    }
+
+    return jqCSVField(value)
+}
+
+private func decodeYQDelimiter(_ text: String) -> Character {
+    if text == "\\t" { return "\t" }
+    return text.first ?? ","
 }
 
 extension Array {
