@@ -100,7 +100,7 @@ public final class CommandRegistry: @unchecked Sendable {
             grep(), egrep(), fgrep(), rg(), sed(), awk(), sort(), uniq(), tr(), cut(), paste(), join(),
             wc(), head(), tail(), tac(), rev(), nl(), fold(), expand(), unexpand(), column(), od(),
             // Data
-            seq(), yes(), base64(), expr(), md5sum(), sha1sum(), sha256sum(), gzip(), gunzip(), zcat(), tar(), sqlite3(),
+            seq(), yes(), base64(), expr(), md5sum(), sha1sum(), sha256sum(), gzip(), gunzip(), zcat(), tar(), sqlite3(), jq(),
             // Misc
             xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(), whoami(), clear(), help(), history(), bash(), sh(), time(), timeout(), curl(), htmlToMarkdown(),
         ]
@@ -1926,6 +1926,58 @@ private func sqlite3() -> AnyBashCommand {
     }
 }
 
+private func jq() -> AnyBashCommand {
+    AnyBashCommand(name: "jq") { args, ctx in
+        var rawOutput = false
+        var compact = false
+        var filter: String?
+        var files: [String] = []
+
+        for arg in args {
+            switch arg {
+            case "--help":
+                return ExecResult.success("jq FILTER [FILE]\n  -c   compact output\n  -r   raw string output\n")
+            case "-c", "--compact-output":
+                compact = true
+            case "-r", "--raw-output":
+                rawOutput = true
+            case let option where option.hasPrefix("-"):
+                return ExecResult.failure("jq: unknown option: \(option)")
+            default:
+                if filter == nil {
+                    filter = arg
+                } else {
+                    files.append(arg)
+                }
+            }
+        }
+
+        let program = filter ?? "."
+        let inputText: String
+        do {
+            if files.isEmpty {
+                inputText = ctx.stdin
+            } else {
+                inputText = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined(separator: "\n")
+            }
+        } catch {
+            return ExecResult.failure("jq: \(error.localizedDescription)")
+        }
+
+        do {
+            let inputs = try parseJQInputValues(inputText)
+            var outputs: [Any] = []
+            for input in inputs {
+                outputs.append(contentsOf: try evaluateJQFilter(program, input: input))
+            }
+            let rendered = outputs.map { renderJQValue($0, compact: compact, raw: rawOutput) }.joined(separator: "\n")
+            return ExecResult.success(rendered + (rendered.isEmpty ? "" : "\n"))
+        } catch {
+            return ExecResult.failure("jq: \(error.localizedDescription)")
+        }
+    }
+}
+
 // MARK: - Misc
 
 private func xargs() -> AnyBashCommand {
@@ -2879,6 +2931,210 @@ private func escapeJSONString(_ value: String) -> String {
         .replacingOccurrences(of: "\n", with: "\\n")
         .replacingOccurrences(of: "\r", with: "\\r")
         .replacingOccurrences(of: "\t", with: "\\t")
+}
+
+private func parseJQInputValues(_ input: String) throws -> [Any] {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [NSNull()] }
+    let data = Data(trimmed.utf8)
+    let value = try JSONSerialization.jsonObject(with: data)
+    return [value]
+}
+
+private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
+    let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let commaParts = splitTopLevelJQ(trimmed, separator: ",") {
+        return try commaParts.flatMap { try evaluateJQFilter($0, input: input) }
+    }
+
+    if let pipeParts = splitTopLevelJQ(trimmed, separator: "|") {
+        var values: [Any] = [input]
+        for part in pipeParts {
+            values = try values.flatMap { try evaluateJQFilter(part, input: $0) }
+        }
+        return values
+    }
+
+    if trimmed == "." {
+        return [input]
+    }
+
+    if trimmed == ".[]" {
+        return iterateJQValues(input)
+    }
+
+    if trimmed.hasPrefix(".") {
+        return try evaluateJQPath(trimmed, input: input)
+    }
+
+    if let literal = parseJQLiteral(trimmed) {
+        return [literal]
+    }
+
+    throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported filter: \(trimmed)"])
+}
+
+private func splitTopLevelJQ(_ text: String, separator: Character) -> [String]? {
+    var depthParen = 0
+    var depthBracket = 0
+    var depthBrace = 0
+    var inString = false
+    var escaped = false
+    var current = ""
+    var parts: [String] = []
+    var sawSeparator = false
+
+    for ch in text {
+        if escaped {
+            current.append(ch)
+            escaped = false
+            continue
+        }
+        if ch == "\\" {
+            current.append(ch)
+            escaped = true
+            continue
+        }
+        if ch == "\"" {
+            inString.toggle()
+            current.append(ch)
+            continue
+        }
+        if !inString {
+            switch ch {
+            case "(":
+                depthParen += 1
+            case ")":
+                depthParen -= 1
+            case "[":
+                depthBracket += 1
+            case "]":
+                depthBracket -= 1
+            case "{":
+                depthBrace += 1
+            case "}":
+                depthBrace -= 1
+            default:
+                break
+            }
+            if ch == separator, depthParen == 0, depthBracket == 0, depthBrace == 0 {
+                parts.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+                sawSeparator = true
+                continue
+            }
+        }
+        current.append(ch)
+    }
+
+    guard sawSeparator else { return nil }
+    parts.append(current.trimmingCharacters(in: .whitespaces))
+    return parts
+}
+
+private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
+    if filter == "." { return [input] }
+    var currentValues: [Any] = [input]
+    var index = filter.startIndex
+    guard filter[index] == "." else { return [input] }
+    index = filter.index(after: index)
+
+    while index < filter.endIndex {
+        if filter[index] == "[" {
+            guard let closing = filter[index...].firstIndex(of: "]") else {
+                throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad path"])
+            }
+            let content = String(filter[filter.index(after: index)..<closing])
+            if content.isEmpty {
+                currentValues = currentValues.flatMap(iterateJQValues)
+            } else if let number = Int(content) {
+                currentValues = currentValues.map { jqArrayIndex($0, number) ?? NSNull() }
+            } else {
+                currentValues = currentValues.map { _ in NSNull() }
+            }
+            index = filter.index(after: closing)
+            if index < filter.endIndex, filter[index] == "." {
+                index = filter.index(after: index)
+            }
+            continue
+        }
+
+        let start = index
+        while index < filter.endIndex, filter[index] != ".", filter[index] != "[" {
+            index = filter.index(after: index)
+        }
+        let key = String(filter[start..<index])
+        if !key.isEmpty {
+            currentValues = currentValues.map { value in
+                if let object = value as? [String: Any] {
+                    return object[key] ?? NSNull()
+                }
+                return NSNull()
+            }
+        }
+        if index < filter.endIndex, filter[index] == "." {
+            index = filter.index(after: index)
+        }
+    }
+
+    return currentValues
+}
+
+private func iterateJQValues(_ value: Any) -> [Any] {
+    if let array = value as? [Any] {
+        return array
+    }
+    if let object = value as? [String: Any] {
+        return object.keys.sorted().compactMap { object[$0] }
+    }
+    return [NSNull()]
+}
+
+private func jqArrayIndex(_ value: Any, _ index: Int) -> Any? {
+    guard let array = value as? [Any], !array.isEmpty else { return nil }
+    let resolved = index >= 0 ? index : array.count + index
+    guard resolved >= 0, resolved < array.count else { return nil }
+    return array[resolved]
+}
+
+private func parseJQLiteral(_ text: String) -> Any? {
+    if text == "null" { return NSNull() }
+    if text == "true" { return true }
+    if text == "false" { return false }
+    if let int = Int(text) { return int }
+    if let double = Double(text) { return double }
+    if text.hasPrefix("\""), text.hasSuffix("\""), let data = text.data(using: .utf8),
+       let value = try? JSONSerialization.jsonObject(with: data) as? String {
+        return value
+    }
+    return nil
+}
+
+private func renderJQValue(_ value: Any, compact: Bool, raw: Bool) -> String {
+    if raw, let string = value as? String {
+        return string
+    }
+    if value is NSNull { return "null" }
+    if let string = value as? String { return "\"\(escapeJSONString(string))\"" }
+    if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+        if floor(number.doubleValue) == number.doubleValue {
+            return String(number.intValue)
+        }
+        return String(number.doubleValue)
+    }
+    if let bool = value as? Bool { return bool ? "true" : "false" }
+    if let int = value as? Int { return String(int) }
+    if let double = value as? Double { return String(double) }
+    if JSONSerialization.isValidJSONObject(value) {
+        let options: JSONSerialization.WritingOptions = compact ? [] : [.prettyPrinted]
+        let data = try? JSONSerialization.data(withJSONObject: value, options: options)
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+    }
+    return String(describing: value)
 }
 
 extension Array {

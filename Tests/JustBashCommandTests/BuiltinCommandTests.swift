@@ -312,4 +312,40 @@ final class BuiltinCommandTests: XCTestCase {
         let result = await bash.exec(#"echo '<h1>Title</h1><p>Hello <strong>world</strong> <a href="https://example.com">link</a></p>' | html-to-markdown"#)
         XCTAssertEqual(result.stdout, "# Title\n\nHello **world** [link](https://example.com)\n")
     }
+
+    func testJQBasicAccessAndIteration() async {
+        let bash = Bash()
+
+        let identity = await bash.exec(#"echo '{"a":1}' | jq '.'"#)
+        XCTAssertTrue(identity.stdout.contains("\"a\""))
+        XCTAssertTrue(identity.stdout.contains("1"))
+
+        let field = await bash.exec(#"echo '{"name":"test"}' | jq '.name'"#)
+        XCTAssertEqual(field.stdout, "\"test\"\n")
+
+        let nested = await bash.exec(#"echo '{"a":{"b":"nested"}}' | jq '.a.b'"#)
+        XCTAssertEqual(nested.stdout, "\"nested\"\n")
+
+        let arrayIndex = await bash.exec(#"echo '["a","b","c"]' | jq '.[-1]'"#)
+        XCTAssertEqual(arrayIndex.stdout, "\"c\"\n")
+
+        let iter = await bash.exec(#"echo '[1,2,3]' | jq '.[]'"#)
+        XCTAssertEqual(iter.stdout, "1\n2\n3\n")
+    }
+
+    func testJQPipesCommaAndCompactRawModes() async {
+        let bash = Bash()
+
+        let piped = await bash.exec(#"echo '{"data":{"value":42}}' | jq '.data | .value'"#)
+        XCTAssertEqual(piped.stdout, "42\n")
+
+        let comma = await bash.exec(#"echo '{"a":1,"b":2}' | jq '.a, .b'"#)
+        XCTAssertEqual(comma.stdout, "1\n2\n")
+
+        let compact = await bash.exec(#"echo '{"a":1}' | jq -c '.'"#)
+        XCTAssertEqual(compact.stdout, "{\"a\":1}\n")
+
+        let raw = await bash.exec(#"echo '{"name":"raw"}' | jq -r '.name'"#)
+        XCTAssertEqual(raw.stdout, "raw\n")
+    }
 }
