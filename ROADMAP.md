@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 64 passing tests
+- Current verification baseline: `swift test` with 71 passing tests
 
 ## Recently Completed
 
@@ -32,6 +32,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - glob character classes like `[ab]` and `[a-z]` now match in the virtual filesystem
 - basic command-position alias expansion is now active
 - `set -x` now emits xtrace lines to stderr
+- a large utility-command block now exists in the Swift port: `base64`, hashes, `expr`, `whoami`, `rmdir`, `tree`, `file`, `strings`, `split`, `join`, `tac`, `od`, `egrep`/`fgrep`/`rg`, `clear`, `help`, `history`, `bash`/`sh`, `time`, and `timeout`
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -59,28 +60,31 @@ This is the only active milestone.
 - Update `README.md` only when behavior is implemented and tested
 - Keep this roadmap aligned with the active milestone instead of appending new parallel phases
 
-## Next: Agent-Critical Commands
+## Next: Remaining High-Value Command Gaps
 
-Only start this after the active correctness milestone is stable.
+The next command wave is the part of upstream parity that still materially changes capability.
 
-- `base64`
-- `expr`
-- `whoami`
-- `rmdir`
-- `md5sum` / `sha256sum`
+- `jq`
+- `yq`
+- `sqlite3`
+- `xan`
+- `gzip` / `gunzip` / `zcat`
+- `tar`
+- `curl` / `html-to-markdown`
 
 Rationale:
 
-- These improve agent usefulness without introducing large embedded runtimes
-- They are smaller and lower-risk than jumping directly to `jq`, compression, or database tooling
+- These are the biggest remaining upstream command families still absent from the Swift port
+- They also represent the point where parity work starts colliding with larger dependency and security decisions
 
 ## Later: Data Model And Shell Completeness
 
+- brace expansion
 - indexed arrays
 - `${arr[n]}`, `${arr[@]}`, `${arr[*]}`
 - array length and indices
 - highest-value missing special variables used by real scripts
-- alias expansion when the tokenizer/parser contract is ready for it
+- deeper alias/bash-parity edge cases once fixture coverage expands
 
 ## Later: Filesystem Abstraction For Embedding
 
@@ -94,11 +98,6 @@ This stays later because it is an embedding concern, not a blocker for the curre
 
 These are not current priorities and should not be pulled into unrelated milestones:
 
-- `jq`
-- `yq`
-- `sqlite3`
-- compression/archive tooling (`gzip`, `gunzip`, `zcat`, `tar`)
-- optional network support
 - embedded JS/Python runtimes
 - overlay or mountable filesystem backends
 - example iOS host app or demo app

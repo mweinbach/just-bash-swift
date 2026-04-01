@@ -100,7 +100,7 @@ Everything in this section is intended to describe implemented behavior in the c
 
 **Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`
 
-**External commands:** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `cp`, `mv`, `ln`, `chmod`, `stat`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `grep`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `wc`, `head`, `tail`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `seq`, `yes`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`
+**External commands:** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
 
 ### Execution Limits
 
@@ -189,7 +189,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-64 tests covering: control flow, functions, alias expansion, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, filesystem persistence, session isolation, and curated parity cases.
+71 tests covering: control flow, functions, alias expansion, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

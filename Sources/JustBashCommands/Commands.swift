@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import JustBashFS
 
 public struct ExecResult: Sendable, Equatable {
@@ -90,16 +91,16 @@ public final class CommandRegistry: @unchecked Sendable {
             // Core I/O
             cat(), tee(),
             // File operations
-            ls(), mkdir(), touch(), rm(), cp(), mv(), ln(), chmod(), stat(),
+            ls(), mkdir(), touch(), rm(), rmdir(), cp(), mv(), ln(), chmod(), stat(), tree(), split(),
             // File info
-            find(), du(), realpath(), readlink(), basename(), dirname(),
+            find(), du(), realpath(), readlink(), basename(), dirname(), file(), strings(),
             // Text processing
-            grep(), sed(), awk(), sort(), uniq(), tr(), cut(), paste(),
-            wc(), head(), tail(), rev(), nl(), fold(), expand(), unexpand(), column(),
+            grep(), egrep(), fgrep(), rg(), sed(), awk(), sort(), uniq(), tr(), cut(), paste(), join(),
+            wc(), head(), tail(), tac(), rev(), nl(), fold(), expand(), unexpand(), column(), od(),
             // Data
-            seq(), yes(),
+            seq(), yes(), base64(), expr(), md5sum(), sha1sum(), sha256sum(),
             // Misc
-            xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(),
+            xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(), whoami(), clear(), help(), history(), bash(), sh(), time(), timeout(),
         ]
     }
 }
@@ -282,6 +283,25 @@ private func rm() -> AnyBashCommand {
     }
 }
 
+private func rmdir() -> AnyBashCommand {
+    AnyBashCommand(name: "rmdir") { args, ctx in
+        let paths = args.filter { !$0.hasPrefix("-") }
+        guard !paths.isEmpty else { return ExecResult.failure("rmdir: missing operand") }
+        do {
+            for path in paths {
+                let normalized = VirtualPath.normalize(path, relativeTo: ctx.cwd)
+                guard ctx.fileSystem.isDirectory(normalized) else {
+                    return ExecResult.failure("rmdir: not a directory: \(path)")
+                }
+                try ctx.fileSystem.removeItem(path, relativeTo: ctx.cwd, recursive: false, force: false)
+            }
+            return ExecResult.success()
+        } catch {
+            return ExecResult.failure("rmdir: \(error.localizedDescription)")
+        }
+    }
+}
+
 private func cp() -> AnyBashCommand {
     AnyBashCommand(name: "cp") { args, ctx in
         let filtered = args.filter { arg in
@@ -371,6 +391,34 @@ private func stat() -> AnyBashCommand {
         } catch {
             return ExecResult.failure("stat: \(error.localizedDescription)")
         }
+    }
+}
+
+private func tree() -> AnyBashCommand {
+    AnyBashCommand(name: "tree") { args, ctx in
+        let target = args.first(where: { !$0.hasPrefix("-") }) ?? "."
+        let path = VirtualPath.normalize(target, relativeTo: ctx.cwd)
+        guard ctx.fileSystem.exists(path) else { return ExecResult.failure("tree: no such file or directory: \(target)") }
+
+        var lines: [String] = [VirtualPath.basename(path)]
+
+        func walk(_ current: String, prefix: String) {
+            guard let entries = try? ctx.fileSystem.listDirectory(current, includeHidden: false) else { return }
+            for (index, entry) in entries.enumerated() {
+                let isLast = index == entries.count - 1
+                let branch = isLast ? "`-- " : "|-- "
+                lines.append(prefix + branch + entry.name)
+                if entry.isDirectory {
+                    walk(entry.path, prefix: prefix + (isLast ? "    " : "|   "))
+                }
+            }
+        }
+
+        if ctx.fileSystem.isDirectory(path) {
+            walk(path, prefix: "")
+        }
+
+        return ExecResult.success(lines.joined(separator: "\n") + "\n")
     }
 }
 
@@ -510,6 +558,69 @@ private func dirname() -> AnyBashCommand {
     }
 }
 
+private func file() -> AnyBashCommand {
+    AnyBashCommand(name: "file") { args, ctx in
+        let paths = args.filter { !$0.hasPrefix("-") }
+        guard !paths.isEmpty else { return ExecResult.failure("file: missing operand") }
+        do {
+            let lines = try paths.map { path -> String in
+                let info = try ctx.fileSystem.fileInfo(path, relativeTo: ctx.cwd)
+                let description: String
+                switch info.kind {
+                case .directory:
+                    description = "directory"
+                case .symlink:
+                    description = "symbolic link"
+                case .file:
+                    let name = VirtualPath.basename(path).lowercased()
+                    if name.hasSuffix(".json") {
+                        description = "JSON text"
+                    } else if name.hasSuffix(".md") {
+                        description = "Markdown text"
+                    } else if name.hasSuffix(".txt") || name.hasSuffix(".log") {
+                        description = "ASCII text"
+                    } else if name.hasSuffix(".sh") {
+                        description = "shell script"
+                    } else {
+                        description = info.size == 0 ? "empty" : "data"
+                    }
+                }
+                return "\(path): \(description)"
+            }
+            return ExecResult.success(lines.joined(separator: "\n") + "\n")
+        } catch {
+            return ExecResult.failure("file: \(error.localizedDescription)")
+        }
+    }
+}
+
+private func strings() -> AnyBashCommand {
+    AnyBashCommand(name: "strings") { args, ctx in
+        let files = args.filter { !$0.hasPrefix("-") }
+        let content: String
+        do {
+            if files.isEmpty { content = ctx.stdin }
+            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+        } catch {
+            return ExecResult.failure("strings: \(error.localizedDescription)")
+        }
+
+        var results: [String] = []
+        var current = ""
+        for ch in content {
+            let isPrintableASCII = ch.unicodeScalars.allSatisfy { $0.value >= 32 && $0.value <= 126 }
+            if isPrintableASCII {
+                current.append(ch)
+            } else {
+                if current.count >= 4 { results.append(current) }
+                current = ""
+            }
+        }
+        if current.count >= 4 { results.append(current) }
+        return ExecResult.success(results.joined(separator: "\n") + (results.isEmpty ? "" : "\n"))
+    }
+}
+
 // MARK: - Text Processing
 
 private func grep() -> AnyBashCommand {
@@ -630,6 +741,24 @@ private func grep() -> AnyBashCommand {
 
         if output.isEmpty && !countOnly { return ExecResult(stdout: "", stderr: "", exitCode: 1) }
         return ExecResult.success(output.joined(separator: "\n") + "\n")
+    }
+}
+
+private func egrep() -> AnyBashCommand {
+    AnyBashCommand(name: "egrep") { args, ctx in
+        await grep().execute(args, ctx)
+    }
+}
+
+private func fgrep() -> AnyBashCommand {
+    AnyBashCommand(name: "fgrep") { args, ctx in
+        await grep().execute(["-F"] + args, ctx)
+    }
+}
+
+private func rg() -> AnyBashCommand {
+    AnyBashCommand(name: "rg") { args, ctx in
+        await grep().execute(["-r"] + args, ctx)
     }
 }
 
@@ -1187,6 +1316,50 @@ private func paste() -> AnyBashCommand {
     }
 }
 
+private func join() -> AnyBashCommand {
+    AnyBashCommand(name: "join") { args, ctx in
+        var delimiter: Character? = nil
+        var files: [String] = []
+        var index = 0
+        while index < args.count {
+            if args[index] == "-t", index + 1 < args.count {
+                delimiter = args[index + 1].first
+                index += 2
+            } else {
+                files.append(args[index])
+                index += 1
+            }
+        }
+        guard files.count >= 2 else { return ExecResult.failure("join: missing file operand") }
+        do {
+            let lhs = try ctx.fileSystem.readFile(files[0], relativeTo: ctx.cwd)
+            let rhs = try ctx.fileSystem.readFile(files[1], relativeTo: ctx.cwd)
+            let splitLine: (String) -> [String] = { line in
+                if let delimiter {
+                    return line.split(separator: delimiter, omittingEmptySubsequences: false).map(String.init)
+                }
+                return line.split(whereSeparator: \.isWhitespace).map(String.init)
+            }
+            let rightRows = rhs.split(separator: "\n").map(String.init).map(splitLine)
+            var rightByKey: [String: [[String]]] = [:]
+            for row in rightRows where !row.isEmpty {
+                rightByKey[row[0], default: []].append(row)
+            }
+
+            var output: [String] = []
+            for row in lhs.split(separator: "\n").map(String.init).map(splitLine) where !row.isEmpty {
+                guard let matches = rightByKey[row[0]] else { continue }
+                for match in matches {
+                    output.append(([row[0]] + Array(row.dropFirst()) + Array(match.dropFirst())).joined(separator: delimiter.map(String.init) ?? " "))
+                }
+            }
+            return ExecResult.success(output.joined(separator: "\n") + (output.isEmpty ? "" : "\n"))
+        } catch {
+            return ExecResult.failure("join: \(error.localizedDescription)")
+        }
+    }
+}
+
 private func wc() -> AnyBashCommand {
     AnyBashCommand(name: "wc") { args, ctx in
         var lineOnly = false, wordOnly = false, byteOnly = false, charOnly = false
@@ -1239,6 +1412,22 @@ private func head() -> AnyBashCommand {
 private func tail() -> AnyBashCommand {
     AnyBashCommand(name: "tail") { args, ctx in
         runLineSlicer(command: "tail", args: args, ctx: ctx, tailMode: true)
+    }
+}
+
+private func tac() -> AnyBashCommand {
+    AnyBashCommand(name: "tac") { args, ctx in
+        let content: String
+        do {
+            if args.isEmpty { content = ctx.stdin }
+            else { content = try args.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+        } catch {
+            return ExecResult.failure("tac: \(error.localizedDescription)")
+        }
+        var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.last == "" && content.hasSuffix("\n") { lines.removeLast() }
+        lines.reverse()
+        return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
     }
 }
 
@@ -1397,6 +1586,29 @@ private func column() -> AnyBashCommand {
     }
 }
 
+private func od() -> AnyBashCommand {
+    AnyBashCommand(name: "od") { args, ctx in
+        let files = args.filter { !$0.hasPrefix("-") }
+        let content: String
+        do {
+            if files.isEmpty { content = ctx.stdin }
+            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+        } catch {
+            return ExecResult.failure("od: \(error.localizedDescription)")
+        }
+
+        let bytes = Array(content.utf8)
+        guard !bytes.isEmpty else { return ExecResult.success() }
+        var lines: [String] = []
+        for offset in stride(from: 0, to: bytes.count, by: 16) {
+            let chunk = bytes[offset..<Swift.min(offset + 16, bytes.count)]
+            let hex = chunk.map { String(format: "%02x", $0) }.joined(separator: " ")
+            lines.append(String(format: "%07o %@", offset, hex))
+        }
+        return ExecResult.success(lines.joined(separator: "\n") + "\n")
+    }
+}
+
 // MARK: - Data
 
 private func seq() -> AnyBashCommand {
@@ -1439,6 +1651,72 @@ private func yes() -> AnyBashCommand {
         let output = (0..<100).map { _ in text }.joined(separator: "\n") + "\n"
         return ExecResult.success(output)
     }
+}
+
+private func base64() -> AnyBashCommand {
+    AnyBashCommand(name: "base64") { args, ctx in
+        let decode = args.contains("-d") || args.contains("--decode")
+        let files = args.filter { !$0.hasPrefix("-") }
+        let content: String
+        do {
+            if files.isEmpty { content = ctx.stdin }
+            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+        } catch {
+            return ExecResult.failure("base64: \(error.localizedDescription)")
+        }
+
+        if decode {
+            guard let data = Data(base64Encoded: content.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                return ExecResult.failure("base64: invalid input")
+            }
+            return ExecResult.success(String(decoding: data, as: UTF8.self))
+        }
+
+        let encoded = Data(content.utf8).base64EncodedString()
+        return ExecResult.success(encoded + "\n")
+    }
+}
+
+private func expr() -> AnyBashCommand {
+    AnyBashCommand(name: "expr") { args, _ in
+        guard !args.isEmpty else { return ExecResult.failure("expr: missing operand") }
+        if args.count >= 3, let lhs = Int(args[0]), let rhs = Int(args[2]) {
+            let op = args[1]
+            switch op {
+            case "+": return ExecResult.success("\(lhs + rhs)\n")
+            case "-": return ExecResult.success("\(lhs - rhs)\n")
+            case "*": return ExecResult.success("\(lhs * rhs)\n")
+            case "/": return rhs == 0 ? ExecResult.failure("expr: division by zero") : ExecResult.success("\(lhs / rhs)\n")
+            case "%": return rhs == 0 ? ExecResult.failure("expr: division by zero") : ExecResult.success("\(lhs % rhs)\n")
+            case "=": return ExecResult.success(lhs == rhs ? "1\n" : "0\n")
+            case "!=": return ExecResult.success(lhs != rhs ? "1\n" : "0\n")
+            case "<": return ExecResult.success(lhs < rhs ? "1\n" : "0\n")
+            case "<=": return ExecResult.success(lhs <= rhs ? "1\n" : "0\n")
+            case ">": return ExecResult.success(lhs > rhs ? "1\n" : "0\n")
+            case ">=": return ExecResult.success(lhs >= rhs ? "1\n" : "0\n")
+            default: break
+            }
+        }
+        return ExecResult.success(args.joined(separator: " ") + "\n")
+    }
+}
+
+private func md5sum() -> AnyBashCommand {
+    checksumCommand(name: "md5sum", hash: { data in
+        Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    })
+}
+
+private func sha1sum() -> AnyBashCommand {
+    checksumCommand(name: "sha1sum", hash: { data in
+        Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    })
+}
+
+private func sha256sum() -> AnyBashCommand {
+    checksumCommand(name: "sha256sum", hash: { data in
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    })
 }
 
 // MARK: - Misc
@@ -1580,7 +1858,154 @@ private func hostname() -> AnyBashCommand {
     }
 }
 
+private func whoami() -> AnyBashCommand {
+    AnyBashCommand(name: "whoami") { _, ctx in
+        ExecResult.success((ctx.environment["USER"] ?? "user") + "\n")
+    }
+}
+
+private func clear() -> AnyBashCommand {
+    AnyBashCommand(name: "clear") { _, _ in
+        ExecResult.success()
+    }
+}
+
+private func help() -> AnyBashCommand {
+    AnyBashCommand(name: "help") { args, _ in
+        if let topic = args.first {
+            return ExecResult.success("help: \(topic): no detailed help available in just-bash-swift yet\n")
+        }
+        let summary = [
+            "Supported utility commands include file, text, data, and shell helpers.",
+            "Try: cat, grep, sed, awk, sort, base64, md5sum, sha256sum, tree, split, join, help"
+        ].joined(separator: "\n")
+        return ExecResult.success(summary + "\n")
+    }
+}
+
+private func history() -> AnyBashCommand {
+    AnyBashCommand(name: "history") { _, _ in
+        ExecResult.success()
+    }
+}
+
+private func bash() -> AnyBashCommand {
+    shellRunnerCommand(named: "bash")
+}
+
+private func sh() -> AnyBashCommand {
+    shellRunnerCommand(named: "sh")
+}
+
+private func time() -> AnyBashCommand {
+    AnyBashCommand(name: "time") { args, ctx in
+        guard !args.isEmpty else { return ExecResult.failure("time: missing command") }
+        guard let executor = ctx.executeSubshell else {
+            return ExecResult.failure("time: shell execution unavailable")
+        }
+        let result = await executor(args.joined(separator: " "))
+        return ExecResult(stdout: result.stdout, stderr: result.stderr + "real 0.000\nuser 0.000\nsys 0.000\n", exitCode: result.exitCode)
+    }
+}
+
+private func timeout() -> AnyBashCommand {
+    AnyBashCommand(name: "timeout") { args, ctx in
+        guard args.count >= 2 else { return ExecResult.failure("timeout: missing command") }
+        guard let executor = ctx.executeSubshell else {
+            return ExecResult.failure("timeout: shell execution unavailable")
+        }
+        return await executor(args.dropFirst().joined(separator: " "))
+    }
+}
+
 // MARK: - Helpers
+
+private func split() -> AnyBashCommand {
+    AnyBashCommand(name: "split") { args, ctx in
+        var linesPerFile = 1000
+        var files: [String] = []
+        var index = 0
+        while index < args.count {
+            if args[index] == "-l", index + 1 < args.count {
+                linesPerFile = Int(args[index + 1]) ?? linesPerFile
+                index += 2
+            } else {
+                files.append(args[index])
+                index += 1
+            }
+        }
+
+        let inputPath = files.first
+        let prefix = files.count > 1 ? files[1] : "x"
+        let content: String
+        do {
+            if let inputPath {
+                if inputPath == "-" {
+                    content = ctx.stdin
+                } else {
+                    content = try ctx.fileSystem.readFile(inputPath, relativeTo: ctx.cwd)
+                }
+            } else {
+                content = ctx.stdin
+            }
+        } catch {
+            return ExecResult.failure("split: \(error.localizedDescription)")
+        }
+
+        var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.last == "" && content.hasSuffix("\n") {
+            lines.removeLast()
+        }
+        let chunks = stride(from: 0, to: lines.count, by: max(1, linesPerFile)).map { Array(lines[$0..<Swift.min($0 + max(1, linesPerFile), lines.count)]) }
+        do {
+            for (index, chunk) in chunks.enumerated() {
+                let suffix = splitFileSuffix(index)
+                try ctx.fileSystem.writeFile(chunk.joined(separator: "\n") + "\n", to: prefix + suffix, relativeTo: ctx.cwd)
+            }
+            return ExecResult.success()
+        } catch {
+            return ExecResult.failure("split: \(error.localizedDescription)")
+        }
+    }
+}
+
+private func checksumCommand(name: String, hash: @escaping @Sendable (Data) -> String) -> AnyBashCommand {
+    AnyBashCommand(name: name) { args, ctx in
+        let files = args.filter { !$0.hasPrefix("-") }
+        do {
+            if files.isEmpty {
+                let data = Data(ctx.stdin.utf8)
+                return ExecResult.success("\(hash(data))  -\n")
+            }
+            let lines = try files.map { path -> String in
+                let data = Data(try ctx.fileSystem.readFile(path, relativeTo: ctx.cwd).utf8)
+                return "\(hash(data))  \(path)"
+            }
+            return ExecResult.success(lines.joined(separator: "\n") + "\n")
+        } catch {
+            return ExecResult.failure("\(name): \(error.localizedDescription)")
+        }
+    }
+}
+
+private func shellRunnerCommand(named name: String) -> AnyBashCommand {
+    AnyBashCommand(name: name) { args, ctx in
+        guard let executor = ctx.executeSubshell else {
+            return ExecResult.failure("\(name): shell execution unavailable")
+        }
+        if args.isEmpty {
+            return ExecResult.success()
+        }
+        return await executor(args.joined(separator: " "))
+    }
+}
+
+private func splitFileSuffix(_ index: Int) -> String {
+    let alphabet = Array("abcdefghijklmnopqrstuvwxyz")
+    let first = alphabet[(index / alphabet.count) % alphabet.count]
+    let second = alphabet[index % alphabet.count]
+    return "\(first)\(second)"
+}
 
 extension Array {
     fileprivate func chunked(into size: Int) -> [[Element]] {
