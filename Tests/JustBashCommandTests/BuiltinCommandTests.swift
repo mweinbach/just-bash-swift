@@ -802,4 +802,52 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(nonString.stdout, "null\n")
     }
 
+    func testYQSlurpAndModeFlags() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/multi.yaml": """
+            ---
+            name: first
+            ---
+            name: second
+            """,
+            "/tmp/items.yaml": """
+            items:
+              - a
+              - b
+              - c
+            value: true
+            """,
+            "/tmp/numbers.yaml": """
+            items:
+              - 1
+              - 2
+            """,
+            "/tmp/missing.yaml": "value: 42\n",
+            "/tmp/array.yaml": """
+            items:
+              - a
+              - b
+            """
+        ]))
+
+        let slurp = await bash.exec("yq -s '.[0].name' /tmp/multi.yaml")
+        XCTAssertEqual(slurp.stdout, "first\n")
+
+        let join = await bash.exec("yq -j '.items[]' /tmp/items.yaml")
+        XCTAssertEqual(join.stdout, "abc")
+
+        let truthy = await bash.exec("yq -e '.value' /tmp/items.yaml")
+        XCTAssertEqual(truthy.exitCode, 0)
+
+        let falsey = await bash.exec("yq -e '.missing' /tmp/missing.yaml")
+        XCTAssertEqual(falsey.exitCode, 1)
+
+        let indent = await bash.exec("yq -o json -I 4 '.' /tmp/array.yaml")
+        XCTAssertTrue(indent.stdout.contains("    \"a\""))
+
+        let combined = await bash.exec("yq -cej -o json '.items[]' /tmp/numbers.yaml")
+        XCTAssertEqual(combined.exitCode, 0)
+        XCTAssertEqual(combined.stdout, "12")
+    }
+
 }

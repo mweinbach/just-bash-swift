@@ -1993,6 +1993,10 @@ private func yq() -> AnyBashCommand {
         var outputJSON = false
         var parseJSON = false
         var nullInput = false
+        var slurp = false
+        var joinOutput = false
+        var exitStatusMode = false
+        var indent = 2
         var filter: String?
         var files: [String] = []
         var index = 0
@@ -2001,13 +2005,24 @@ private func yq() -> AnyBashCommand {
             let arg = args[index]
             switch arg {
             case "--help":
-                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -n        null input\n")
+                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
             case "-c":
                 compact = true
             case "-r":
                 rawOutput = true
             case "-n":
                 nullInput = true
+            case "-s":
+                slurp = true
+            case "-j":
+                joinOutput = true
+            case "-e":
+                exitStatusMode = true
+            case "-I":
+                index += 1
+                if index < args.count {
+                    indent = Int(args[index]) ?? indent
+                }
             case "-o":
                 index += 1
                 if index < args.count, args[index] == "json" {
@@ -2017,6 +2032,34 @@ private func yq() -> AnyBashCommand {
                 index += 1
                 if index < args.count, args[index] == "json" {
                     parseJSON = true
+                }
+            case let option where option.hasPrefix("-") && option.count > 2:
+                let flags = Array(option.dropFirst())
+                var handled = true
+                for flag in flags {
+                    switch flag {
+                    case "c":
+                        compact = true
+                    case "r":
+                        rawOutput = true
+                    case "n":
+                        nullInput = true
+                    case "s":
+                        slurp = true
+                    case "j":
+                        joinOutput = true
+                    case "e":
+                        exitStatusMode = true
+                    default:
+                        handled = false
+                    }
+                }
+                if !handled {
+                    if !arg.hasPrefix("-"), filter == nil {
+                        filter = arg
+                    } else if !arg.hasPrefix("-") || arg == "-" {
+                        files.append(arg)
+                    }
                 }
             default:
                 if !arg.hasPrefix("-"), filter == nil {
@@ -2049,6 +2092,12 @@ private func yq() -> AnyBashCommand {
             let inputValue: Any
             if nullInput {
                 inputValue = NSNull()
+            } else if slurp {
+                if parseJSON {
+                    inputValue = try parseJQInputValues(sourceText)
+                } else {
+                    inputValue = try parseYAMLDocuments(sourceText)
+                }
             } else if parseJSON {
                 inputValue = try parseJQInputValues(sourceText).first ?? NSNull()
             } else {
@@ -2058,11 +2107,15 @@ private func yq() -> AnyBashCommand {
             let outputs = try evaluateJQFilter(program, input: inputValue)
             let rendered: String
             if outputJSON {
-                rendered = outputs.map { renderJQValue($0, compact: compact, raw: rawOutput) }.joined(separator: "\n")
+                let separator = joinOutput ? "" : "\n"
+                rendered = outputs.map { renderYQJSONValue($0, compact: compact, raw: rawOutput, indent: indent) }.joined(separator: separator)
             } else {
-                rendered = outputs.map { renderYAMLValue($0) }.joined(separator: "\n")
+                let separator = joinOutput ? "" : "\n"
+                rendered = outputs.map { renderYAMLValue($0) }.joined(separator: separator)
             }
-            return ExecResult.success(rendered + (rendered.isEmpty ? "" : "\n"))
+            let stdout = joinOutput ? rendered : rendered + (rendered.isEmpty ? "" : "\n")
+            let exitCode = exitStatusMode && !outputs.contains(where: jqTruthy) ? 1 : 0
+            return ExecResult(stdout: stdout, stderr: "", exitCode: exitCode)
         } catch {
             return ExecResult.failure("yq: \(error.localizedDescription)")
         }
@@ -4641,6 +4694,58 @@ private func renderJQValue(_ value: Any, compact: Bool, raw: Bool) -> String {
     return String(describing: value)
 }
 
+private func renderYQJSONValue(_ value: Any, compact: Bool, raw: Bool, indent: Int) -> String {
+    if compact || raw || indent == 2 {
+        return renderJQValue(value, compact: compact, raw: raw)
+    }
+    return renderYQStructuredJSON(value, indent: indent, level: 0)
+}
+
+private func renderYQStructuredJSON(_ value: Any, indent: Int, level: Int) -> String {
+    if value is NSNull { return "null" }
+    if let string = value as? String { return "\"\(escapeJSONString(string))\"" }
+    if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+        if floor(number.doubleValue) == number.doubleValue {
+            return String(number.intValue)
+        }
+        return String(number.doubleValue)
+    }
+    if let bool = value as? Bool { return bool ? "true" : "false" }
+    if let int = value as? Int { return String(int) }
+    if let double = value as? Double { return String(double) }
+    if let orderedArray = value as? [OrderedJSONObject] {
+        return renderYQStructuredJSON(orderedArray.map { $0 as Any }, indent: indent, level: level)
+    }
+    if let array = value as? [Any] {
+        if array.isEmpty { return "[]" }
+        let prefix = String(repeating: " ", count: indent * (level + 1))
+        let closing = String(repeating: " ", count: indent * level)
+        let rendered = array.map { prefix + renderYQStructuredJSON($0, indent: indent, level: level + 1) }
+        return "[\n" + rendered.joined(separator: ",\n") + "\n" + closing + "]"
+    }
+    if let object = value as? OrderedJSONObject {
+        return renderYQStructuredJSONObject(object.entries, indent: indent, level: level)
+    }
+    if let object = jqObjectDictionary(value) {
+        let entries = object.keys.sorted().map { ($0, object[$0] as Any) }
+        return renderYQStructuredJSONObject(entries, indent: indent, level: level)
+    }
+    return renderJQValue(value, compact: false, raw: false)
+}
+
+private func renderYQStructuredJSONObject(_ entries: [(String, Any)], indent: Int, level: Int) -> String {
+    if entries.isEmpty { return "{}" }
+    let prefix = String(repeating: " ", count: indent * (level + 1))
+    let closing = String(repeating: " ", count: indent * level)
+    let rendered = entries.map { key, value in
+        prefix + "\"\(escapeJSONString(key))\": " + renderYQStructuredJSON(value, indent: indent, level: level + 1)
+    }
+    return "{\n" + rendered.joined(separator: ",\n") + "\n" + closing + "}"
+}
+
 private struct YAMLLine {
     let indent: Int
     let text: String
@@ -4660,6 +4765,36 @@ private func parseSimpleYAML(_ text: String) throws -> Any {
     if lines.isEmpty { return NSNull() }
     var index = 0
     return try parseYAMLBlock(lines, index: &index, indent: lines[0].indent)
+}
+
+private func parseYAMLDocuments(_ text: String) throws -> [Any] {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var documents: [String] = []
+    var current: [String] = []
+
+    for line in lines {
+        if line.trimmingCharacters(in: .whitespaces) == "---" {
+            let document = current.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !document.isEmpty {
+                documents.append(document)
+            }
+            current = []
+        } else {
+            current.append(line)
+        }
+    }
+
+    let tail = current.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    if !tail.isEmpty {
+        documents.append(tail)
+    }
+
+    if documents.isEmpty {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? [] : [try parseSimpleYAML(trimmed)]
+    }
+
+    return try documents.map(parseSimpleYAML)
 }
 
 private func parseYAMLBlock(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> Any {
