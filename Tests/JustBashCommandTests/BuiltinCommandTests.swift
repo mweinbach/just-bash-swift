@@ -348,4 +348,29 @@ final class BuiltinCommandTests: XCTestCase {
         let raw = await bash.exec(#"echo '{"name":"raw"}' | jq -r '.name'"#)
         XCTAssertEqual(raw.stdout, "raw\n")
     }
+
+    func testJQSlicesSelectMapAndHas() async {
+        let bash = Bash()
+
+        let slice = await bash.exec(#"echo '[0,1,2,3,4]' | jq '.[1:4]'"#)
+        XCTAssertTrue(slice.stdout.contains("1"))
+        XCTAssertTrue(slice.stdout.contains("3"))
+
+        let stringSlice = await bash.exec(#"echo '{"text":"hello"}' | jq '.text[1:4]'"#)
+        XCTAssertEqual(stringSlice.stdout, "\"ell\"\n")
+
+        let selected = await bash.exec(#"echo '[1,2,3,4,5]' | jq '[.[] | select(. > 3)]'"#)
+        XCTAssertTrue(selected.stdout.contains("4"))
+        XCTAssertTrue(selected.stdout.contains("5"))
+
+        let mapped = await bash.exec(#"echo '[1,2,3]' | jq 'map(. * 2)'"#)
+        XCTAssertTrue(mapped.stdout.contains("2"))
+        XCTAssertTrue(mapped.stdout.contains("6"))
+
+        let hasObject = await bash.exec(#"echo '{"foo":42}' | jq 'has("foo")'"#)
+        XCTAssertEqual(hasObject.stdout, "true\n")
+
+        let hasArray = await bash.exec(#"echo '[1,2,3]' | jq 'has(1)'"#)
+        XCTAssertEqual(hasArray.stdout, "true\n")
+    }
 }

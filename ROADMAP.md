@@ -42,7 +42,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - readonly variables and `shopt` alias toggling now exist in the Swift port
 - the first associative-array slice now exists in the Swift port: `declare -A`, keyed assignment, keyed expansion, length, and keyed unset
 - basic `curl` and `html-to-markdown` commands now exist in the Swift port with local-only verification coverage
-- a first native `jq` slice now exists in the Swift port: identity, key access, nested access, array indexing/iteration, simple pipes, comma output, and compact/raw modes
+- a first native `jq` slice now exists in the Swift port: identity, key access, nested access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, `map`, `select`, and `has`
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -84,7 +84,7 @@ Rationale:
 - They also represent the point where parity work starts colliding with larger dependency and security decisions
 
 jq follow-on still remains:
-- slices, select/map/functions/operators
+- functions, conditionals, variables, and broader operators
 - broader parser/evaluator compatibility
 
 Tar follow-on still remains:

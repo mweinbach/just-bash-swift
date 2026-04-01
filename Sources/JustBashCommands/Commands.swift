@@ -2964,6 +2964,41 @@ private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
         return iterateJQValues(input)
     }
 
+    if let op = parseJQBinaryOperator(trimmed) {
+        let lhsValues = try evaluateJQFilter(op.left, input: input)
+        let rhsValues = try evaluateJQFilter(op.right, input: input)
+        let lhs = lhsValues.first ?? NSNull()
+        let rhs = rhsValues.first ?? NSNull()
+        return [try evaluateJQBinary(lhs: lhs, rhs: rhs, op: op.op)]
+    }
+
+    if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+        let inner = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        let collected = inner.isEmpty ? [] : try evaluateJQFilter(inner, input: input)
+        return [collected]
+    }
+
+    if trimmed.hasPrefix("map("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast())
+        guard let array = input as? [Any] else { return [NSNull()] }
+        let mapped = try array.flatMap { try evaluateJQFilter(inner, input: $0) }
+        return [mapped]
+    }
+
+    if trimmed.hasPrefix("select("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(7).dropLast())
+        let predicateValues = try evaluateJQFilter(inner, input: input)
+        if predicateValues.contains(where: jqTruthy) {
+            return [input]
+        }
+        return []
+    }
+
+    if trimmed.hasPrefix("has("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        return [jqHas(input, argument: inner)]
+    }
+
     if trimmed.hasPrefix(".") {
         return try evaluateJQPath(trimmed, input: input)
     }
@@ -3048,6 +3083,8 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
             let content = String(filter[filter.index(after: index)..<closing])
             if content.isEmpty {
                 currentValues = currentValues.flatMap(iterateJQValues)
+            } else if content.contains(":") {
+                currentValues = currentValues.map { jqSlice($0, spec: content) }
             } else if let number = Int(content) {
                 currentValues = currentValues.map { jqArrayIndex($0, number) ?? NSNull() }
             } else {
@@ -3098,15 +3135,168 @@ private func jqArrayIndex(_ value: Any, _ index: Int) -> Any? {
     return array[resolved]
 }
 
+private func jqSlice(_ value: Any, spec: String) -> Any {
+    let parts = spec.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 2 else { return NSNull() }
+    let start = parts[0].isEmpty ? nil : Int(parts[0])
+    let end = parts[1].isEmpty ? nil : Int(parts[1])
+
+    if let array = value as? [Any] {
+        let lower = resolvedJQIndex(start, count: array.count, defaultValue: 0)
+        let upper = resolvedJQIndex(end, count: array.count, defaultValue: array.count)
+        guard lower <= upper else { return [] }
+        return Array(array[lower..<upper])
+    }
+
+    if let string = value as? String {
+        let chars = Array(string)
+        let lower = resolvedJQIndex(start, count: chars.count, defaultValue: 0)
+        let upper = resolvedJQIndex(end, count: chars.count, defaultValue: chars.count)
+        guard lower <= upper else { return "" }
+        return String(chars[lower..<upper])
+    }
+
+    return NSNull()
+}
+
+private func resolvedJQIndex(_ value: Int?, count: Int, defaultValue: Int) -> Int {
+    guard let value else { return defaultValue }
+    let resolved = value >= 0 ? value : count + value
+    return max(0, min(count, resolved))
+}
+
+private func jqHas(_ value: Any, argument: String) -> Bool {
+    if let key = parseJQLiteral(argument) as? String {
+        if let object = value as? [String: Any] {
+            return object[key] != nil
+        }
+        if let object = value as? NSDictionary {
+            return object.object(forKey: key) != nil
+        }
+    }
+    if let array = value as? [Any], let index = Int(argument) {
+        return index >= 0 && index < array.count
+    }
+    return false
+}
+
+private func jqTruthy(_ value: Any) -> Bool {
+    if value is NSNull { return false }
+    if let bool = value as? Bool { return bool }
+    return true
+}
+
+private func parseJQBinaryOperator(_ text: String) -> (left: String, op: String, right: String)? {
+    for op in ["==", "!=", ">=", "<=", ">", "<", "*", "/", "+", "-"] {
+        if let split = splitTopLevelJQOperator(text, op: op) {
+            return split
+        }
+    }
+    return nil
+}
+
+private func splitTopLevelJQOperator(_ text: String, op: String) -> (left: String, op: String, right: String)? {
+    var depthParen = 0
+    var depthBracket = 0
+    var depthBrace = 0
+    var inString = false
+    var escaped = false
+    let chars = Array(text)
+    var index = 0
+    while index < chars.count {
+        let ch = chars[index]
+        if escaped {
+            escaped = false
+            index += 1
+            continue
+        }
+        if ch == "\\" {
+            escaped = true
+            index += 1
+            continue
+        }
+        if ch == "\"" {
+            inString.toggle()
+            index += 1
+            continue
+        }
+        if !inString {
+            switch ch {
+            case "(":
+                depthParen += 1
+            case ")":
+                depthParen -= 1
+            case "[":
+                depthBracket += 1
+            case "]":
+                depthBracket -= 1
+            case "{":
+                depthBrace += 1
+            case "}":
+                depthBrace -= 1
+            default:
+                break
+            }
+            let currentIndex = text.index(text.startIndex, offsetBy: index)
+            if depthParen == 0, depthBracket == 0, depthBrace == 0,
+               text[currentIndex...].hasPrefix(op) {
+                let left = String(text[..<currentIndex]).trimmingCharacters(in: .whitespaces)
+                let rightStart = text.index(currentIndex, offsetBy: op.count)
+                let right = String(text[rightStart...]).trimmingCharacters(in: .whitespaces)
+                guard !left.isEmpty, !right.isEmpty else { return nil }
+                return (left, op, right)
+            }
+        }
+        index += 1
+    }
+    return nil
+}
+
+private func evaluateJQBinary(lhs: Any, rhs: Any, op: String) throws -> Any {
+    switch op {
+    case "*":
+        return jqDouble(lhs) * jqDouble(rhs)
+    case "+":
+        return jqDouble(lhs) + jqDouble(rhs)
+    case "-":
+        return jqDouble(lhs) - jqDouble(rhs)
+    case "/":
+        return jqDouble(lhs) / jqDouble(rhs)
+    case ">":
+        return jqDouble(lhs) > jqDouble(rhs)
+    case "<":
+        return jqDouble(lhs) < jqDouble(rhs)
+    case ">=":
+        return jqDouble(lhs) >= jqDouble(rhs)
+    case "<=":
+        return jqDouble(lhs) <= jqDouble(rhs)
+    case "==":
+        return String(describing: lhs) == String(describing: rhs)
+    case "!=":
+        return String(describing: lhs) != String(describing: rhs)
+    default:
+        throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported operator: \(op)"])
+    }
+}
+
+private func jqDouble(_ value: Any) -> Double {
+    if let number = value as? NSNumber { return number.doubleValue }
+    if let int = value as? Int { return Double(int) }
+    if let double = value as? Double { return double }
+    return 0
+}
+
 private func parseJQLiteral(_ text: String) -> Any? {
     if text == "null" { return NSNull() }
     if text == "true" { return true }
     if text == "false" { return false }
     if let int = Int(text) { return int }
     if let double = Double(text) { return double }
-    if text.hasPrefix("\""), text.hasSuffix("\""), let data = text.data(using: .utf8),
-       let value = try? JSONSerialization.jsonObject(with: data) as? String {
-        return value
+    if text.hasPrefix("\""), text.hasSuffix("\"") {
+        return String(text.dropFirst().dropLast())
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\t", with: "\t")
     }
     return nil
 }
