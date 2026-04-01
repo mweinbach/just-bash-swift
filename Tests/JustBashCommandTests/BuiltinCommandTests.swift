@@ -204,4 +204,44 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertTrue(ls.stdout.contains("data.txt\n"))
         XCTAssertTrue(ls.stdout.contains("data.txt.gz\n"))
     }
+
+    func testSQLite3BasicAndJsonModes() async {
+        let bash = Bash()
+
+        let basic = await bash.exec(#"sqlite3 :memory: "CREATE TABLE t(x INT, y TEXT); INSERT INTO t VALUES(1,'a'),(2,'b'); SELECT * FROM t""#)
+        XCTAssertEqual(basic.stdout, "1|a\n2|b\n")
+
+        let json = await bash.exec(#"sqlite3 -json :memory: "CREATE TABLE t(x, y); INSERT INTO t VALUES(NULL, 42); SELECT * FROM t""#)
+        XCTAssertEqual(json.stdout, #"[{"x":null,"y":42}]"# + "\n")
+    }
+
+    func testSQLite3StdinAndFilePersistence() async {
+        let bash = Bash()
+
+        let stdinRun = await bash.exec(#"echo "CREATE TABLE t(x); INSERT INTO t VALUES(42); SELECT * FROM t" | sqlite3 :memory:"#)
+        XCTAssertEqual(stdinRun.stdout, "42\n")
+
+        _ = await bash.exec(#"sqlite3 /tmp/test.db "CREATE TABLE users(id INT, name TEXT); INSERT INTO users VALUES(1,'alice')""#)
+        let persisted = await bash.exec(#"sqlite3 /tmp/test.db "SELECT * FROM users""#)
+        XCTAssertEqual(persisted.stdout, "1|alice\n")
+    }
+
+    func testSQLite3HelpAndErrors() async {
+        let bash = Bash()
+
+        let help = await bash.exec("sqlite3 --help")
+        XCTAssertTrue(help.stdout.contains("sqlite3 DATABASE [SQL]"))
+
+        let missing = await bash.exec("sqlite3")
+        XCTAssertEqual(missing.exitCode, 1)
+        XCTAssertEqual(missing.stderr, "sqlite3: missing database argument\n")
+
+        let unknown = await bash.exec(#"sqlite3 -unknown :memory: "SELECT 1""#)
+        XCTAssertEqual(unknown.exitCode, 1)
+        XCTAssertEqual(unknown.stderr, "sqlite3: Error: unknown option: -unknown\nUse -help for a list of options.\n")
+
+        let syntax = await bash.exec(#"sqlite3 :memory: "SELEC * FROM nope""#)
+        XCTAssertEqual(syntax.exitCode, 0)
+        XCTAssertTrue(syntax.stdout.contains("Error:"))
+    }
 }
