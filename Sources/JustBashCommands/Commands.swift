@@ -100,7 +100,7 @@ public final class CommandRegistry: @unchecked Sendable {
             grep(), egrep(), fgrep(), rg(), sed(), awk(), sort(), uniq(), tr(), cut(), paste(), join(),
             wc(), head(), tail(), tac(), rev(), nl(), fold(), expand(), unexpand(), column(), od(),
             // Data
-            seq(), yes(), base64(), expr(), md5sum(), sha1sum(), sha256sum(), gzip(), gunzip(), zcat(), tar(), sqlite3(), jq(),
+            seq(), yes(), base64(), expr(), md5sum(), sha1sum(), sha256sum(), gzip(), gunzip(), zcat(), tar(), sqlite3(), jq(), yq(),
             // Misc
             xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(), whoami(), clear(), help(), history(), bash(), sh(), time(), timeout(), curl(), htmlToMarkdown(),
         ]
@@ -1978,6 +1978,89 @@ private func jq() -> AnyBashCommand {
     }
 }
 
+private func yq() -> AnyBashCommand {
+    AnyBashCommand(name: "yq") { args, ctx in
+        var rawOutput = false
+        var compact = false
+        var outputJSON = false
+        var parseJSON = false
+        var nullInput = false
+        var filter: String?
+        var files: [String] = []
+        var index = 0
+
+        while index < args.count {
+            let arg = args[index]
+            switch arg {
+            case "--help":
+                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -n        null input\n")
+            case "-c":
+                compact = true
+            case "-r":
+                rawOutput = true
+            case "-n":
+                nullInput = true
+            case "-o":
+                index += 1
+                if index < args.count, args[index] == "json" {
+                    outputJSON = true
+                }
+            case "-p":
+                index += 1
+                if index < args.count, args[index] == "json" {
+                    parseJSON = true
+                }
+            default:
+                if !arg.hasPrefix("-"), filter == nil {
+                    filter = arg
+                } else if !arg.hasPrefix("-") || arg == "-" {
+                    files.append(arg)
+                }
+            }
+            index += 1
+        }
+
+        let program = filter ?? "."
+        let sourceText: String
+        do {
+            if nullInput {
+                sourceText = ""
+            } else if files.isEmpty {
+                sourceText = ctx.stdin
+            } else {
+                sourceText = try files.map { file in
+                    if file == "-" { return ctx.stdin }
+                    return try ctx.fileSystem.readFile(file, relativeTo: ctx.cwd)
+                }.joined(separator: "\n")
+            }
+        } catch {
+            return ExecResult.failure("yq: \(error.localizedDescription)")
+        }
+
+        do {
+            let inputValue: Any
+            if nullInput {
+                inputValue = NSNull()
+            } else if parseJSON {
+                inputValue = try parseJQInputValues(sourceText).first ?? NSNull()
+            } else {
+                inputValue = try parseSimpleYAML(sourceText)
+            }
+
+            let outputs = try evaluateJQFilter(program, input: inputValue)
+            let rendered: String
+            if outputJSON {
+                rendered = outputs.map { renderJQValue($0, compact: compact, raw: rawOutput) }.joined(separator: "\n")
+            } else {
+                rendered = outputs.map { renderYAMLValue($0) }.joined(separator: "\n")
+            }
+            return ExecResult.success(rendered + (rendered.isEmpty ? "" : "\n"))
+        } catch {
+            return ExecResult.failure("yq: \(error.localizedDescription)")
+        }
+    }
+}
+
 // MARK: - Misc
 
 private func xargs() -> AnyBashCommand {
@@ -3627,6 +3710,157 @@ private func renderJQValue(_ value: Any, compact: Bool, raw: Bool) -> String {
         let options: JSONSerialization.WritingOptions = compact ? [] : [.prettyPrinted]
         let data = try? JSONSerialization.data(withJSONObject: value, options: options)
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+    }
+    return String(describing: value)
+}
+
+private struct YAMLLine {
+    let indent: Int
+    let text: String
+}
+
+private func parseSimpleYAML(_ text: String) throws -> Any {
+    let lines = text
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init)
+        .compactMap { raw -> YAMLLine? in
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), trimmed != "---" else { return nil }
+            let indent = raw.prefix { $0 == " " }.count
+            return YAMLLine(indent: indent, text: trimmed)
+        }
+
+    if lines.isEmpty { return NSNull() }
+    var index = 0
+    return try parseYAMLBlock(lines, index: &index, indent: lines[0].indent)
+}
+
+private func parseYAMLBlock(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> Any {
+    guard index < lines.count else { return NSNull() }
+    if lines[index].text.hasPrefix("- ") {
+        return try parseYAMLArray(lines, index: &index, indent: indent)
+    }
+    return try parseYAMLObject(lines, index: &index, indent: indent)
+}
+
+private func parseYAMLObject(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> [String: Any] {
+    var result: [String: Any] = [:]
+    while index < lines.count {
+        let line = lines[index]
+        if line.indent < indent || line.text.hasPrefix("- ") {
+            break
+        }
+        guard line.indent == indent, let colon = line.text.firstIndex(of: ":") else {
+            break
+        }
+        let key = String(line.text[..<colon]).trimmingCharacters(in: .whitespaces)
+        let remainder = String(line.text[line.text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        index += 1
+        if remainder.isEmpty {
+            if index < lines.count, lines[index].indent > indent {
+                result[key] = try parseYAMLBlock(lines, index: &index, indent: lines[index].indent)
+            } else {
+                result[key] = NSNull()
+            }
+        } else {
+            result[key] = parseYAMLScalar(remainder)
+        }
+    }
+    return result
+}
+
+private func parseYAMLArray(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> [Any] {
+    var result: [Any] = []
+    while index < lines.count {
+        let line = lines[index]
+        guard line.indent == indent, line.text.hasPrefix("- ") else { break }
+        let remainder = String(line.text.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        index += 1
+        if remainder.isEmpty {
+            if index < lines.count, lines[index].indent > indent {
+                result.append(try parseYAMLBlock(lines, index: &index, indent: lines[index].indent))
+            } else {
+                result.append(NSNull())
+            }
+            continue
+        }
+        if let colon = remainder.firstIndex(of: ":"), !remainder.hasPrefix("\""), !remainder.hasPrefix("'") {
+            let key = String(remainder[..<colon]).trimmingCharacters(in: .whitespaces)
+            let valueText = String(remainder[remainder.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            var object: [String: Any] = [key: valueText.isEmpty ? NSNull() : parseYAMLScalar(valueText)]
+            while index < lines.count, lines[index].indent > indent {
+                let nested = lines[index]
+                guard let nestedColon = nested.text.firstIndex(of: ":") else { break }
+                let nestedKey = String(nested.text[..<nestedColon]).trimmingCharacters(in: .whitespaces)
+                let nestedValueText = String(nested.text[nested.text.index(after: nestedColon)...]).trimmingCharacters(in: .whitespaces)
+                index += 1
+                if nestedValueText.isEmpty, index < lines.count, lines[index].indent > nested.indent {
+                    object[nestedKey] = try parseYAMLBlock(lines, index: &index, indent: lines[index].indent)
+                } else {
+                    object[nestedKey] = nestedValueText.isEmpty ? NSNull() : parseYAMLScalar(nestedValueText)
+                }
+            }
+            result.append(object)
+        } else {
+            result.append(parseYAMLScalar(remainder))
+        }
+    }
+    return result
+}
+
+private func parseYAMLScalar(_ text: String) -> Any {
+    if text == "null" { return NSNull() }
+    if text == "true" { return true }
+    if text == "false" { return false }
+    if let int = Int(text) { return int }
+    if let double = Double(text) { return double }
+    if text.hasPrefix("\""), text.hasSuffix("\"") {
+        return String(text.dropFirst().dropLast())
+    }
+    if text.hasPrefix("'"), text.hasSuffix("'") {
+        return String(text.dropFirst().dropLast())
+    }
+    return text
+}
+
+private func renderYAMLValue(_ value: Any, indent: Int = 0) -> String {
+    let indentText = String(repeating: "  ", count: indent)
+    if value is NSNull { return "null" }
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+        if floor(number.doubleValue) == number.doubleValue {
+            return String(number.intValue)
+        }
+        return String(number.doubleValue)
+    }
+    if let array = value as? [Any] {
+        return array.map { item in
+            if item is [String: Any] || item is [Any] {
+                return "\(indentText)- \(renderYAMLValue(item, indent: indent + 1).replacingOccurrences(of: "\n", with: "\n" + indentText + "  "))"
+            }
+            return "\(indentText)- \(renderYAMLValue(item, indent: indent + 1))"
+        }.joined(separator: "\n")
+    }
+    if let object = value as? [String: Any] {
+        return object.keys.sorted().map { key in
+            let rendered = renderYAMLValue(object[key] as Any, indent: indent + 1)
+            if object[key] is [String: Any] || object[key] is [Any] {
+                return "\(indentText)\(key):\n\(rendered)"
+            }
+            return "\(indentText)\(key): \(rendered)"
+        }.joined(separator: "\n")
+    }
+    if let object = value as? OrderedJSONObject {
+        return object.entries.map { key, child in
+            let rendered = renderYAMLValue(child, indent: indent + 1)
+            if child is [String: Any] || child is [Any] || child is OrderedJSONObject {
+                return "\(indentText)\(key):\n\(rendered)"
+            }
+            return "\(indentText)\(key): \(rendered)"
+        }.joined(separator: "\n")
     }
     return String(describing: value)
 }

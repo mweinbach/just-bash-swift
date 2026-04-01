@@ -417,4 +417,70 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(object.stdout, #"{"value":3,"doubled":6}"# + "\n")
     }
 
+    func testYQYamlAccessAndIteration() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/data.yaml": """
+            config:
+              database:
+                host: localhost
+            items:
+              - name: foo
+                active: true
+              - name: bar
+                active: false
+            fruits:
+              - apple
+              - banana
+            """
+        ]))
+
+        let host = await bash.exec("yq '.config.database.host' /tmp/data.yaml")
+        XCTAssertEqual(host.stdout, "localhost\n")
+
+        let first = await bash.exec("yq '.items[0].name' /tmp/data.yaml")
+        XCTAssertEqual(first.stdout, "foo\n")
+
+        let fruits = await bash.exec("yq '.fruits[]' /tmp/data.yaml")
+        XCTAssertEqual(fruits.stdout, "apple\nbanana\n")
+
+        let active = await bash.exec("yq '.items[] | select(.active) | .name' /tmp/data.yaml")
+        XCTAssertEqual(active.stdout, "foo\n")
+    }
+
+    func testYQJsonModesAndJsonInput() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/data.yaml": "name: test\nvalue: 42\nmessage: hello world\n",
+            "/tmp/data.json": #"{"name":"test","value":42}"#
+        ]))
+
+        let pretty = await bash.exec("yq -o json '.' /tmp/data.yaml")
+        XCTAssertTrue(pretty.stdout.contains("\"name\""))
+        XCTAssertTrue(pretty.stdout.contains("\"value\""))
+
+        let compact = await bash.exec("yq -c -o json '.' /tmp/data.yaml")
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(compact.stdout.utf8)) as? [String: AnyHashable],
+            ["name": "test", "value": 42, "message": "hello world"]
+        )
+
+        let raw = await bash.exec("yq -r -o json '.message' /tmp/data.yaml")
+        XCTAssertEqual(raw.stdout, "hello world\n")
+
+        let jsonInput = await bash.exec("yq -p json '.name' /tmp/data.json")
+        XCTAssertEqual(jsonInput.stdout, "test\n")
+    }
+
+    func testYQStdinAndNullInput() async {
+        let bash = Bash()
+
+        let stdin = await bash.exec("echo 'name: test' | yq '.name'")
+        XCTAssertEqual(stdin.stdout, "test\n")
+
+        let nullInput = await bash.exec("yq -n '{name: \"created\"}' -o json")
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(nullInput.stdout.utf8)) as? [String: AnyHashable],
+            ["name": "created"]
+        )
+    }
+
 }
