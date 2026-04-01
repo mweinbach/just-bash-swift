@@ -3058,6 +3058,18 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return iterateJQValues(input)
     }
 
+    if trimmed == "length" {
+        return [jqLength(input)]
+    }
+
+    if trimmed == "keys" {
+        return [jqKeys(input)]
+    }
+
+    if trimmed == "add" {
+        return [jqAdd(input)]
+    }
+
     if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
         return [try evaluateJQConditional(trimmed, input: input, bindings: bindings)]
     }
@@ -3424,6 +3436,32 @@ private func jqEqual(_ lhs: Any, _ rhs: Any) -> Bool {
         }
         return false
     }
+}
+
+private func jqLength(_ value: Any) -> Any {
+    if let array = value as? [Any] { return array.count }
+    if let string = value as? String { return string.count }
+    if let object = jqObjectDictionary(value) { return object.count }
+    return 0
+}
+
+private func jqKeys(_ value: Any) -> Any {
+    if let object = jqObjectDictionary(value) {
+        return object.keys.sorted()
+    }
+    return []
+}
+
+private func jqAdd(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        if array.allSatisfy({ ($0 as? NSNumber) != nil }) {
+            return array.compactMap { ($0 as? NSNumber)?.doubleValue }.reduce(0.0, +)
+        }
+        if array.allSatisfy({ $0 is String }) {
+            return array.compactMap { $0 as? String }.joined()
+        }
+    }
+    return NSNull()
 }
 
 private func jqObjectDictionary(_ value: Any) -> [String: Any]? {

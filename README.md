@@ -190,7 +190,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-106 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, jq and yq support, readonly/shopt behavior, filesystem persistence, session isolation, and curated parity cases.
+107 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, jq and yq support, readonly/shopt behavior, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

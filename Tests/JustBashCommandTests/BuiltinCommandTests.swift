@@ -417,6 +417,29 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(object.stdout, #"{"value":3,"doubled":6}"# + "\n")
     }
 
+    func testJQFunctionsLengthKeysAndAdd() async {
+        let bash = Bash()
+
+        let arrayLength = await bash.exec(#"echo '[1,2,3,4,5]' | jq 'length'"#)
+        XCTAssertEqual(arrayLength.stdout, "5\n")
+
+        let stringLength = await bash.exec(#"echo '"hello"' | jq 'length'"#)
+        XCTAssertEqual(stringLength.stdout, "5\n")
+
+        let objectLength = await bash.exec(#"echo '{"a":1,"b":2}' | jq 'length'"#)
+        XCTAssertEqual(objectLength.stdout, "2\n")
+
+        let keys = await bash.exec(#"echo '{"b":1,"a":2}' | jq 'keys'"#)
+        XCTAssertTrue(keys.stdout.contains("\"a\""))
+        XCTAssertTrue(keys.stdout.contains("\"b\""))
+
+        let addNumbers = await bash.exec(#"echo '[1,2,3,4]' | jq 'add'"#)
+        XCTAssertEqual(addNumbers.stdout, "10\n")
+
+        let addStrings = await bash.exec(#"echo '["a","b","c"]' | jq 'add'"#)
+        XCTAssertEqual(addStrings.stdout, "\"abc\"\n")
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
