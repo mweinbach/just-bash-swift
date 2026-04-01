@@ -19,6 +19,16 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "world\n/home/user\n")
     }
 
+    func testHashAndExecBuiltins() async {
+        let bash = Bash()
+        let hash = await bash.exec("hash echo grep")
+        XCTAssertTrue(hash.stdout.contains("echo=/bin/echo"))
+        XCTAssertTrue(hash.stdout.contains("grep=/bin/grep"))
+
+        let execResult = await bash.exec("exec echo through-exec")
+        XCTAssertEqual(execResult.stdout, "through-exec\n")
+    }
+
     func testPipesAndConditionals() async {
         let bash = Bash()
         let result = await bash.exec("printf 'alpha\\nbeta\\n' | grep beta && echo done")
@@ -141,6 +151,16 @@ final class BashTests: XCTestCase {
         show
         """)
         XCTAssertEqual(result.stdout, "z\n")
+    }
+
+    func testBuiltinBypassesFunction() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        echo() { printf 'function\\n'; }
+        builtin echo real
+        echo fake
+        """)
+        XCTAssertEqual(result.stdout, "real\nfunction\n")
     }
 
     func testAliasExpansion() async {
@@ -354,6 +374,21 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "hello\n")
     }
 
+    func testMapfileAndReadarray() async {
+        let bash = Bash()
+        let mapfile = await bash.exec("""
+        printf 'a\\nb\\n' | mapfile -t arr
+        echo ${arr[*]}
+        """)
+        XCTAssertEqual(mapfile.stdout, "a b\n")
+
+        let readarray = await bash.exec("""
+        printf 'x\\ny\\n' | readarray -t items
+        echo ${#items[@]}
+        """)
+        XCTAssertEqual(readarray.stdout, "2\n")
+    }
+
     func testMultiLineScript() async {
         let bash = Bash()
         let result = await bash.exec("""
@@ -384,6 +419,20 @@ final class BashTests: XCTestCase {
         { echo a; echo b; } | wc -l
         """)
         XCTAssertEqual(result.stdout, "2\n")
+    }
+
+    func testDirectoryStackBuiltins() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        mkdir -p /tmp/one /tmp/two
+        pushd /tmp/one
+        pushd /tmp/two
+        dirs
+        popd
+        pwd
+        """)
+        XCTAssertTrue(result.stdout.contains("/tmp/two /tmp/one /home/user\n"))
+        XCTAssertTrue(result.stdout.hasSuffix("/tmp/one\n"))
     }
 
     func testBraceExpansionCommaAndPreamble() async {

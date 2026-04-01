@@ -355,6 +355,7 @@ public struct ShellSession: Sendable {
     public var cwd: String
     public var environment: [String: String]
     public var arrayEnvironment: [String: [String]] = [:]
+    public var directoryStack: [String] = []
     public var commandCount: Int = 0
     public var lastExitCode: Int = 0
     public var positionalParams: [String] = []

@@ -237,10 +237,10 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         // Execute
         let result: ExecResult
-        if let builtin = shellBuiltin(commandName) {
-            result = try await builtin(arguments, &session, environment, effectiveStdin)
-        } else if let funcBody = session.functions[commandName] {
+        if let funcBody = session.functions[commandName] {
             result = try await executeFunction(funcBody, arguments: arguments, session: &session, stdin: effectiveStdin)
+        } else if let builtin = shellBuiltin(commandName) {
+            result = try await builtin(arguments, &session, environment, effectiveStdin)
         } else if let command = registry.command(named: commandName) {
             let capturedSession = session
             let subshellExec: SubshellExecutor = { [self] script in
@@ -1429,6 +1429,13 @@ public final class ShellInterpreter: @unchecked Sendable {
         case "command": return builtinCommand
         case "let": return builtinLet
         case "getopts": return builtinGetopts
+        case "mapfile", "readarray": return builtinMapfile
+        case "pushd": return builtinPushd
+        case "popd": return builtinPopd
+        case "dirs": return builtinDirs
+        case "builtin": return builtinBuiltin
+        case "hash": return builtinHash
+        case "exec": return builtinExec
         default: return nil
         }
     }
@@ -2075,5 +2082,97 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
 
         return ExecResult.success()
+    }
+
+    private func builtinMapfile(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        var stripTerminators = false
+        var variableName = "MAPFILE"
+        var index = 0
+        while index < args.count {
+            switch args[index] {
+            case "-t":
+                stripTerminators = true
+                index += 1
+            default:
+                variableName = args[index]
+                index += 1
+            }
+        }
+
+        var lines = stdin.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if stripTerminators {
+            if lines.last == "" && stdin.hasSuffix("\n") {
+                lines.removeLast()
+            }
+        } else if !stdin.isEmpty {
+            lines = lines.map { $0 + "\n" }
+            if stdin.hasSuffix("\n"), !lines.isEmpty {
+                _ = lines.removeLast()
+            }
+        }
+        session.setArray(variableName, lines)
+        return ExecResult.success()
+    }
+
+    private func builtinPushd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        guard let targetArg = args.first else {
+            return ExecResult.failure("pushd: no other directory")
+        }
+        let target = VirtualPath.normalize(targetArg, relativeTo: session.cwd)
+        guard fileSystem.isDirectory(target) else {
+            return ExecResult.failure("pushd: no such directory: \(targetArg)")
+        }
+        session.directoryStack.insert(session.cwd, at: 0)
+        session.cwd = target
+        session.setVariable("PWD", target)
+        return ExecResult.success(formatDirectoryStack(session) + "\n")
+    }
+
+    private func builtinPopd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        guard !session.directoryStack.isEmpty else {
+            return ExecResult.failure("popd: directory stack empty")
+        }
+        let target = session.directoryStack.removeFirst()
+        session.cwd = target
+        session.setVariable("PWD", target)
+        return ExecResult.success(formatDirectoryStack(session) + "\n")
+    }
+
+    private func builtinDirs(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        if args.contains("-p") {
+            return ExecResult.success(([session.cwd] + session.directoryStack).joined(separator: "\n") + "\n")
+        }
+        return ExecResult.success(formatDirectoryStack(session) + "\n")
+    }
+
+    private func builtinBuiltin(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        guard let builtinName = args.first else { return ExecResult.success() }
+        guard let builtin = shellBuiltin(builtinName) else {
+            return ExecResult.failure("builtin: \(builtinName): not a shell builtin")
+        }
+        return try await builtin(Array(args.dropFirst()), &session, env, stdin)
+    }
+
+    private func builtinHash(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        if args.contains("-r") {
+            return ExecResult.success()
+        }
+        if args.isEmpty {
+            return ExecResult.success()
+        }
+        let lines = args.filter { shellBuiltin($0) != nil || registry.contains($0) || session.functions[$0] != nil }
+            .map { "\($0)=/bin/\($0)" }
+        return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
+    }
+
+    private func builtinExec(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        guard !args.isEmpty else { return ExecResult.success() }
+        let script = args.joined(separator: " ")
+        let parsed = try ShellParser(limits: limits).parse(script)
+        return try await executeScript(parsed, session: &session, stdin: stdin)
+    }
+
+    private func formatDirectoryStack(_ session: ShellSession) -> String {
+        ([session.cwd] + session.directoryStack).joined(separator: " ")
     }
 }

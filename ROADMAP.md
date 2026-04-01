@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 78 passing tests
+- Current verification baseline: `swift test` with 84 passing tests
 
 ## Recently Completed
 
@@ -36,6 +36,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - brace expansion now supports comma form, numeric and alpha sequences, step values, nesting, and preamble/postscript composition for literal word segments
 - the gzip family now exists in the Swift port: `gzip`, `gunzip`, and `zcat`
 - the indexed-array subset now works in the Swift port: `arr=(...)`, `arr[n]=...`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `unset arr[n]`, `local arr=(...)`, and `declare -a arr=(...)`
+- a larger shell-builtin parity block now exists in the Swift port: `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, and sandbox-friendly `exec`
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -56,6 +57,7 @@ This is the only active milestone.
 
 - decide whether alias expansion needs to grow beyond basic command-position replacement semantics
 - tighten `nounset` / `xtrace` edge-case parity against bash-specific corners
+- deepen shell builtin parity beyond the new baseline (`readonly`, `shopt`, `exec` edge cases, `pushd`/`popd` semantics)
 - expand parity fixtures around the newly completed runtime behavior so regressions do not slip back in
 
 ### 3. Keep The Docs Honest

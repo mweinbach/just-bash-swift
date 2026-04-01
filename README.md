@@ -99,7 +99,7 @@ Everything in this section is intended to describe implemented behavior in the c
 
 ### Commands
 
-**Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`
+**Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`, `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, `exec`
 
 **External commands:** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
 
@@ -190,7 +190,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-78 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed-array support, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, filesystem persistence, session isolation, and curated parity cases.
+84 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed-array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 
