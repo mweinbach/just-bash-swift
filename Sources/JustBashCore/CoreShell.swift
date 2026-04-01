@@ -355,6 +355,7 @@ public struct ShellSession: Sendable {
     public var cwd: String
     public var environment: [String: String]
     public var arrayEnvironment: [String: [String]] = [:]
+    public var associativeArrayEnvironment: [String: [String: String]] = [:]
     public var readonlyVariables: Set<String> = []
     public var directoryStack: [String] = []
     public var commandCount: Int = 0
@@ -363,6 +364,7 @@ public struct ShellSession: Sendable {
     public var functions: [String: Command] = [:]
     public var localScopes: [[String: String?]] = []
     public var localArrayScopes: [[String: [String]?]] = []
+    public var localAssociativeArrayScopes: [[String: [String: String]?]] = []
     public var shellName: String = "bash"
     public var callDepth: Int = 0
     public var aliasExpansionDepth: Int = 0
@@ -383,6 +385,7 @@ public struct ShellSession: Sendable {
             environment[name] = value
         }
         arrayEnvironment.removeValue(forKey: name)
+        associativeArrayEnvironment.removeValue(forKey: name)
     }
 
     /// Get a variable value, checking local scopes first
@@ -397,8 +400,16 @@ public struct ShellSession: Sendable {
                 return entry?.first
             }
         }
+        for scope in localAssociativeArrayScopes.reversed() {
+            if let entry = scope[name] {
+                return entry?.values.sorted().first
+            }
+        }
         if let values = arrayEnvironment[name] {
             return values.first
+        }
+        if let values = associativeArrayEnvironment[name] {
+            return values.values.sorted().first
         }
         return environment[name]
     }
@@ -410,12 +421,14 @@ public struct ShellSession: Sendable {
             arrayEnvironment[name] = values
         }
         environment.removeValue(forKey: name)
+        associativeArrayEnvironment.removeValue(forKey: name)
     }
 
     public mutating func declareLocalArray(_ name: String, values: [String]? = nil) {
         guard !localArrayScopes.isEmpty else {
             arrayEnvironment[name] = values ?? []
             environment.removeValue(forKey: name)
+            associativeArrayEnvironment.removeValue(forKey: name)
             return
         }
         localArrayScopes[localArrayScopes.count - 1][name] = values ?? []
@@ -429,6 +442,43 @@ public struct ShellSession: Sendable {
             }
         }
         return arrayEnvironment[name]
+    }
+
+    public mutating func declareAssociativeArray(_ name: String, values: [String: String]? = nil) {
+        guard !localAssociativeArrayScopes.isEmpty else {
+            associativeArrayEnvironment[name] = values ?? [:]
+            environment.removeValue(forKey: name)
+            arrayEnvironment.removeValue(forKey: name)
+            return
+        }
+        localAssociativeArrayScopes[localAssociativeArrayScopes.count - 1][name] = values ?? [:]
+        localScopes[localScopes.count - 1].removeValue(forKey: name)
+        localArrayScopes[localArrayScopes.count - 1].removeValue(forKey: name)
+    }
+
+    public func getAssociativeArray(_ name: String) -> [String: String]? {
+        for scope in localAssociativeArrayScopes.reversed() {
+            if let entry = scope[name] {
+                return entry
+            }
+        }
+        return associativeArrayEnvironment[name]
+    }
+
+    public mutating func setAssociativeElement(_ name: String, key: String, value: String) {
+        var values = getAssociativeArray(name) ?? [:]
+        values[key] = value
+        declareAssociativeArray(name, values: values)
+    }
+
+    public func getAssociativeElement(_ name: String, key: String) -> String? {
+        getAssociativeArray(name)?[key]
+    }
+
+    public mutating func unsetAssociativeElement(_ name: String, key: String) {
+        guard var values = getAssociativeArray(name) else { return }
+        values.removeValue(forKey: key)
+        declareAssociativeArray(name, values: values)
     }
 
     public mutating func setArrayElement(_ name: String, index: Int, value: String) {
@@ -475,20 +525,29 @@ public struct ShellSession: Sendable {
                 return
             }
         }
+        for i in localAssociativeArrayScopes.indices.reversed() {
+            if localAssociativeArrayScopes[i].keys.contains(name) {
+                localAssociativeArrayScopes[i].removeValue(forKey: name)
+                return
+            }
+        }
         environment.removeValue(forKey: name)
         arrayEnvironment.removeValue(forKey: name)
+        associativeArrayEnvironment.removeValue(forKey: name)
     }
 
     /// Push a new local scope (for function calls)
     public mutating func pushScope() {
         localScopes.append([:])
         localArrayScopes.append([:])
+        localAssociativeArrayScopes.append([:])
     }
 
     /// Pop the current local scope
     @discardableResult
     public mutating func popScope() -> [String: String?] {
         _ = localArrayScopes.isEmpty ? [:] : localArrayScopes.removeLast()
+        _ = localAssociativeArrayScopes.isEmpty ? [:] : localAssociativeArrayScopes.removeLast()
         return localScopes.isEmpty ? [:] : localScopes.removeLast()
     }
 }

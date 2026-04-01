@@ -168,13 +168,18 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
 
             let value = try await expandWord(assignment.value, session: &session, stdin: stdin)
-            if let (arrayName, index) = parseArrayElementAssignmentName(assignment.name) {
+            if let (arrayName, key) = parseArrayElementAssignmentTarget(assignment.name) {
                 if cmd.words.isEmpty {
                     if session.readonlyVariables.contains(arrayName) {
                         return ExecResult.failure("bash: \(arrayName): readonly variable")
                     }
-                    session.setArrayElement(arrayName, index: index, value: value)
-                    environment[arrayName] = session.getArray(arrayName)?.first
+                    if let index = Int(key) {
+                        session.setArrayElement(arrayName, index: index, value: value)
+                        environment[arrayName] = session.getArray(arrayName)?.first
+                    } else {
+                        session.setAssociativeElement(arrayName, key: key, value: value)
+                        environment[arrayName] = session.getAssociativeArray(arrayName)?.values.sorted().first
+                    }
                 } else {
                     environment[arrayName] = value
                 }
@@ -1037,6 +1042,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             if let values = session.getArray(name) {
                 return String(values.count)
             }
+            if let values = session.getAssociativeArray(name) {
+                return String(values.count)
+            }
             guard let val = session.getVariable(name) else {
                 if session.options.nounset {
                     throw ShellRuntimeError.unboundVariable(name)
@@ -1047,19 +1055,25 @@ public final class ShellInterpreter: @unchecked Sendable {
         case .withOp(let name, let op):
             return try expandVarOp(name: name, op: op, session: &session)
         case .arrayElement(let name, let indexWord):
-            let indexText = try await expandWord(indexWord, session: &session, stdin: stdin)
-            let index = Int(indexText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-            if let value = session.getArrayElement(name, index: index) {
+            let key = try await expandWord(indexWord, session: &session, stdin: stdin).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let index = Int(key), let value = session.getArrayElement(name, index: index) {
+                return value
+            }
+            if let value = session.getAssociativeElement(name, key: key) {
                 return value
             }
             if session.options.nounset {
-                throw ShellRuntimeError.unboundVariable("\(name)[\(index)]")
+                throw ShellRuntimeError.unboundVariable("\(name)[\(key)]")
             }
             return ""
         case .arrayAll(let name, let allTypeAt):
             if let values = session.getArray(name) {
                 let separator = allTypeAt ? " " : (session.getVariable("IFS") ?? " \t\n")
                 return values.joined(separator: separator)
+            }
+            if let values = session.getAssociativeArray(name) {
+                let separator = allTypeAt ? " " : (session.getVariable("IFS") ?? " \t\n")
+                return values.keys.sorted().compactMap { values[$0] }.joined(separator: separator)
             }
             if session.options.nounset {
                 throw ShellRuntimeError.unboundVariable(name)
@@ -1635,11 +1649,15 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         for name in names {
-            if session.readonlyVariables.contains(name) || parseArrayElementAssignmentName(name).map({ session.readonlyVariables.contains($0.0) }) == true {
+            if session.readonlyVariables.contains(name) || parseArrayElementAssignmentTarget(name).map({ session.readonlyVariables.contains($0.0) }) == true {
                 return ExecResult.failure("bash: \(name.replacingOccurrences(of: "\\[.*\\]$", with: "", options: .regularExpression)): readonly variable")
             }
-            if let (arrayName, index) = parseArrayElementAssignmentName(name) {
-                session.unsetArrayElement(arrayName, index: index)
+            if let (arrayName, key) = parseArrayElementAssignmentTarget(name) {
+                if let index = Int(key) {
+                    session.unsetArrayElement(arrayName, index: index)
+                } else {
+                    session.unsetAssociativeElement(arrayName, key: key)
+                }
             } else {
                 session.unsetVariable(name)
             }
@@ -1673,11 +1691,13 @@ public final class ShellInterpreter: @unchecked Sendable {
         var isLocal = false
         var isExport = false
         var isArray = false
+        var isAssociativeArray = false
         var filtered: [String] = []
         for arg in args {
             if arg.hasPrefix("-") {
                 if arg.contains("x") { isExport = true }
                 if arg.contains("a") { isArray = true }
+                if arg.contains("A") { isAssociativeArray = true }
                 // -g means global (opposite of local)
                 if !arg.contains("g") { isLocal = true }
             } else {
@@ -1685,7 +1705,15 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         for arg in filtered {
-            if isArray, let (name, values) = parseInlineArrayArgument(arg) {
+            if isAssociativeArray {
+                if let name = arg.components(separatedBy: "=").first {
+                    if isLocal {
+                        session.declareAssociativeArray(name)
+                    } else {
+                        session.declareAssociativeArray(name)
+                    }
+                }
+            } else if isArray, let (name, values) = parseInlineArrayArgument(arg) {
                 if session.readonlyVariables.contains(name) {
                     return ExecResult.failure("bash: \(name): readonly variable")
                 }
@@ -2002,7 +2030,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         return result
     }
 
-    private func parseArrayElementAssignmentName(_ name: String) -> (String, Int)? {
+    private func parseArrayElementAssignmentTarget(_ name: String) -> (String, String)? {
         guard let bracket = name.firstIndex(of: "["),
               name.hasSuffix("]") else {
             return nil
@@ -2011,10 +2039,10 @@ public final class ShellInterpreter: @unchecked Sendable {
         let start = name.index(after: bracket)
         let end = name.index(before: name.endIndex)
         let indexText = String(name[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !base.isEmpty, let index = Int(indexText), index >= 0 else {
+        guard !base.isEmpty, !indexText.isEmpty else {
             return nil
         }
-        return (base, index)
+        return (base, indexText)
     }
 
     private func parseInlineArrayArgument(_ arg: String) -> (String, [String])? {

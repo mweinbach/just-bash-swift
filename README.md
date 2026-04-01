@@ -85,9 +85,9 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
 | **test / [** | Unary and binary operators |
 | **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
-| **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`), indexed array assignment and element assignment |
+| **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`), indexed and associative array assignment and element assignment |
 | **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
-| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}` |
+| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `${map[key]}` |
 | **Tilde expansion** | `~`, `~user` |
 | **Field splitting** | Unquoted expansion splits on `IFS` |
 | **Glob patterns** | `*`, `?`, `[abc]`, `[a-z]` via virtual filesystem |
@@ -190,7 +190,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-92 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed-array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, readonly/shopt behavior, filesystem persistence, session isolation, and curated parity cases.
+94 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, readonly/shopt behavior, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

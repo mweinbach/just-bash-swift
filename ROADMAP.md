@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 92 passing tests
+- Current verification baseline: `swift test` with 94 passing tests
 
 ## Recently Completed
 
@@ -40,6 +40,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - a native `sqlite3` command now exists in the Swift port for `:memory:`, stdin-driven SQL, file-backed databases, and `-json` output
 - a tar subset now exists in the Swift port: create/list/extract, `-f`, `-C`, `--strip-components`, and gzip-compressed `.tar.gz` archives
 - readonly variables and `shopt` alias toggling now exist in the Swift port
+- the first associative-array slice now exists in the Swift port: `declare -A`, keyed assignment, keyed expansion, length, and keyed unset
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -89,7 +90,7 @@ Tar follow-on still remains:
 
 ## Later: Data Model And Shell Completeness
 
-- associative arrays and richer array semantics remain the largest shell-core gap still open in the Swift runtime
+- richer associative-array semantics remain one of the largest shell-core gaps still open in the Swift runtime
 - sparse-array/bash edge cases
 - higher-fidelity quoted `${arr[@]}` behavior
 - highest-value missing special variables used by real scripts

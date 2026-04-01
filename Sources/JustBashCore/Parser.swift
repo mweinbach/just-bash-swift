@@ -1009,7 +1009,7 @@ private struct Tokenizer {
             guard !base.isEmpty else { return nil }
             guard base.first!.isLetter || base.first! == "_" else { return nil }
             guard base.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
-            guard Int(indexText.trimmingCharacters(in: .whitespacesAndNewlines)) != nil else { return nil }
+            guard !indexText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         } else {
             guard name.first!.isLetter || name.first! == "_" else { return nil }
             guard name.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }

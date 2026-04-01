@@ -367,6 +367,31 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "red\n3\n")
     }
 
+    func testAssociativeArrayAssignmentAndExpansion() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        declare -A info
+        info[name]=alice
+        info[role]=dev
+        echo ${info[name]}
+        echo ${#info[@]}
+        """)
+        XCTAssertEqual(result.stdout, "alice\n2\n")
+    }
+
+    func testAssociativeArrayUnset() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        declare -A info
+        info[name]=alice
+        info[role]=dev
+        unset info[name]
+        echo ${#info[@]}
+        echo ${info[role]}
+        """)
+        XCTAssertEqual(result.stdout, "1\ndev\n")
+    }
+
     // MARK: - Conditional Expressions
 
     func testConditionalExpression() async {
