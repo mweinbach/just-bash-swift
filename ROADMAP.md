@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 100 passing tests
+- Current verification baseline: `swift test` with 103 passing tests
 
 ## Recently Completed
 
@@ -42,7 +42,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - readonly variables and `shopt` alias toggling now exist in the Swift port
 - the first associative-array slice now exists in the Swift port: `declare -A`, keyed assignment, keyed expansion, length, and keyed unset
 - basic `curl` and `html-to-markdown` commands now exist in the Swift port with local-only verification coverage
-- a first native `jq` slice now exists in the Swift port: identity, key access, nested access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, `map`, `select`, `has`, `contains`, `any`, and `all`
+- a larger native `jq` slice now exists in the Swift port: identity, key access, nested access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, `map`, `select`, `has`, `contains`, `any`, `all`, simple conditionals, variable binding, and object construction
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -84,7 +84,7 @@ Rationale:
 - They also represent the point where parity work starts colliding with larger dependency and security decisions
 
 jq follow-on still remains:
-- functions, conditionals, variables, and broader operators
+- try/catch, broader functions, and broader operator coverage
 - broader parser/evaluator compatibility
 
 Tar follow-on still remains:

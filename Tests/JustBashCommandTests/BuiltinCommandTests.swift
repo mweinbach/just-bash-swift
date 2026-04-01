@@ -390,4 +390,31 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(all.stdout, "true\n")
     }
 
+    func testJQConditionals() async {
+        let bash = Bash()
+
+        let conditional = await bash.exec(#"echo '5' | jq 'if . > 10 then "big" elif . > 3 then "medium" else "small" end'"#)
+        XCTAssertEqual(conditional.stdout, "\"medium\"\n")
+    }
+
+    func testJQOptionalAccess() async {
+        let bash = Bash()
+
+        let missing = await bash.exec(#"echo 'null' | jq '.foo?'"#)
+        XCTAssertEqual(missing.stdout, "null\n")
+
+        let present = await bash.exec(#"echo '{"foo":42}' | jq '.foo?'"#)
+        XCTAssertEqual(present.stdout, "42\n")
+    }
+
+    func testJQVariablesAndObjectConstruction() async {
+        let bash = Bash()
+
+        let bound = await bash.exec(#"echo '5' | jq '. as $x | $x * $x'"#)
+        XCTAssertEqual(bound.stdout, "25\n")
+
+        let object = await bash.exec(#"echo '3' | jq -c '. as $n | {value: $n, doubled: ($n * 2)}'"#)
+        XCTAssertEqual(object.stdout, #"{"value":3,"doubled":6}"# + "\n")
+    }
+
 }

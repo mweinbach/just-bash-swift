@@ -2655,6 +2655,10 @@ private struct TarEntry {
     let isDirectory: Bool
 }
 
+private struct OrderedJSONObject {
+    let entries: [(String, Any)]
+}
+
 private func tarHelpText() -> String {
     """
     tar - manipulate tape archives
@@ -2937,21 +2941,28 @@ private func parseJQInputValues(_ input: String) throws -> [Any] {
     let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return [NSNull()] }
     let data = Data(trimmed.utf8)
-    let value = try JSONSerialization.jsonObject(with: data)
+    let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     return [value]
 }
 
-private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
+private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: Any] = [:]) throws -> [Any] {
     let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines)
 
+    if let binding = parseJQBinding(trimmed) {
+        let boundValue = try evaluateJQFilter(binding.source, input: input, bindings: bindings).first ?? input
+        var nextBindings = bindings
+        nextBindings[binding.name] = boundValue
+        return try evaluateJQFilter(binding.rest, input: input, bindings: nextBindings)
+    }
+
     if let commaParts = splitTopLevelJQ(trimmed, separator: ",") {
-        return try commaParts.flatMap { try evaluateJQFilter($0, input: input) }
+        return try commaParts.flatMap { try evaluateJQFilter($0, input: input, bindings: bindings) }
     }
 
     if let pipeParts = splitTopLevelJQ(trimmed, separator: "|") {
         var values: [Any] = [input]
         for part in pipeParts {
-            values = try values.flatMap { try evaluateJQFilter(part, input: $0) }
+            values = try values.flatMap { try evaluateJQFilter(part, input: $0, bindings: bindings) }
         }
         return values
     }
@@ -2965,51 +2976,55 @@ private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
     }
 
     if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
-        return [try evaluateJQConditional(trimmed, input: input)]
+        return [try evaluateJQConditional(trimmed, input: input, bindings: bindings)]
     }
 
     if trimmed.hasPrefix("any("), trimmed.hasSuffix(")") {
         let inner = String(trimmed.dropFirst(4).dropLast())
         guard let array = input as? [Any] else { return [false] }
-        return [try array.contains { try evaluateJQFilter(inner, input: $0).contains(where: jqTruthy) }]
+        return [try array.contains { try evaluateJQFilter(inner, input: $0, bindings: bindings).contains(where: jqTruthy) }]
     }
 
     if trimmed.hasPrefix("all("), trimmed.hasSuffix(")") {
         let inner = String(trimmed.dropFirst(4).dropLast())
         guard let array = input as? [Any] else { return [false] }
-        return [try array.allSatisfy { try evaluateJQFilter(inner, input: $0).contains(where: jqTruthy) }]
+        return [try array.allSatisfy { try evaluateJQFilter(inner, input: $0, bindings: bindings).contains(where: jqTruthy) }]
     }
 
     if trimmed.hasPrefix("contains("), trimmed.hasSuffix(")") {
         let inner = String(trimmed.dropFirst(9).dropLast())
-        let rhs = try evaluateJQFilter(inner, input: input).first ?? NSNull()
+        let rhs = try evaluateJQFilter(inner, input: input, bindings: bindings).first ?? NSNull()
         return [jqContains(input, rhs)]
     }
 
     if let op = parseJQBinaryOperator(trimmed) {
-        let lhsValues = try evaluateJQFilter(op.left, input: input)
-        let rhsValues = try evaluateJQFilter(op.right, input: input)
+        let lhsValues = try evaluateJQFilter(op.left, input: input, bindings: bindings)
+        let rhsValues = try evaluateJQFilter(op.right, input: input, bindings: bindings)
         let lhs = lhsValues.first ?? NSNull()
         let rhs = rhsValues.first ?? NSNull()
         return [try evaluateJQBinary(lhs: lhs, rhs: rhs, op: op.op)]
     }
 
+    if trimmed.hasPrefix("{"), trimmed.hasSuffix("}") {
+        return [try evaluateJQObject(trimmed, input: input, bindings: bindings)]
+    }
+
     if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
         let inner = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-        let collected = inner.isEmpty ? [] : try evaluateJQFilter(inner, input: input)
+        let collected = inner.isEmpty ? [] : try evaluateJQFilter(inner, input: input, bindings: bindings)
         return [collected]
     }
 
     if trimmed.hasPrefix("map("), trimmed.hasSuffix(")") {
         let inner = String(trimmed.dropFirst(4).dropLast())
         guard let array = input as? [Any] else { return [NSNull()] }
-        let mapped = try array.flatMap { try evaluateJQFilter(inner, input: $0) }
+        let mapped = try array.flatMap { try evaluateJQFilter(inner, input: $0, bindings: bindings) }
         return [mapped]
     }
 
     if trimmed.hasPrefix("select("), trimmed.hasSuffix(")") {
         let inner = String(trimmed.dropFirst(7).dropLast())
-        let predicateValues = try evaluateJQFilter(inner, input: input)
+        let predicateValues = try evaluateJQFilter(inner, input: input, bindings: bindings)
         if predicateValues.contains(where: jqTruthy) {
             return [input]
         }
@@ -3025,11 +3040,94 @@ private func evaluateJQFilter(_ filter: String, input: Any) throws -> [Any] {
         return try evaluateJQPath(trimmed, input: input)
     }
 
+    if trimmed.hasPrefix("$"), let bound = bindings[String(trimmed.dropFirst())] {
+        return [bound]
+    }
+
     if let literal = parseJQLiteral(trimmed) {
         return [literal]
     }
 
     throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported filter: \(trimmed)"])
+}
+
+private func parseJQBinding(_ text: String) -> (source: String, name: String, rest: String)? {
+    guard let range = text.range(of: " as $") else { return nil }
+    let source = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+    let after = text[range.upperBound...]
+    guard let pipeRange = after.range(of: " | ") else { return nil }
+    let name = String(after[..<pipeRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+    let rest = String(after[pipeRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+    guard !source.isEmpty, !name.isEmpty, !rest.isEmpty else { return nil }
+    return (source, name, rest)
+}
+
+private func evaluateJQObject(_ filter: String, input: Any, bindings: [String: Any]) throws -> OrderedJSONObject {
+    let inner = String(filter.dropFirst().dropLast())
+    let parts = splitTopLevelJQ(inner, separator: ",") ?? [inner]
+    var entries: [(String, Any)] = []
+    for part in parts {
+        guard let colonIndex = topLevelJQColonIndex(part) else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid object constructor"])
+        }
+        let key = String(part[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+        var valueExpr = String(part[part.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+        if valueExpr.hasPrefix("("), valueExpr.hasSuffix(")") {
+            valueExpr = String(valueExpr.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+        }
+        let normalizedKey = key.replacingOccurrences(of: "\"", with: "")
+        entries.append((normalizedKey, try evaluateJQFilter(valueExpr, input: input, bindings: bindings).first ?? NSNull()))
+    }
+    return OrderedJSONObject(entries: entries)
+}
+
+private func topLevelJQColonIndex(_ text: String) -> String.Index? {
+    var depthParen = 0
+    var depthBracket = 0
+    var depthBrace = 0
+    var inString = false
+    var escaped = false
+    var index = text.startIndex
+    while index < text.endIndex {
+        let ch = text[index]
+        if escaped {
+            escaped = false
+            index = text.index(after: index)
+            continue
+        }
+        if ch == "\\" {
+            escaped = true
+            index = text.index(after: index)
+            continue
+        }
+        if ch == "\"" {
+            inString.toggle()
+            index = text.index(after: index)
+            continue
+        }
+        if !inString {
+            switch ch {
+            case "(":
+                depthParen += 1
+            case ")":
+                depthParen -= 1
+            case "[":
+                depthBracket += 1
+            case "]":
+                depthBracket -= 1
+            case "{":
+                depthBrace += 1
+            case "}":
+                depthBrace -= 1
+            case ":" where depthParen == 0 && depthBracket == 0 && depthBrace == 0:
+                return index
+            default:
+                break
+            }
+        }
+        index = text.index(after: index)
+    }
+    return nil
 }
 
 private func splitTopLevelJQ(_ text: String, separator: Character) -> [String]? {
@@ -3216,7 +3314,7 @@ private func jqContains(_ lhs: Any, _ rhs: Any) -> Bool {
     if let lhsArray = lhs as? [Any], let rhsArray = rhs as? [Any] {
         return rhsArray.allSatisfy { rhsValue in lhsArray.contains(where: { jqEqual($0, rhsValue) }) }
     }
-    if let lhsObject = lhs as? [String: Any], let rhsObject = rhs as? [String: Any] {
+    if let lhsObject = jqObjectDictionary(lhs), let rhsObject = jqObjectDictionary(rhs) {
         return rhsObject.allSatisfy { key, rhsValue in
             guard let lhsValue = lhsObject[key] else { return false }
             return jqEqual(lhsValue, rhsValue)
@@ -3238,11 +3336,32 @@ private func jqEqual(_ lhs: Any, _ rhs: Any) -> Bool {
     case let (l as [String: Any], r as [String: Any]):
         return l.keys == r.keys && l.keys.allSatisfy { key in jqEqual(l[key] as Any, r[key] as Any) }
     default:
+        if let l = jqObjectDictionary(lhs), let r = jqObjectDictionary(rhs) {
+            return l.keys == r.keys && l.keys.allSatisfy { key in jqEqual(l[key] as Any, r[key] as Any) }
+        }
         return false
     }
 }
 
-private func evaluateJQConditional(_ filter: String, input: Any) throws -> Any {
+private func jqObjectDictionary(_ value: Any) -> [String: Any]? {
+    if let value = value as? OrderedJSONObject {
+        return Dictionary(uniqueKeysWithValues: value.entries)
+    }
+    if let value = value as? [String: Any] {
+        return value
+    }
+    if let dict = value as? NSDictionary {
+        var result: [String: Any] = [:]
+        for (key, value) in dict {
+            guard let key = key as? String else { return nil }
+            result[key] = value
+        }
+        return result
+    }
+    return nil
+}
+
+private func evaluateJQConditional(_ filter: String, input: Any, bindings: [String: Any]) throws -> Any {
     let patterns = [
         #"^if\s+(.+?)\s+then\s+(.+?)\s+elif\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+?)\s+end$"#,
         #"^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+?)\s+end$"#
@@ -3256,7 +3375,6 @@ private func evaluateJQConditional(_ filter: String, input: Any) throws -> Any {
             guard let range = Range(match.range(at: idx), in: filter) else { return nil }
             return String(filter[range]).trimmingCharacters(in: .whitespaces)
         }
-        print("JQ-COND-CAPTURES", captures)
 
         let branches: [(String, String)]
         let elseExpr: String
@@ -3271,12 +3389,12 @@ private func evaluateJQConditional(_ filter: String, input: Any) throws -> Any {
         }
 
         for (condition, valueExpr) in branches {
-            let conditionValue = try evaluateJQFilter(condition, input: input).first ?? NSNull()
+            let conditionValue = try evaluateJQFilter(condition, input: input, bindings: bindings).first ?? NSNull()
             if jqTruthy(conditionValue) {
-                return try evaluateJQFilter(valueExpr, input: input).first ?? NSNull()
+                return try evaluateJQFilter(valueExpr, input: input, bindings: bindings).first ?? NSNull()
             }
         }
-        return try evaluateJQFilter(elseExpr, input: input).first ?? NSNull()
+        return try evaluateJQFilter(elseExpr, input: input, bindings: bindings).first ?? NSNull()
     }
 
     throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid conditional"])
@@ -3480,6 +3598,18 @@ private func renderJQValue(_ value: Any, compact: Bool, raw: Bool) -> String {
         return string
     }
     if value is NSNull { return "null" }
+    if let object = value as? OrderedJSONObject {
+        if compact {
+            let rendered = object.entries.map { key, value in
+                "\"\(escapeJSONString(key))\":" + renderJQValue(value, compact: true, raw: false)
+            }.joined(separator: ",")
+            return "{\(rendered)}"
+        }
+        let rendered = object.entries.map { key, value in
+            "  \"\(escapeJSONString(key))\": " + renderJQValue(value, compact: false, raw: false)
+        }.joined(separator: ",\n")
+        return "{\n\(rendered)\n}"
+    }
     if let string = value as? String { return "\"\(escapeJSONString(string))\"" }
     if let number = value as? NSNumber {
         if CFGetTypeID(number) == CFBooleanGetTypeID() {
