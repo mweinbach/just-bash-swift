@@ -475,6 +475,80 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(max.stdout, "8\n")
     }
 
+    func testJQFunctionsByKeyAndEntries() async {
+        let bash = Bash()
+
+        let minBy = await bash.exec(#"echo '[{"n":3},{"n":1},{"n":2}]' | jq -c 'min_by(.n)'"#)
+        XCTAssertEqual(minBy.stdout, #"{"n":1}"# + "\n")
+
+        let maxBy = await bash.exec(#"echo '[{"n":3},{"n":1},{"n":2}]' | jq -c 'max_by(.n)'"#)
+        XCTAssertEqual(maxBy.stdout, #"{"n":3}"# + "\n")
+
+        let sortBy = await bash.exec(#"echo '[{"n":3},{"n":1},{"n":2}]' | jq -c 'sort_by(.n)'"#)
+        XCTAssertEqual(sortBy.stdout, #"[{"n":1},{"n":2},{"n":3}]"# + "\n")
+
+        let groupBy = await bash.exec(#"echo '[{"g":1,"v":"a"},{"g":2,"v":"b"},{"g":1,"v":"c"}]' | jq -c 'group_by(.g)'"#)
+        XCTAssertEqual(groupBy.stdout, #"[[{"g":1,"v":"a"},{"g":1,"v":"c"}],[{"g":2,"v":"b"}]]"# + "\n")
+
+        let uniqueBy = await bash.exec(#"echo '[{"n":1},{"n":2},{"n":1}]' | jq -c 'unique_by(.n)'"#)
+        XCTAssertEqual(uniqueBy.stdout, #"[{"n":1},{"n":2}]"# + "\n")
+
+        let toEntries = await bash.exec(#"echo '{"a":1,"b":2}' | jq -c 'to_entries'"#)
+        XCTAssertEqual(toEntries.stdout, #"[{"key":"a","value":1},{"key":"b","value":2}]"# + "\n")
+
+        let fromEntries = await bash.exec(#"echo '[{"key":"a","value":1}]' | jq -c 'from_entries'"#)
+        XCTAssertEqual(fromEntries.stdout, #"{"a":1}"# + "\n")
+
+        let withEntries = await bash.exec(#"echo '{"a":1,"b":2}' | jq -c 'with_entries({key: .key, value: (.value + 10)})'"#)
+        XCTAssertEqual(withEntries.stdout, #"{"a":11,"b":12}"# + "\n")
+    }
+
+    func testJQGeneratorsPathFunctionsAndMath() async {
+        let bash = Bash()
+
+        let flatten = await bash.exec(#"echo '[[1,2],[3,4]]' | jq 'flatten'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(flatten.stdout.utf8)) as? [Int],
+            [1, 2, 3, 4]
+        )
+
+        let flattenDepth = await bash.exec(#"echo '[[[1]],[[2]]]' | jq -c 'flatten(1)'"#)
+        XCTAssertEqual(flattenDepth.stdout, #"[[1],[2]]"# + "\n")
+
+        let transpose = await bash.exec(#"echo '[[1,2],[3,4]]' | jq -c 'transpose'"#)
+        XCTAssertEqual(transpose.stdout, #"[[1,3],[2,4]]"# + "\n")
+
+        let range = await bash.exec(#"jq -n '[range(5)]'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(range.stdout.utf8)) as? [Int],
+            [0, 1, 2, 3, 4]
+        )
+
+        let boundedRange = await bash.exec(#"jq -n '[limit(3; range(10))]'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(boundedRange.stdout.utf8)) as? [Int],
+            [0, 1, 2]
+        )
+
+        let getPath = await bash.exec(#"echo '{"a":{"b":42}}' | jq 'getpath(["a","b"])'"#)
+        XCTAssertEqual(getPath.stdout, "42\n")
+
+        let setPath = await bash.exec(#"echo '{"a":1}' | jq -c 'setpath(["b"]; 2)'"#)
+        XCTAssertEqual(setPath.stdout, #"{"a":1,"b":2}"# + "\n")
+
+        let recursiveNumbers = await bash.exec(#"echo '{"a":{"b":1}}' | jq '[.. | numbers]'"#)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(recursiveNumbers.stdout.utf8)) as? [Int],
+            [1]
+        )
+
+        let pow = await bash.exec(#"jq -n 'pow(2; 3)'"#)
+        XCTAssertEqual(pow.stdout, "8\n")
+
+        let atan2 = await bash.exec(#"jq -n 'atan2(3; 4)'"#)
+        XCTAssertEqual(atan2.stdout, "0.6435011087932844\n")
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
@@ -539,6 +613,18 @@ final class BuiltinCommandTests: XCTestCase {
             try JSONSerialization.jsonObject(with: Data(nullInput.stdout.utf8)) as? [String: AnyHashable],
             ["name": "created"]
         )
+    }
+
+    func testYQInheritsSharedJQFunctions() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}]}"#
+        ]))
+
+        let transpose = await bash.exec("yq -p json '.matrix | transpose' /tmp/data.json -o json -c")
+        XCTAssertEqual(transpose.stdout, "[[1,3],[2,4]]\n")
+
+        let groupBy = await bash.exec("yq -p json '.items | group_by(.type) | length' /tmp/data.json")
+        XCTAssertEqual(groupBy.stdout, "2\n")
     }
 
 }

@@ -1930,17 +1930,20 @@ private func jq() -> AnyBashCommand {
     AnyBashCommand(name: "jq") { args, ctx in
         var rawOutput = false
         var compact = false
+        var nullInput = false
         var filter: String?
         var files: [String] = []
 
         for arg in args {
             switch arg {
             case "--help":
-                return ExecResult.success("jq FILTER [FILE]\n  -c   compact output\n  -r   raw string output\n")
+                return ExecResult.success("jq FILTER [FILE]\n  -c   compact output\n  -r   raw string output\n  -n   null input\n")
             case "-c", "--compact-output":
                 compact = true
             case "-r", "--raw-output":
                 rawOutput = true
+            case "-n", "--null-input":
+                nullInput = true
             case let option where option.hasPrefix("-"):
                 return ExecResult.failure("jq: unknown option: \(option)")
             default:
@@ -1953,19 +1956,24 @@ private func jq() -> AnyBashCommand {
         }
 
         let program = filter ?? "."
-        let inputText: String
+        let inputs: [Any]
         do {
-            if files.isEmpty {
-                inputText = ctx.stdin
+            if nullInput {
+                inputs = [NSNull()]
             } else {
-                inputText = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined(separator: "\n")
+                let inputText: String
+                if files.isEmpty {
+                    inputText = ctx.stdin
+                } else {
+                    inputText = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined(separator: "\n")
+                }
+                inputs = try parseJQInputValues(inputText)
             }
         } catch {
             return ExecResult.failure("jq: \(error.localizedDescription)")
         }
 
         do {
-            let inputs = try parseJQInputValues(inputText)
             var outputs: [Any] = []
             for input in inputs {
                 outputs.append(contentsOf: try evaluateJQFilter(program, input: input))
@@ -3050,12 +3058,20 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return values
     }
 
+    if trimmed == ".." {
+        return jqRecursiveDescent(input)
+    }
+
     if trimmed == "." {
         return [input]
     }
 
     if trimmed == ".[]" {
         return iterateJQValues(input)
+    }
+
+    if trimmed == "numbers" {
+        return jqIsNumber(input) ? [input] : []
     }
 
     if trimmed == "length" {
@@ -3070,6 +3086,14 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return [jqAdd(input)]
     }
 
+    if trimmed == "to_entries" {
+        return [jqToEntries(input)]
+    }
+
+    if trimmed == "from_entries" {
+        return [jqFromEntries(input)]
+    }
+
     if trimmed == "type" {
         return [jqType(input)]
     }
@@ -3078,8 +3102,18 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
         return [jqFirst(input)]
     }
 
+    if trimmed.hasPrefix("first("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        return [try evaluateJQFilter(inner, input: input, bindings: bindings).first ?? NSNull()]
+    }
+
     if trimmed == "last" {
         return [jqLast(input)]
+    }
+
+    if trimmed.hasPrefix("last("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(5).dropLast())
+        return [try evaluateJQFilter(inner, input: input, bindings: bindings).last ?? NSNull()]
     }
 
     if trimmed == "reverse" {
@@ -3100,6 +3134,103 @@ private func evaluateJQFilter(_ filter: String, input: Any, bindings: [String: A
 
     if trimmed == "max" {
         return [jqMax(input)]
+    }
+
+    if trimmed == "flatten" {
+        return [try jqFlatten(input, depth: nil)]
+    }
+
+    if trimmed.hasPrefix("flatten("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(8).dropLast())
+        let depth = try evaluateJQFilter(inner, input: input, bindings: bindings).first.flatMap(jqIntegerValue)
+        return [try jqFlatten(input, depth: depth)]
+    }
+
+    if trimmed == "transpose" {
+        return [jqTranspose(input)]
+    }
+
+    if trimmed.hasPrefix("min_by("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(7).dropLast())
+        return [try jqExtremaBy(input, filter: inner, pickMax: false)]
+    }
+
+    if trimmed.hasPrefix("max_by("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(7).dropLast())
+        return [try jqExtremaBy(input, filter: inner, pickMax: true)]
+    }
+
+    if trimmed.hasPrefix("sort_by("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(8).dropLast())
+        return [try jqSortBy(input, filter: inner)]
+    }
+
+    if trimmed.hasPrefix("group_by("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(9).dropLast())
+        return [try jqGroupBy(input, filter: inner)]
+    }
+
+    if trimmed.hasPrefix("unique_by("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(10).dropLast())
+        return [try jqUniqueBy(input, filter: inner)]
+    }
+
+    if trimmed.hasPrefix("with_entries("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(13).dropLast())
+        return [try jqWithEntries(input, filter: inner, bindings: bindings)]
+    }
+
+    if trimmed.hasPrefix("range("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        return try jqRange(inner, input: input, bindings: bindings)
+    }
+
+    if trimmed.hasPrefix("limit("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        return try jqLimit(inner, input: input, bindings: bindings)
+    }
+
+    if trimmed.hasPrefix("getpath("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(8).dropLast())
+        let pathValue = try evaluateJQFilter(inner, input: input, bindings: bindings).first ?? []
+        guard let path = pathValue as? [Any] else { return [NSNull()] }
+        return [jqGetPath(input, path: path)]
+    }
+
+    if trimmed.hasPrefix("setpath("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(8).dropLast())
+        let arguments = splitTopLevelJQ(inner, separator: ";") ?? []
+        guard arguments.count == 2 else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid setpath arguments"])
+        }
+        let pathValue = try evaluateJQFilter(arguments[0], input: input, bindings: bindings).first ?? []
+        guard let path = pathValue as? [Any] else { return [input] }
+        let replacement = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first ?? NSNull()
+        return [jqSetPath(input, path: path, replacement: replacement)]
+    }
+
+    if trimmed.hasPrefix("pow("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(4).dropLast())
+        let arguments = splitTopLevelJQ(inner, separator: ";") ?? []
+        guard arguments.count == 2 else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid pow arguments"])
+        }
+        let lhs = try evaluateJQFilter(arguments[0], input: input, bindings: bindings).first ?? NSNull()
+        let rhs = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first ?? NSNull()
+        guard let base = jqNumericValue(lhs), let exponent = jqNumericValue(rhs) else { return [NSNull()] }
+        return [NSNumber(value: Foundation.pow(base, exponent))]
+    }
+
+    if trimmed.hasPrefix("atan2("), trimmed.hasSuffix(")") {
+        let inner = String(trimmed.dropFirst(6).dropLast())
+        let arguments = splitTopLevelJQ(inner, separator: ";") ?? []
+        guard arguments.count == 2 else {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid atan2 arguments"])
+        }
+        let lhs = try evaluateJQFilter(arguments[0], input: input, bindings: bindings).first ?? NSNull()
+        let rhs = try evaluateJQFilter(arguments[1], input: input, bindings: bindings).first ?? NSNull()
+        guard let y = jqNumericValue(lhs), let x = jqNumericValue(rhs) else { return [NSNull()] }
+        return [NSNumber(value: Foundation.atan2(y, x))]
     }
 
     if trimmed.hasPrefix("if "), trimmed.hasSuffix(" end") {
@@ -3352,6 +3483,9 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
         if !key.isEmpty {
             let normalizedKey = key.hasSuffix("?") ? String(key.dropLast()) : key
             currentValues = currentValues.map { value in
+                if let object = value as? OrderedJSONObject {
+                    return object.entries.first(where: { $0.0 == normalizedKey })?.1 ?? NSNull()
+                }
                 if let object = value as? [String: Any] {
                     return object[normalizedKey] ?? NSNull()
                 }
@@ -3372,6 +3506,9 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
 private func iterateJQValues(_ value: Any) -> [Any] {
     if let array = value as? [Any] {
         return array
+    }
+    if let object = value as? OrderedJSONObject {
+        return object.entries.map(\.1)
     }
     if let object = value as? [String: Any] {
         return object.keys.sorted().compactMap { object[$0] }
@@ -3418,11 +3555,8 @@ private func resolvedJQIndex(_ value: Int?, count: Int, defaultValue: Int) -> In
 
 private func jqHas(_ value: Any, argument: String) -> Bool {
     if let key = parseJQLiteral(argument) as? String {
-        if let object = value as? [String: Any] {
+        if let object = jqObjectDictionary(value) {
             return object[key] != nil
-        }
-        if let object = value as? NSDictionary {
-            return object.object(forKey: key) != nil
         }
     }
     if let array = value as? [Any], let index = Int(argument) {
@@ -3477,6 +3611,31 @@ private func jqLength(_ value: Any) -> Any {
     return 0
 }
 
+private func jqRecursiveDescent(_ value: Any) -> [Any] {
+    var values: [Any] = [value]
+    if let array = value as? [Any] {
+        for child in array {
+            values.append(contentsOf: jqRecursiveDescent(child))
+        }
+    } else if let object = value as? OrderedJSONObject {
+        for (_, child) in object.entries {
+            values.append(contentsOf: jqRecursiveDescent(child))
+        }
+    } else if let object = jqObjectDictionary(value) {
+        for key in object.keys.sorted() {
+            values.append(contentsOf: jqRecursiveDescent(object[key] as Any))
+        }
+    }
+    return values
+}
+
+private func jqIsNumber(_ value: Any) -> Bool {
+    if let number = value as? NSNumber {
+        return CFGetTypeID(number) != CFBooleanGetTypeID()
+    }
+    return value is Int || value is Double
+}
+
 private func jqKeys(_ value: Any) -> Any {
     if let object = jqObjectDictionary(value) {
         return object.keys.sorted()
@@ -3494,6 +3653,25 @@ private func jqAdd(_ value: Any) -> Any {
         }
     }
     return NSNull()
+}
+
+private func jqToEntries(_ value: Any) -> Any {
+    guard let object = jqObjectDictionary(value) else { return [] }
+    return object.keys.sorted().map { key in
+        OrderedJSONObject(entries: [("key", key), ("value", object[key] as Any)])
+    }
+}
+
+private func jqFromEntries(_ value: Any) -> Any {
+    guard let array = value as? [Any] else { return OrderedJSONObject(entries: []) }
+    var entries: [(String, Any)] = []
+    for item in array {
+        if let object = jqObjectDictionary(item),
+           let key = object["key"] as? String {
+            entries.append((key, object["value"] as Any))
+        }
+    }
+    return OrderedJSONObject(entries: entries)
 }
 
 private func jqType(_ value: Any) -> Any {
@@ -3565,10 +3743,218 @@ private func jqMax(_ value: Any) -> Any {
     return NSNull()
 }
 
+private func jqFlatten(_ value: Any, depth: Int?) throws -> Any {
+    guard let array = value as? [Any] else { return NSNull() }
+    if let depth, depth < 0 {
+        throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "flatten depth must not be negative"])
+    }
+    return jqFlattenArray(array, depth: depth)
+}
+
+private func jqFlattenArray(_ array: [Any], depth: Int?) -> [Any] {
+    guard depth != 0 else { return array }
+    return array.flatMap { element in
+        guard let nested = element as? [Any] else { return [element] }
+        let nextDepth = depth.map { $0 - 1 }
+        return jqFlattenArray(nested, depth: nextDepth)
+    }
+}
+
+private func jqTranspose(_ value: Any) -> Any {
+    guard let rows = value as? [Any] else { return NSNull() }
+    let arrays = rows.map { ($0 as? [Any]) ?? [] }
+    let maxWidth = arrays.map(\.count).max() ?? 0
+    var result: [[Any]] = []
+    for column in 0..<maxWidth {
+        result.append(arrays.map { column < $0.count ? $0[column] : NSNull() })
+    }
+    return result
+}
+
+private func jqExtremaBy(_ value: Any, filter: String, pickMax: Bool) throws -> Any {
+    guard let array = value as? [Any], !array.isEmpty else { return NSNull() }
+    let decorated = try array.map { element -> (Any, String) in
+        let key = try evaluateJQFilter(filter, input: element).first ?? NSNull()
+        return (element, jqSortableString(key))
+    }
+    return pickMax
+        ? decorated.max(by: { $0.1 < $1.1 })?.0 ?? NSNull()
+        : decorated.min(by: { $0.1 < $1.1 })?.0 ?? NSNull()
+}
+
+private func jqSortBy(_ value: Any, filter: String) throws -> Any {
+    guard let array = value as? [Any] else { return [] }
+    return try array.sorted { lhs, rhs in
+        let left = try evaluateJQFilter(filter, input: lhs).first ?? NSNull()
+        let right = try evaluateJQFilter(filter, input: rhs).first ?? NSNull()
+        return jqSortableString(left) < jqSortableString(right)
+    }
+}
+
+private func jqGroupBy(_ value: Any, filter: String) throws -> Any {
+    guard let sorted = try jqSortBy(value, filter: filter) as? [Any] else { return [] }
+    var groups: [[Any]] = []
+    for element in sorted {
+        let key = try evaluateJQFilter(filter, input: element).first ?? NSNull()
+        if let lastKey = groups.last.flatMap({ try? evaluateJQFilter(filter, input: $0.first ?? NSNull()).first ?? NSNull() }),
+           jqEqual(lastKey, key) {
+            groups[groups.count - 1].append(element)
+        } else {
+            groups.append([element])
+        }
+    }
+    return groups
+}
+
+private func jqUniqueBy(_ value: Any, filter: String) throws -> Any {
+    guard let sorted = try jqSortBy(value, filter: filter) as? [Any] else { return [] }
+    var result: [Any] = []
+    for element in sorted {
+        let key = try evaluateJQFilter(filter, input: element).first ?? NSNull()
+        if !result.contains(where: {
+            let otherKey = try? evaluateJQFilter(filter, input: $0).first ?? NSNull()
+            return otherKey.map { jqEqual($0, key) } ?? false
+        }) {
+            result.append(element)
+        }
+    }
+    return result
+}
+
+private func jqWithEntries(_ value: Any, filter: String, bindings: [String: Any]) throws -> Any {
+    let entries: [OrderedJSONObject]
+    if let direct = jqToEntries(value) as? [OrderedJSONObject] {
+        entries = direct
+    } else if let array = jqToEntries(value) as? [Any] {
+        entries = array.compactMap { $0 as? OrderedJSONObject }
+    } else {
+        entries = []
+    }
+    let transformed = try entries.map { entry -> OrderedJSONObject in
+        let transformedValue = try evaluateJQFilter(filter, input: entry, bindings: bindings).first ?? entry
+        if let object = transformedValue as? OrderedJSONObject {
+            return object
+        }
+        return entry
+    }
+    return jqFromEntries(transformed)
+}
+
+private func jqRange(_ arguments: String, input: Any, bindings: [String: Any]) throws -> [Any] {
+    let parts = splitTopLevelJQ(arguments, separator: ";") ?? [arguments]
+    guard (1...3).contains(parts.count) else {
+        throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid range arguments"])
+    }
+
+    let values = try parts.map { try evaluateJQFilter($0, input: input, bindings: bindings).first ?? NSNull() }
+    let start: Int
+    let end: Int
+    let step: Int
+
+    switch values.count {
+    case 1:
+        start = 0
+        end = jqIntegerValue(values[0]) ?? 0
+        step = 1
+    case 2:
+        start = jqIntegerValue(values[0]) ?? 0
+        end = jqIntegerValue(values[1]) ?? 0
+        step = 1
+    default:
+        start = jqIntegerValue(values[0]) ?? 0
+        end = jqIntegerValue(values[1]) ?? 0
+        step = jqIntegerValue(values[2]) ?? 0
+    }
+
+    guard step != 0 else { return [] }
+    let maximumResults = 1_000_000
+    var result: [Any] = []
+    var current = start
+    while (step > 0 && current < end) || (step < 0 && current > end) {
+        result.append(current)
+        if result.count > maximumResults {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "range result limit exceeded"])
+        }
+        current += step
+    }
+    return result
+}
+
+private func jqLimit(_ arguments: String, input: Any, bindings: [String: Any]) throws -> [Any] {
+    let parts = splitTopLevelJQ(arguments, separator: ";") ?? []
+    guard parts.count == 2 else {
+        throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid limit arguments"])
+    }
+    let countValue = try evaluateJQFilter(parts[0], input: input, bindings: bindings).first ?? 0
+    let count = max(0, jqIntegerValue(countValue) ?? 0)
+    guard count > 0 else { return [] }
+    let values = try evaluateJQFilter(parts[1], input: input, bindings: bindings)
+    return Array(values.prefix(count))
+}
+
+private func jqGetPath(_ value: Any, path: [Any]) -> Any {
+    guard let head = path.first else { return value }
+    let tail = Array(path.dropFirst())
+
+    if let key = head as? String {
+        if let object = value as? OrderedJSONObject,
+           let child = object.entries.first(where: { $0.0 == key })?.1 {
+            return jqGetPath(child, path: tail)
+        }
+        if let object = jqObjectDictionary(value),
+           let child = object[key] {
+            return jqGetPath(child, path: tail)
+        }
+        return NSNull()
+    }
+
+    guard let index = jqPathIndex(head),
+          let array = value as? [Any],
+          index >= 0,
+          index < array.count else {
+        return NSNull()
+    }
+    return jqGetPath(array[index], path: tail)
+}
+
+private func jqSetPath(_ value: Any, path: [Any], replacement: Any) -> Any {
+    guard let head = path.first else { return replacement }
+    let tail = Array(path.dropFirst())
+
+    if let key = head as? String {
+        var entries = jqObjectEntries(value)
+        if let existingIndex = entries.firstIndex(where: { $0.0 == key }) {
+            entries[existingIndex].1 = jqSetPath(entries[existingIndex].1, path: tail, replacement: replacement)
+        } else {
+            let seed: Any = tail.first.flatMap(jqPathIndex) != nil ? [Any]() : OrderedJSONObject(entries: [])
+            entries.append((key, jqSetPath(seed, path: tail, replacement: replacement)))
+        }
+        return OrderedJSONObject(entries: entries)
+    }
+
+    guard let index = jqPathIndex(head), index >= 0 else { return value }
+    var array = (value as? [Any]) ?? []
+    if index >= array.count {
+        array.append(contentsOf: Array(repeating: NSNull(), count: index - array.count + 1))
+    }
+    array[index] = jqSetPath(array[index], path: tail, replacement: replacement)
+    return array
+}
+
 private func jqSortableString(_ value: Any) -> String {
     if let string = value as? String { return string }
     if let number = value as? NSNumber { return String(number.doubleValue) }
     return String(describing: value)
+}
+
+private func jqObjectEntries(_ value: Any) -> [(String, Any)] {
+    if let object = value as? OrderedJSONObject {
+        return object.entries
+    }
+    if let object = jqObjectDictionary(value) {
+        return object.keys.sorted().map { ($0, object[$0] as Any) }
+    }
+    return []
 }
 
 private func jqObjectDictionary(_ value: Any) -> [String: Any]? {
@@ -3800,6 +4186,31 @@ private func jqDouble(_ value: Any) -> Double {
     return 0
 }
 
+private func jqNumericValue(_ value: Any) -> Double? {
+    guard jqIsNumber(value) else { return nil }
+    return jqDouble(value)
+}
+
+private func jqIntegerValue(_ value: Any) -> Int? {
+    if let int = value as? Int { return int }
+    if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+        let double = number.doubleValue
+        return floor(double) == double ? Int(double) : nil
+    }
+    if let double = value as? Double, floor(double) == double {
+        return Int(double)
+    }
+    return nil
+}
+
+private func jqPathIndex(_ value: Any) -> Int? {
+    if let int = value as? Int { return int }
+    if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+        return Int(truncating: number)
+    }
+    return nil
+}
+
 private func parseJQLiteral(_ text: String) -> Any? {
     if text == "null" { return NSNull() }
     if text == "true" { return true }
@@ -3826,6 +4237,13 @@ private func renderJQValue(_ value: Any, compact: Bool, raw: Bool) -> String {
         return string
     }
     if value is NSNull { return "null" }
+    if let array = value as? [OrderedJSONObject] {
+        if compact {
+            return "[" + array.map { renderJQValue($0, compact: true, raw: false) }.joined(separator: ",") + "]"
+        }
+        let rendered = array.map { "  " + renderJQValue($0, compact: false, raw: false).replacingOccurrences(of: "\n", with: "\n  ") }
+        return "[\n" + rendered.joined(separator: ",\n") + "\n]"
+    }
     if let object = value as? OrderedJSONObject {
         if compact {
             let rendered = object.entries.map { key, value in
