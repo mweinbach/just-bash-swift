@@ -1,0 +1,26 @@
+[
+  {
+    "name": "echo redirection round trip",
+    "script": "echo hi > /tmp/hello.txt; cat /tmp/hello.txt",
+    "files": {},
+    "stdout": "hi\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "pipeline grep",
+    "script": "printf 'alpha\\nbeta\\n' | grep beta",
+    "files": {},
+    "stdout": "beta\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "find created file",
+    "script": "mkdir -p /tmp/demo; echo ok > /tmp/demo/a.txt; find /tmp/demo",
+    "files": {},
+    "stdout": "/tmp/demo\n/tmp/demo/a.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]
