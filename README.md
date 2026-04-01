@@ -1,0 +1,184 @@
+# just-bash-swift
+
+A pure Swift bash interpreter for AI agent sandboxing on iOS, macOS, and iPadOS. No VMs, no containers, no real bash needed — everything runs in-process with an in-memory virtual filesystem.
+
+Inspired by [Vercel's just-bash](https://github.com/vercel-labs/just-bash) (TypeScript). This is a ground-up Swift rewrite targeting Apple platforms where `Process`/`NSTask` aren't available (iOS/iPadOS).
+
+## Quick Start
+
+Add to your `Package.swift`:
+
+```swift
+.package(url: "https://github.com/mweinbach/just-bash-swift.git", branch: "main")
+```
+
+```swift
+import JustBash
+
+let bash = Bash(options: .init(
+    files: ["/data/input.txt": "hello world"],
+    env: ["NAME": "Agent"]
+))
+
+let result = await bash.exec("""
+    echo "Hello, $NAME!"
+    for f in /data/*.txt; do
+        echo "Processing: $(basename $f)"
+        wc -w "$f"
+    done
+""")
+
+print(result.stdout)  // Hello, Agent!\nProcessing: input.txt\n1 /data/input.txt\n
+print(result.exitCode) // 0
+```
+
+## Architecture
+
+Four modules, zero dependencies beyond Foundation:
+
+```
+┌─────────────┐
+│   JustBash   │  Public API: Bash actor, BashOptions, ExecOptions
+├─────────────┤
+│ JustBashCore │  Parser (recursive descent), Interpreter (tree-walking),
+│              │  AST types, ShellSession, Arithmetic evaluator
+├─────────────┤
+│JustBashCmds │  40+ commands: grep, sed, awk, sort, tr, cut, find, etc.
+├─────────────┤
+│  JustBashFS  │  In-memory virtual filesystem with /proc, /dev layout
+└─────────────┘
+```
+
+**Execution pipeline:** `Input → Tokenizer → Parser → AST → Interpreter → Output`
+
+- The **tokenizer** handles comments, quoting (single, double, `$'...'`, ANSI-C), `$()`, `$(())`, backticks, heredocs, all operators
+- The **parser** is a recursive descent parser producing a rich AST with compound commands
+- The **interpreter** is a tree-walking executor with word expansion, arithmetic evaluation, and control flow
+- The **filesystem** is a tree-based in-memory VFS with a seeded Linux-like layout (`/proc`, `/dev`, `/home/user`, etc.)
+
+## What's Supported
+
+### Shell Features
+
+| Feature | Status |
+|---|---|
+| **Pipes & redirections** | `\|`, `>`, `>>`, `<`, `2>`, `>&`, `<&`, `>|`, `<<<`, `<<` |
+| **Logic operators** | `&&`, `\|\|`, `!` (pipeline negation) |
+| **Control flow** | `if/elif/else/fi`, `for/do/done`, `while/until`, `case/esac` |
+| **Functions** | `name() { ... }`, `function name { ... }`, local scoping, `return` |
+| **Subshells** | `( ... )` — isolated environment |
+| **Brace groups** | `{ ...; }` |
+| **Command substitution** | `$(...)`, `` `...` `` |
+| **Arithmetic** | `$(( ))`, `(( ))` — full precedence: `**`, `*/%`, `+-`, shifts, bitwise, comparison, logical, ternary |
+| **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
+| **test / [** | Unary and binary operators |
+| **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
+| **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`) |
+| **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
+| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}` |
+| **Tilde expansion** | `~`, `~user` |
+| **Glob patterns** | `*`, `?` via virtual filesystem |
+| **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping) |
+| **Here-strings** | `<<<` |
+| **Comments** | `# ...` |
+| **Shell options** | `set -e/-u/-x/-f/-C`, `set -o pipefail` |
+| **Aliases** | `alias`/`unalias` (stored; expansion not yet wired into parser) |
+
+### Commands (69 total)
+
+**Shell builtins (34):** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`
+
+**External commands (35):** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `cp`, `mv`, `ln`, `chmod`, `stat`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `grep`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `wc`, `head`, `tail`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `seq`, `yes`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`
+
+### Execution Limits
+
+| Limit | Default |
+|---|---|
+| Max input size | 256 KB |
+| Max tokens | 16,000 |
+| Max commands | 10,000 |
+| Max output | 1 MB |
+| Max pipeline depth | 32 |
+| Max call depth | 100 |
+| Max loop iterations | 10,000 |
+| Max substitution depth | 50 |
+
+All configurable via `ExecutionLimits`.
+
+### Custom Commands
+
+```swift
+let bash = Bash(options: .init(
+    customCommands: [
+        AnyBashCommand(name: "greet") { args, ctx in
+            ExecResult.success("Hello, \(args.joined(separator: " "))!\n")
+        }
+    ]
+))
+let result = await bash.exec("greet World")
+// stdout: "Hello, World!\n"
+```
+
+## API Reference
+
+### `Bash` (actor)
+
+```swift
+// Initialize with options
+let bash = Bash(options: BashOptions(
+    files: ["/path": "content"],   // Pre-populate filesystem
+    env: ["KEY": "value"],         // Environment variables
+    cwd: "/home/user",             // Working directory
+    executionLimits: .init(),      // Safety limits
+    customCommands: [],            // Additional commands
+    processInfo: .init()           // Virtual PID/UID
+))
+
+// Execute a script
+let result = await bash.exec("echo hello", options: ExecOptions(
+    env: [:],            // Additional env vars for this call
+    replaceEnv: false,   // Replace base env instead of merging
+    cwd: nil,            // Override working directory
+    stdin: ""            // Stdin data
+))
+
+// Access the virtual filesystem
+let content = try bash.readFile("/path/to/file")
+let entries = try bash.listDirectory("/")
+```
+
+### `ExecResult`
+
+```swift
+result.stdout    // String — captured stdout
+result.stderr    // String — captured stderr
+result.exitCode  // Int — 0 for success
+```
+
+### Filesystem behavior
+
+- Filesystem **persists across `exec()` calls** — files written in one call are readable in the next
+- Environment and cwd **reset between calls** — `export` and `cd` don't leak
+- Each `exec()` gets a fresh `ShellSession` but shares the `VirtualFileSystem`
+
+## Platform Support
+
+| Platform | Minimum Version |
+|---|---|
+| iOS | 18.0 |
+| macOS | 15.0 |
+| Mac Catalyst | 18.0 |
+
+Swift 6.0+ with strict concurrency.
+
+## Testing
+
+```bash
+swift test
+```
+
+52 tests covering: control flow, functions, command substitution, variable operations, arithmetic, conditionals, pipes, redirections, all commands, filesystem persistence, session isolation, and bash parity.
+
+## License
+
+MIT
