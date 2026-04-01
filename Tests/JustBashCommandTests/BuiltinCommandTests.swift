@@ -662,6 +662,25 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(toNumber.stdout, "42\n")
     }
 
+    func testJQQuotedFieldAccessAndObjectShorthand() async {
+        let bash = Bash()
+
+        let keywordField = await bash.exec(#"echo '{"and":true}' | jq '.and'"#)
+        XCTAssertEqual(keywordField.stdout, "true\n")
+
+        let bracketString = await bash.exec(#"echo '{"foo":"bar"}' | jq '.["foo"]'"#)
+        XCTAssertEqual(bracketString.stdout, #""bar""# + "\n")
+
+        let dottedQuoted = await bash.exec(#"echo '{"data":{"foo":"bar"}}' | jq '.data. "foo"'"#)
+        XCTAssertEqual(dottedQuoted.stdout, #""bar""# + "\n")
+
+        let shorthand = await bash.exec(#"echo '{"label":"hello"}' | jq -c '{label}'"#)
+        XCTAssertEqual(shorthand.stdout, #"{"label":"hello"}"# + "\n")
+
+        let keywordShorthand = await bash.exec(#"echo '{"and":1}' | jq -c '{and}'"#)
+        XCTAssertEqual(keywordShorthand.stdout, #"{"and":1}"# + "\n")
+    }
+
     func testYQYamlAccessAndIteration() async {
         let bash = Bash(options: .init(files: [
             "/tmp/data.yaml": """
@@ -730,7 +749,7 @@ final class BuiltinCommandTests: XCTestCase {
 
     func testYQInheritsSharedJQFunctions() async {
         let bash = Bash(options: .init(files: [
-            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}],"message":"hello world","a":null}"#
+            "/tmp/data.json": #"{"matrix":[[1,2],[3,4]],"items":[{"type":"a","name":"b"},{"type":"b","name":"c"},{"type":"a","name":"a"}],"message":"hello world","a":null,"and":1}"#
         ]))
 
         let transpose = await bash.exec("yq -p json '.matrix | transpose' /tmp/data.json -o json -c")
@@ -744,6 +763,9 @@ final class BuiltinCommandTests: XCTestCase {
 
         let fallback = await bash.exec("yq -p json '.a // \"default\"' /tmp/data.json")
         XCTAssertEqual(fallback.stdout, "default\n")
+
+        let keywordShorthand = await bash.exec("yq -p json -o json -c '{and}' /tmp/data.json")
+        XCTAssertEqual(keywordShorthand.stdout, "{\"and\":1}\n")
     }
 
 }

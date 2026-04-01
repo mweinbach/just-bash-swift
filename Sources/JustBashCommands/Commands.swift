@@ -3441,11 +3441,16 @@ private func evaluateJQObject(_ filter: String, input: Any, bindings: [String: A
     let parts = splitTopLevelJQ(inner, separator: ",") ?? [inner]
     var entries: [(String, Any)] = []
     for part in parts {
-        guard let colonIndex = topLevelJQColonIndex(part) else {
-            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid object constructor"])
+        let trimmedPart = part.trimmingCharacters(in: .whitespaces)
+        guard !trimmedPart.isEmpty else { continue }
+
+        guard let colonIndex = topLevelJQColonIndex(trimmedPart) else {
+            let normalizedKey = trimmedPart.replacingOccurrences(of: "\"", with: "")
+            entries.append((normalizedKey, try evaluateJQFilter(".\(normalizedKey)", input: input, bindings: bindings).first ?? NSNull()))
+            continue
         }
-        let key = String(part[..<colonIndex]).trimmingCharacters(in: .whitespaces)
-        var valueExpr = String(part[part.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+        let key = String(trimmedPart[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+        var valueExpr = String(trimmedPart[trimmedPart.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
         if valueExpr.hasPrefix("("), valueExpr.hasSuffix(")") {
             valueExpr = String(valueExpr.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
         }
@@ -3581,10 +3586,50 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
                 currentValues = currentValues.map { jqSlice($0, spec: content) }
             } else if let number = Int(content) {
                 currentValues = currentValues.map { jqArrayIndex($0, number) ?? NSNull() }
+            } else if let key = parseJQLiteral(content) as? String {
+                currentValues = currentValues.map { jqObjectLookup($0, key: key) }
             } else {
                 currentValues = currentValues.map { _ in NSNull() }
             }
             index = filter.index(after: closing)
+            if index < filter.endIndex, filter[index] == "." {
+                index = filter.index(after: index)
+            }
+            continue
+        }
+
+        let originalIndex = index
+        while index < filter.endIndex, filter[index].isWhitespace {
+            index = filter.index(after: index)
+        }
+        if index != originalIndex, index < filter.endIndex, filter[index] != "\"" {
+            throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad path"])
+        }
+
+        if index < filter.endIndex, filter[index] == "\"" {
+            let stringStart = index
+            index = filter.index(after: index)
+            var escaped = false
+            while index < filter.endIndex {
+                let ch = filter[index]
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    break
+                }
+                index = filter.index(after: index)
+            }
+            guard index < filter.endIndex else {
+                throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad path"])
+            }
+            let keyToken = String(filter[stringStart...index])
+            guard let key = parseJQLiteral(keyToken) as? String else {
+                throw NSError(domain: "jq", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad path"])
+            }
+            currentValues = currentValues.map { jqObjectLookup($0, key: key) }
+            index = filter.index(after: index)
             if index < filter.endIndex, filter[index] == "." {
                 index = filter.index(after: index)
             }
@@ -3598,18 +3643,7 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
         let key = String(filter[start..<index])
         if !key.isEmpty {
             let normalizedKey = key.hasSuffix("?") ? String(key.dropLast()) : key
-            currentValues = currentValues.map { value in
-                if let object = value as? OrderedJSONObject {
-                    return object.entries.first(where: { $0.0 == normalizedKey })?.1 ?? NSNull()
-                }
-                if let object = value as? [String: Any] {
-                    return object[normalizedKey] ?? NSNull()
-                }
-                if let object = value as? NSDictionary {
-                    return object.object(forKey: normalizedKey) ?? NSNull()
-                }
-                return NSNull()
-            }
+            currentValues = currentValues.map { jqObjectLookup($0, key: normalizedKey) }
         }
         if index < filter.endIndex, filter[index] == "." {
             index = filter.index(after: index)
@@ -3617,6 +3651,19 @@ private func evaluateJQPath(_ filter: String, input: Any) throws -> [Any] {
     }
 
     return currentValues
+}
+
+private func jqObjectLookup(_ value: Any, key: String) -> Any {
+    if let object = value as? OrderedJSONObject {
+        return object.entries.first(where: { $0.0 == key })?.1 ?? NSNull()
+    }
+    if let object = value as? [String: Any] {
+        return object[key] ?? NSNull()
+    }
+    if let object = value as? NSDictionary {
+        return object.object(forKey: key) ?? NSNull()
+    }
+    return NSNull()
 }
 
 private func iterateJQValues(_ value: Any) -> [Any] {

@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 113 passing tests
+- Current verification baseline: `swift test` with 114 passing tests
 
 ## Recently Completed
 
@@ -42,7 +42,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - readonly variables and `shopt` alias toggling now exist in the Swift port
 - the first associative-array slice now exists in the Swift port: `declare -A`, keyed assignment, keyed expansion, length, and keyed unset
 - basic `curl` and `html-to-markdown` commands now exist in the Swift port with local-only verification coverage
-- a larger native `jq` slice now exists in the Swift port: identity, recursive descent, key access, nested access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, `map`, `select`, `has`, `contains`, `any`, `all`, simple conditionals, variable binding, object construction, path helpers like `getpath` and `setpath`, generators like `range` and `limit`, numeric filtering via `numbers`, string helpers like `split`, `join`, `test`, `startswith`, `endswith`, `ltrimstr`, `rtrimstr`, `ascii_downcase`, `ascii_upcase`, `sub`, `gsub`, `index`, and `indices`, comparison and logical operators including `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not`, and `//`, type conversion via `tostring` and `tonumber`, and builtin functions like `length`, `keys`, `add`, `type`, `first`, `last`, `reverse`, `sort`, `unique`, `min`, `max`, `flatten`, `transpose`, `pow`, `atan2`, `floor`, `ceil`, `round`, `sqrt`, and `abs`
+- a larger native `jq` slice now exists in the Swift port: identity, recursive descent, key access, nested access, quoted and bracketed string-key access, keyword-named field access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, shorthand object construction, `map`, `select`, `has`, `contains`, `any`, `all`, simple conditionals, variable binding, object construction, path helpers like `getpath` and `setpath`, generators like `range` and `limit`, numeric filtering via `numbers`, string helpers like `split`, `join`, `test`, `startswith`, `endswith`, `ltrimstr`, `rtrimstr`, `ascii_downcase`, `ascii_upcase`, `sub`, `gsub`, `index`, and `indices`, comparison and logical operators including `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not`, and `//`, type conversion via `tostring` and `tonumber`, and builtin functions like `length`, `keys`, `add`, `type`, `first`, `last`, `reverse`, `sort`, `unique`, `min`, `max`, `flatten`, `transpose`, `pow`, `atan2`, `floor`, `ceil`, `round`, `sqrt`, and `abs`
 - a first `yq` slice now exists in the Swift port: YAML field access, nested access, array traversal, select-on-array, JSON output modes, JSON input mode, stdin input, null-input object construction, and shared jq-backed advanced filters in JSON mode
 
 ## Now: Parity Harness And Remaining Correctness Work
