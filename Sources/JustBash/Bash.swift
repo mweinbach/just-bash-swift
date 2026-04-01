@@ -65,7 +65,7 @@ public actor Bash {
                       "declare", "typeset", "eval", "source", ".", "shift", "return",
                       "exit", "break", "continue", "trap", "alias", "unalias",
                       "command", "type", "let", ":", "getopts", "mapfile", "readarray",
-                      "pushd", "popd", "dirs", "builtin", "hash", "exec"] + registry.names {
+                      "pushd", "popd", "dirs", "builtin", "hash", "exec", "readonly", "shopt"] + registry.names {
             fileSystem.seedCommandStub(named: name)
         }
         self.baseCwd = VirtualPath.normalize(options.cwd)

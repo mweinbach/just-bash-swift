@@ -29,6 +29,36 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(execResult.stdout, "through-exec\n")
     }
 
+    func testReadonlyPreventsReassignment() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        readonly answer=42
+        answer=7
+        echo $answer
+        """)
+        XCTAssertEqual(result.stdout, "42\n")
+        XCTAssertEqual(result.stderr, "bash: answer: readonly variable\n")
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
+    func testShoptExpandAliasesToggle() async {
+        let bash = Bash()
+        let disabled = await bash.exec("""
+        shopt -u expand_aliases
+        alias hi='echo hello'
+        hi
+        """)
+        XCTAssertEqual(disabled.exitCode, 127)
+
+        let enabled = await bash.exec("""
+        shopt -s expand_aliases
+        alias hi='echo hello'
+        hi
+        """)
+        XCTAssertEqual(enabled.stdout, "hello\n")
+        XCTAssertEqual(enabled.exitCode, 0)
+    }
+
     func testPipesAndConditionals() async {
         let bash = Bash()
         let result = await bash.exec("printf 'alpha\\nbeta\\n' | grep beta && echo done")

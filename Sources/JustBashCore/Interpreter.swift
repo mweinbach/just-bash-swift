@@ -129,7 +129,8 @@ public final class ShellInterpreter: @unchecked Sendable {
     // MARK: - Simple command
 
     private func executeSimple(_ cmd: SimpleCommand, session: inout ShellSession, stdin: String) async throws -> ExecResult {
-        if let aliasName = cmd.words.first?.simpleLiteralText,
+        if session.options.expandAliases,
+           let aliasName = cmd.words.first?.simpleLiteralText,
            let aliasValue = session.aliases[aliasName] {
             guard session.aliasExpansionDepth < 16 else {
                 throw ShellRuntimeError.aliasExpansionTooDeep
@@ -155,6 +156,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             if let arrayValues = assignment.arrayValues {
                 let expandedValues = try await expandWords(arrayValues, session: &session, stdin: stdin)
                 if cmd.words.isEmpty {
+                    if session.readonlyVariables.contains(assignment.name) {
+                        return ExecResult.failure("bash: \(assignment.name): readonly variable")
+                    }
                     session.setArray(assignment.name, expandedValues)
                     environment[assignment.name] = expandedValues.first
                 } else {
@@ -166,6 +170,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             let value = try await expandWord(assignment.value, session: &session, stdin: stdin)
             if let (arrayName, index) = parseArrayElementAssignmentName(assignment.name) {
                 if cmd.words.isEmpty {
+                    if session.readonlyVariables.contains(arrayName) {
+                        return ExecResult.failure("bash: \(arrayName): readonly variable")
+                    }
                     session.setArrayElement(arrayName, index: index, value: value)
                     environment[arrayName] = session.getArray(arrayName)?.first
                 } else {
@@ -173,6 +180,9 @@ public final class ShellInterpreter: @unchecked Sendable {
                 }
             } else if cmd.words.isEmpty {
                 // Bare assignments persist in session
+                if session.readonlyVariables.contains(assignment.name) {
+                    return ExecResult.failure("bash: \(assignment.name): readonly variable")
+                }
                 if assignment.append {
                     let existing = session.getVariable(assignment.name) ?? ""
                     session.setVariable(assignment.name, existing + value)
@@ -1436,6 +1446,8 @@ public final class ShellInterpreter: @unchecked Sendable {
         case "builtin": return builtinBuiltin
         case "hash": return builtinHash
         case "exec": return builtinExec
+        case "readonly": return builtinReadonly
+        case "shopt": return builtinShopt
         default: return nil
         }
     }
@@ -1599,6 +1611,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
                 let value = String(arg[arg.index(after: eq)...])
+                if session.readonlyVariables.contains(name) {
+                    return ExecResult.failure("bash: \(name): readonly variable")
+                }
                 session.setVariable(name, value)
                 session.environment[name] = value
             } else if let val = session.getVariable(arg) {
@@ -1620,6 +1635,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         for name in names {
+            if session.readonlyVariables.contains(name) || parseArrayElementAssignmentName(name).map({ session.readonlyVariables.contains($0.0) }) == true {
+                return ExecResult.failure("bash: \(name.replacingOccurrences(of: "\\[.*\\]$", with: "", options: .regularExpression)): readonly variable")
+            }
             if let (arrayName, index) = parseArrayElementAssignmentName(name) {
                 session.unsetArrayElement(arrayName, index: index)
             } else {
@@ -1632,10 +1650,16 @@ public final class ShellInterpreter: @unchecked Sendable {
     private func builtinLocal(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
         for arg in args {
             if let (name, values) = parseInlineArrayArgument(arg) {
+                if session.readonlyVariables.contains(name) {
+                    return ExecResult.failure("bash: \(name): readonly variable")
+                }
                 session.declareLocalArray(name, values: values)
             } else if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
                 let value = String(arg[arg.index(after: eq)...])
+                if session.readonlyVariables.contains(name) {
+                    return ExecResult.failure("bash: \(name): readonly variable")
+                }
                 session.declareLocal(name, value: value)
             } else {
                 session.declareLocal(arg)
@@ -1662,6 +1686,9 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
         for arg in filtered {
             if isArray, let (name, values) = parseInlineArrayArgument(arg) {
+                if session.readonlyVariables.contains(name) {
+                    return ExecResult.failure("bash: \(name): readonly variable")
+                }
                 if isLocal {
                     session.declareLocalArray(name, values: values)
                 } else {
@@ -1670,6 +1697,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             } else if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
                 let value = String(arg[arg.index(after: eq)...])
+                if session.readonlyVariables.contains(name) {
+                    return ExecResult.failure("bash: \(name): readonly variable")
+                }
                 if isLocal {
                     session.declareLocal(name, value: value)
                 } else {
@@ -2170,6 +2200,55 @@ public final class ShellInterpreter: @unchecked Sendable {
         let script = args.joined(separator: " ")
         let parsed = try ShellParser(limits: limits).parse(script)
         return try await executeScript(parsed, session: &session, stdin: stdin)
+    }
+
+    private func builtinReadonly(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        if args.isEmpty {
+            let lines = session.readonlyVariables.sorted().map { "readonly \($0)" }
+            return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
+        }
+        for arg in args {
+            if let (name, values) = parseInlineArrayArgument(arg) {
+                if !session.readonlyVariables.contains(name) {
+                    session.setArray(name, values)
+                }
+                session.readonlyVariables.insert(name)
+            } else if let eq = arg.firstIndex(of: "=") {
+                let name = String(arg[..<eq])
+                let value = String(arg[arg.index(after: eq)...])
+                if !session.readonlyVariables.contains(name) {
+                    session.setVariable(name, value)
+                }
+                session.readonlyVariables.insert(name)
+            } else {
+                session.readonlyVariables.insert(arg)
+            }
+        }
+        return ExecResult.success()
+    }
+
+    private func builtinShopt(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        if args.isEmpty {
+            let value = session.options.expandAliases ? "shopt -s expand_aliases\n" : "shopt -u expand_aliases\n"
+            return ExecResult.success(value)
+        }
+        if args.count >= 2 {
+            switch (args[0], args[1]) {
+            case ("-s", "expand_aliases"):
+                session.options.expandAliases = true
+                return ExecResult.success()
+            case ("-u", "expand_aliases"):
+                session.options.expandAliases = false
+                return ExecResult.success()
+            default:
+                break
+            }
+        }
+        let lines = args.map { option in
+            let enabled = (option == "expand_aliases") ? session.options.expandAliases : false
+            return enabled ? "shopt -s \(option)" : "shopt -u \(option)"
+        }
+        return ExecResult.success(lines.joined(separator: "\n") + "\n")
     }
 
     private func formatDirectoryStack(_ session: ShellSession) -> String {

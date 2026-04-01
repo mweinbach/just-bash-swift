@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 90 passing tests
+- Current verification baseline: `swift test` with 92 passing tests
 
 ## Recently Completed
 
@@ -39,6 +39,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - a larger shell-builtin parity block now exists in the Swift port: `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, and sandbox-friendly `exec`
 - a native `sqlite3` command now exists in the Swift port for `:memory:`, stdin-driven SQL, file-backed databases, and `-json` output
 - a tar subset now exists in the Swift port: create/list/extract, `-f`, `-C`, `--strip-components`, and gzip-compressed `.tar.gz` archives
+- readonly variables and `shopt` alias toggling now exist in the Swift port
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -59,7 +60,7 @@ This is the only active milestone.
 
 - decide whether alias expansion needs to grow beyond basic command-position replacement semantics
 - tighten `nounset` / `xtrace` edge-case parity against bash-specific corners
-- deepen shell builtin parity beyond the new baseline (`readonly`, `shopt`, `exec` edge cases, `pushd`/`popd` semantics)
+- deepen shell builtin parity beyond the new baseline (`readonly`/`shopt` edge cases, fuller `exec` behavior, and directory-stack corner cases)
 - expand parity fixtures around the newly completed runtime behavior so regressions do not slip back in
 
 ### 3. Keep The Docs Honest

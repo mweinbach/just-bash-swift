@@ -355,6 +355,7 @@ public struct ShellSession: Sendable {
     public var cwd: String
     public var environment: [String: String]
     public var arrayEnvironment: [String: [String]] = [:]
+    public var readonlyVariables: Set<String> = []
     public var directoryStack: [String] = []
     public var commandCount: Int = 0
     public var lastExitCode: Int = 0
@@ -499,6 +500,7 @@ public struct ShellOptions: Sendable {
     public var pipefail = false   // set -o pipefail
     public var noglob = false     // set -f
     public var noclobber = false  // set -C
+    public var expandAliases = true
 
     public init() {}
 
