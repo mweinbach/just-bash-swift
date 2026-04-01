@@ -131,6 +131,18 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "local\nglobal\n")
     }
 
+    func testFunctionLocalArray() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        show() {
+            local arr=(x y z)
+            echo ${arr[2]}
+        }
+        show
+        """)
+        XCTAssertEqual(result.stdout, "z\n")
+    }
+
     func testAliasExpansion() async {
         let bash = Bash()
         let result = await bash.exec("""
@@ -269,6 +281,40 @@ final class BashTests: XCTestCase {
         echo $x
         """)
         XCTAssertEqual(result.stdout, "helloworld\n")
+    }
+
+    func testIndexedArrayAssignmentAndExpansion() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        arr=(alpha beta gamma)
+        echo ${arr[1]}
+        echo ${arr[*]}
+        echo ${#arr[@]}
+        """)
+        XCTAssertEqual(result.stdout, "beta\nalpha beta gamma\n3\n")
+    }
+
+    func testArrayElementAssignmentAndUnset() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        arr=(a b)
+        arr[2]=c
+        echo ${arr[*]}
+        unset arr[1]
+        echo ${arr[*]}
+        echo ${#arr[@]}
+        """)
+        XCTAssertEqual(result.stdout, "a b c\na c\n2\n")
+    }
+
+    func testDeclareIndexedArray() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        declare -a arr=(red green blue)
+        echo ${arr[0]}
+        echo ${#arr[@]}
+        """)
+        XCTAssertEqual(result.stdout, "red\n3\n")
     }
 
     // MARK: - Conditional Expressions

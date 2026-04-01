@@ -152,8 +152,26 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         // Apply assignments
         for assignment in cmd.assignments {
+            if let arrayValues = assignment.arrayValues {
+                let expandedValues = try await expandWords(arrayValues, session: &session, stdin: stdin)
+                if cmd.words.isEmpty {
+                    session.setArray(assignment.name, expandedValues)
+                    environment[assignment.name] = expandedValues.first
+                } else {
+                    environment[assignment.name] = expandedValues.first
+                }
+                continue
+            }
+
             let value = try await expandWord(assignment.value, session: &session, stdin: stdin)
-            if cmd.words.isEmpty {
+            if let (arrayName, index) = parseArrayElementAssignmentName(assignment.name) {
+                if cmd.words.isEmpty {
+                    session.setArrayElement(arrayName, index: index, value: value)
+                    environment[arrayName] = session.getArray(arrayName)?.first
+                } else {
+                    environment[arrayName] = value
+                }
+            } else if cmd.words.isEmpty {
                 // Bare assignments persist in session
                 if assignment.append {
                     let existing = session.getVariable(assignment.name) ?? ""
@@ -969,7 +987,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         case .dollarSingleQuoted(let s):
             return s
         case .variable(let varRef):
-            return try expandVariable(varRef, session: &session)
+            return try await expandVariable(varRef, session: &session, stdin: stdin)
         case .commandSub(let script):
             return try await executeCommandSubstitution(script, session: &session, stdin: stdin)
         case .backtickSub(let script):
@@ -985,7 +1003,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
     }
 
-    private func expandVariable(_ ref: VarRef, session: inout ShellSession) throws -> String {
+    private func expandVariable(_ ref: VarRef, session: inout ShellSession, stdin: String) async throws -> String {
         switch ref {
         case .named(let name):
             if let value = session.getVariable(name) {
@@ -1006,6 +1024,9 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
             return ""
         case .length(let name):
+            if let values = session.getArray(name) {
+                return String(values.count)
+            }
             guard let val = session.getVariable(name) else {
                 if session.options.nounset {
                     throw ShellRuntimeError.unboundVariable(name)
@@ -1015,18 +1036,20 @@ public final class ShellInterpreter: @unchecked Sendable {
             return String(val.count)
         case .withOp(let name, let op):
             return try expandVarOp(name: name, op: op, session: &session)
-        case .arrayElement(let name, _):
-            // Simplified: treat as regular variable
-            if let value = session.getVariable(name) {
+        case .arrayElement(let name, let indexWord):
+            let indexText = try await expandWord(indexWord, session: &session, stdin: stdin)
+            let index = Int(indexText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            if let value = session.getArrayElement(name, index: index) {
                 return value
             }
             if session.options.nounset {
-                throw ShellRuntimeError.unboundVariable(name)
+                throw ShellRuntimeError.unboundVariable("\(name)[\(index)]")
             }
             return ""
-        case .arrayAll(let name, _):
-            if let value = session.getVariable(name) {
-                return value
+        case .arrayAll(let name, let allTypeAt):
+            if let values = session.getArray(name) {
+                let separator = allTypeAt ? " " : (session.getVariable("IFS") ?? " \t\n")
+                return values.joined(separator: separator)
             }
             if session.options.nounset {
                 throw ShellRuntimeError.unboundVariable(name)
@@ -1589,13 +1612,21 @@ public final class ShellInterpreter: @unchecked Sendable {
                 return ExecResult.success()
             }
         }
-        for name in names { session.unsetVariable(name) }
+        for name in names {
+            if let (arrayName, index) = parseArrayElementAssignmentName(name) {
+                session.unsetArrayElement(arrayName, index: index)
+            } else {
+                session.unsetVariable(name)
+            }
+        }
         return ExecResult.success()
     }
 
     private func builtinLocal(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
         for arg in args {
-            if let eq = arg.firstIndex(of: "=") {
+            if let (name, values) = parseInlineArrayArgument(arg) {
+                session.declareLocalArray(name, values: values)
+            } else if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
                 let value = String(arg[arg.index(after: eq)...])
                 session.declareLocal(name, value: value)
@@ -1610,10 +1641,12 @@ public final class ShellInterpreter: @unchecked Sendable {
         // Simplified declare - just handle variable assignment
         var isLocal = false
         var isExport = false
+        var isArray = false
         var filtered: [String] = []
         for arg in args {
             if arg.hasPrefix("-") {
                 if arg.contains("x") { isExport = true }
+                if arg.contains("a") { isArray = true }
                 // -g means global (opposite of local)
                 if !arg.contains("g") { isLocal = true }
             } else {
@@ -1621,7 +1654,13 @@ public final class ShellInterpreter: @unchecked Sendable {
             }
         }
         for arg in filtered {
-            if let eq = arg.firstIndex(of: "=") {
+            if isArray, let (name, values) = parseInlineArrayArgument(arg) {
+                if isLocal {
+                    session.declareLocalArray(name, values: values)
+                } else {
+                    session.setArray(name, values)
+                }
+            } else if let eq = arg.firstIndex(of: "=") {
                 let name = String(arg[..<eq])
                 let value = String(arg[arg.index(after: eq)...])
                 if isLocal {
@@ -1924,6 +1963,44 @@ public final class ShellInterpreter: @unchecked Sendable {
             result.removeLast()
         }
         return result
+    }
+
+    private func parseArrayElementAssignmentName(_ name: String) -> (String, Int)? {
+        guard let bracket = name.firstIndex(of: "["),
+              name.hasSuffix("]") else {
+            return nil
+        }
+        let base = String(name[..<bracket])
+        let start = name.index(after: bracket)
+        let end = name.index(before: name.endIndex)
+        let indexText = String(name[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, let index = Int(indexText), index >= 0 else {
+            return nil
+        }
+        return (base, index)
+    }
+
+    private func parseInlineArrayArgument(_ arg: String) -> (String, [String])? {
+        guard let eq = arg.firstIndex(of: "="),
+              arg[arg.index(after: eq)] == "(",
+              arg.hasSuffix(")") else {
+            return nil
+        }
+        let name = String(arg[..<eq])
+        let start = arg.index(arg.index(after: eq), offsetBy: 1)
+        let inner = String(arg[start..<arg.index(before: arg.endIndex)])
+        guard !name.isEmpty else { return nil }
+        do {
+            let parsed = try ShellParser(limits: limits).parse("echo \(inner)")
+            guard let entry = parsed.entries.first,
+                  case .simple(let command) = entry.andOr.first.commands.first else {
+                return nil
+            }
+            let values = command.words.dropFirst().map(\.rawText)
+            return (name, values)
+        } catch {
+            return nil
+        }
     }
 
     private func builtinCommand(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {

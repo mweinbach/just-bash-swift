@@ -354,11 +354,13 @@ public indirect enum CondExpr: Sendable {
 public struct ShellSession: Sendable {
     public var cwd: String
     public var environment: [String: String]
+    public var arrayEnvironment: [String: [String]] = [:]
     public var commandCount: Int = 0
     public var lastExitCode: Int = 0
     public var positionalParams: [String] = []
     public var functions: [String: Command] = [:]
     public var localScopes: [[String: String?]] = []
+    public var localArrayScopes: [[String: [String]?]] = []
     public var shellName: String = "bash"
     public var callDepth: Int = 0
     public var aliasExpansionDepth: Int = 0
@@ -378,6 +380,7 @@ public struct ShellSession: Sendable {
         } else {
             environment[name] = value
         }
+        arrayEnvironment.removeValue(forKey: name)
     }
 
     /// Get a variable value, checking local scopes first
@@ -387,7 +390,64 @@ public struct ShellSession: Sendable {
                 return entry // nil entry means explicitly local but unset
             }
         }
+        for scope in localArrayScopes.reversed() {
+            if let entry = scope[name] {
+                return entry?.first
+            }
+        }
+        if let values = arrayEnvironment[name] {
+            return values.first
+        }
         return environment[name]
+    }
+
+    public mutating func setArray(_ name: String, _ values: [String]) {
+        if let scopeIndex = localArrayScopes.lastIndex(where: { $0.keys.contains(name) }) {
+            localArrayScopes[scopeIndex][name] = values
+        } else {
+            arrayEnvironment[name] = values
+        }
+        environment.removeValue(forKey: name)
+    }
+
+    public mutating func declareLocalArray(_ name: String, values: [String]? = nil) {
+        guard !localArrayScopes.isEmpty else {
+            arrayEnvironment[name] = values ?? []
+            environment.removeValue(forKey: name)
+            return
+        }
+        localArrayScopes[localArrayScopes.count - 1][name] = values ?? []
+        localScopes[localScopes.count - 1].removeValue(forKey: name)
+    }
+
+    public func getArray(_ name: String) -> [String]? {
+        for scope in localArrayScopes.reversed() {
+            if let entry = scope[name] {
+                return entry
+            }
+        }
+        return arrayEnvironment[name]
+    }
+
+    public mutating func setArrayElement(_ name: String, index: Int, value: String) {
+        guard index >= 0 else { return }
+        var values = getArray(name) ?? []
+        if index >= values.count {
+            values.append(contentsOf: Array(repeating: "", count: index - values.count + 1))
+        }
+        values[index] = value
+        setArray(name, values)
+    }
+
+    public func getArrayElement(_ name: String, index: Int) -> String? {
+        guard index >= 0, let values = getArray(name), index < values.count else { return nil }
+        return values[index]
+    }
+
+    public mutating func unsetArrayElement(_ name: String, index: Int) {
+        guard index >= 0, var values = getArray(name), index < values.count else { return }
+        values.remove(at: index)
+        setArray(name, values)
     }
 
     /// Declare a local variable in the current scope
@@ -407,18 +467,27 @@ public struct ShellSession: Sendable {
                 return
             }
         }
+        for i in localArrayScopes.indices.reversed() {
+            if localArrayScopes[i].keys.contains(name) {
+                localArrayScopes[i].removeValue(forKey: name)
+                return
+            }
+        }
         environment.removeValue(forKey: name)
+        arrayEnvironment.removeValue(forKey: name)
     }
 
     /// Push a new local scope (for function calls)
     public mutating func pushScope() {
         localScopes.append([:])
+        localArrayScopes.append([:])
     }
 
     /// Pop the current local scope
     @discardableResult
     public mutating func popScope() -> [String: String?] {
-        localScopes.isEmpty ? [:] : localScopes.removeLast()
+        _ = localArrayScopes.isEmpty ? [:] : localArrayScopes.removeLast()
+        return localScopes.isEmpty ? [:] : localScopes.removeLast()
     }
 }
 

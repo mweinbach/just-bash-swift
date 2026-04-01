@@ -1003,8 +1003,17 @@ private struct Tokenizer {
         }
 
         guard !name.isEmpty else { return nil }
-        guard name.first!.isLetter || name.first! == "_" else { return nil }
-        guard name.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
+        if let bracket = name.firstIndex(of: "["), name.hasSuffix("]") {
+            let base = String(name[..<bracket])
+            let indexText = String(name[name.index(after: bracket)..<name.index(before: name.endIndex)])
+            guard !base.isEmpty else { return nil }
+            guard base.first!.isLetter || base.first! == "_" else { return nil }
+            guard base.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
+            guard Int(indexText.trimmingCharacters(in: .whitespacesAndNewlines)) != nil else { return nil }
+        } else {
+            guard name.first!.isLetter || name.first! == "_" else { return nil }
+            guard name.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
+        }
 
         let valueText = String(text[text.index(after: eqIdx)...])
         var valueParts: [WordPart] = []
@@ -1249,8 +1258,12 @@ private struct ParserState {
 
         // Leading assignments
         while case .assignment(let name, let value, let append) = current {
-            assignments.append(Assignment(name: name, value: value, append: append))
             advance()
+            if !append, value.isEmpty, case .lparen = current {
+                assignments.append(Assignment(name: name, arrayValues: try parseArrayLiteral()))
+            } else {
+                assignments.append(Assignment(name: name, value: value, append: append))
+            }
         }
 
         // Words and redirections
@@ -1269,14 +1282,24 @@ private struct ParserState {
                 advance()
 
             case .assignment(let name, let value, let append):
-                if words.isEmpty {
-                    assignments.append(Assignment(name: name, value: value, append: append))
-                } else {
-                    // After the first word, treat as a regular word
-                    let operatorText = append ? "+=" : "="
-                    words.append(ShellWord([.literal("\(name)\(operatorText)")] + value.parts))
-                }
                 advance()
+                if words.isEmpty {
+                    if !append, value.isEmpty, case .lparen = current {
+                        assignments.append(Assignment(name: name, arrayValues: try parseArrayLiteral()))
+                    } else {
+                        assignments.append(Assignment(name: name, value: value, append: append))
+                    }
+                } else {
+                    if !append, value.isEmpty, case .lparen = current {
+                        let arrayValues = try parseArrayLiteral()
+                        let raw = arrayValues.map(\.rawText).joined(separator: " ")
+                        words.append(ShellWord([.singleQuoted("\(name)=(\(raw))")]))
+                    } else {
+                        // After the first word, treat as a regular word
+                        let operatorText = append ? "+=" : "="
+                        words.append(ShellWord([.literal("\(name)\(operatorText)")] + value.parts))
+                    }
+                }
 
             case .ioNumber(let fd):
                 advance()
@@ -1293,6 +1316,27 @@ private struct ParserState {
         }
 
         return SimpleCommand(assignments: assignments, words: words, redirections: redirections)
+    }
+
+    mutating func parseArrayLiteral() throws -> [ShellWord] {
+        guard case .lparen = current else { return [] }
+        advance()
+        var values: [ShellWord] = []
+        while !isAtEnd {
+            switch current {
+            case .rparen:
+                advance()
+                return values
+            case .newline:
+                advance()
+            case .word(let word):
+                values.append(word)
+                advance()
+            default:
+                throw ParseError.expectedToken("array element or )")
+            }
+        }
+        throw ParseError.expectedToken(")")
     }
 
     mutating func parseRedirection(fd: Int?) throws -> Redirection {
