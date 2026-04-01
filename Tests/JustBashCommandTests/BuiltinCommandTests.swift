@@ -939,4 +939,63 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(tsv.stdout, "alice\n")
     }
 
+    func testYQINIInputAndOutput() async throws {
+        let bash = Bash(options: .init(files: [
+            "/tmp/config.ini": """
+            [database]
+            host=localhost
+            port=5432
+
+            [server]
+            debug=true
+            """,
+            "/tmp/app.ini": """
+            name=MyApp
+            version=1.0
+
+            [features]
+            dark_mode=true
+            notifications=true
+            analytics=false
+            """,
+            "/tmp/data.yaml": """
+            database:
+              host: localhost
+              port: 5432
+            """,
+            "/tmp/root.yaml": "name: test\nversion: 1\n"
+        ]))
+
+        let host = await bash.exec("yq -p ini '.database.host' /tmp/config.ini")
+        XCTAssertEqual(host.stdout, "localhost\n")
+
+        let port = await bash.exec("yq -p ini '.database.port' /tmp/config.ini")
+        XCTAssertEqual(port.stdout, "5432\n")
+
+        let keys = await bash.exec("yq -p ini 'keys' /tmp/config.ini")
+        XCTAssertTrue(keys.stdout.contains("database"))
+        XCTAssertTrue(keys.stdout.contains("server"))
+
+        let name = await bash.exec("yq -p ini '.name' /tmp/app.ini")
+        XCTAssertEqual(name.stdout, "MyApp\n")
+
+        let features = await bash.exec("yq -p ini '.features' /tmp/app.ini -o json")
+        let featureObject = try JSONSerialization.jsonObject(with: Data(features.stdout.utf8)) as? [String: Bool]
+        XCTAssertEqual(featureObject?["dark_mode"], true)
+        XCTAssertEqual(featureObject?["notifications"], true)
+        XCTAssertEqual(featureObject?["analytics"], false)
+
+        let iniOut = await bash.exec("yq -o ini '.' /tmp/data.yaml")
+        XCTAssertTrue(iniOut.stdout.contains("[database]"))
+        XCTAssertTrue(iniOut.stdout.contains("host=localhost"))
+        XCTAssertTrue(iniOut.stdout.contains("port=5432"))
+
+        let rootOut = await bash.exec("yq -o ini '.' /tmp/root.yaml")
+        XCTAssertTrue(rootOut.stdout.contains("name=test"))
+        XCTAssertTrue(rootOut.stdout.contains("version=1"))
+
+        let autodetect = await bash.exec("yq '.database.host' /tmp/config.ini")
+        XCTAssertEqual(autodetect.stdout, "localhost\n")
+    }
+
 }

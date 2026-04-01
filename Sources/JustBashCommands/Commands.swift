@@ -1992,8 +1992,11 @@ private func yq() -> AnyBashCommand {
         var compact = false
         var outputJSON = false
         var outputCSV = false
+        var outputINI = false
         var parseJSON = false
         var parseCSV = false
+        var parseINI = false
+        var explicitInputFormat = false
         var nullInput = false
         var slurp = false
         var joinOutput = false
@@ -2008,7 +2011,7 @@ private func yq() -> AnyBashCommand {
             let arg = args[index]
             switch arg {
             case "--help":
-                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -o csv    output CSV\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -p csv    parse CSV input\n  --csv-delimiter=CHAR\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
+                return ExecResult.success("yq FILTER [FILE]\n  -o json   output JSON\n  -o csv    output CSV\n  -o ini    output INI\n  -c        compact JSON output\n  -r        raw string output\n  -p json   parse JSON input\n  -p csv    parse CSV input\n  -p ini    parse INI input\n  --csv-delimiter=CHAR\n  -n        null input\n  -s        slurp documents into an array\n  -j        join outputs without separators\n  -e        set exit status from truthiness\n  -I N      JSON indentation width\n")
             case "-c":
                 compact = true
             case "-r":
@@ -2034,18 +2037,23 @@ private func yq() -> AnyBashCommand {
                         outputJSON = true
                     case "csv":
                         outputCSV = true
+                    case "ini":
+                        outputINI = true
                     default:
                         break
                     }
                 }
             case "-p":
                 index += 1
+                explicitInputFormat = true
                 if index < args.count {
                     switch args[index] {
                     case "json":
                         parseJSON = true
                     case "csv":
                         parseCSV = true
+                    case "ini":
+                        parseINI = true
                     default:
                         break
                     }
@@ -2108,6 +2116,20 @@ private func yq() -> AnyBashCommand {
         }
 
         do {
+            if !explicitInputFormat, let firstFile = files.first, firstFile != "-" {
+                let lowercased = firstFile.lowercased()
+                if lowercased.hasSuffix(".json") {
+                    parseJSON = true
+                } else if lowercased.hasSuffix(".csv") {
+                    parseCSV = true
+                } else if lowercased.hasSuffix(".tsv") {
+                    parseCSV = true
+                    csvDelimiter = "\\t"
+                } else if lowercased.hasSuffix(".ini") {
+                    parseINI = true
+                }
+            }
+
             let inputValue: Any
             if nullInput {
                 inputValue = NSNull()
@@ -2116,6 +2138,8 @@ private func yq() -> AnyBashCommand {
                     inputValue = try parseJQInputValues(sourceText)
                 } else if parseCSV {
                     inputValue = [try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))]
+                } else if parseINI {
+                    inputValue = [try parseINIInput(sourceText)]
                 } else {
                     inputValue = try parseYAMLDocuments(sourceText)
                 }
@@ -2123,6 +2147,8 @@ private func yq() -> AnyBashCommand {
                 inputValue = try parseJQInputValues(sourceText).first ?? NSNull()
             } else if parseCSV {
                 inputValue = try parseCSVInput(sourceText, delimiter: decodeYQDelimiter(csvDelimiter))
+            } else if parseINI {
+                inputValue = try parseINIInput(sourceText)
             } else {
                 inputValue = try parseSimpleYAML(sourceText)
             }
@@ -2140,6 +2166,9 @@ private func yq() -> AnyBashCommand {
             } else if outputCSV {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map { renderCSVValue($0, delimiter: decodeYQDelimiter(csvDelimiter)) }.joined(separator: separator)
+            } else if outputINI {
+                let separator = joinOutput ? "" : "\n"
+                rendered = outputs.map(renderINIValue).joined(separator: separator)
             } else {
                 let separator = joinOutput ? "" : "\n"
                 rendered = outputs.map { renderYAMLValue($0) }.joined(separator: separator)
@@ -5045,6 +5074,39 @@ private func parseCSVRow(_ line: String, delimiter: Character) -> [String] {
     return fields
 }
 
+private func parseINIInput(_ text: String) throws -> [String: Any] {
+    var result: [String: Any] = [:]
+    var currentSection: String?
+
+    for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty || line.hasPrefix("#") || line.hasPrefix(";") {
+            continue
+        }
+        if line.hasPrefix("["), line.hasSuffix("]") {
+            let section = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+            currentSection = section
+            if result[section] == nil {
+                result[section] = [String: Any]()
+            }
+            continue
+        }
+        guard let equal = line.firstIndex(of: "=") else { continue }
+        let key = String(line[..<equal]).trimmingCharacters(in: .whitespaces)
+        let value = parseINIScalar(String(line[line.index(after: equal)...]).trimmingCharacters(in: .whitespaces))
+
+        if let currentSection {
+            var sectionObject = (result[currentSection] as? [String: Any]) ?? [:]
+            sectionObject[key] = value
+            result[currentSection] = sectionObject
+        } else {
+            result[key] = value
+        }
+    }
+
+    return result
+}
+
 private func parseYAMLBlock(_ lines: [YAMLLine], index: inout Int, indent: Int) throws -> Any {
     guard index < lines.count else { return NSNull() }
     if lines[index].text.hasPrefix("- ") {
@@ -5141,6 +5203,18 @@ private func parseYQCSVScalar(_ text: String) -> Any {
     return text
 }
 
+private func parseINIScalar(_ text: String) -> Any {
+    if text == "true" { return true }
+    if text == "false" { return false }
+    if text.hasPrefix("\""), text.hasSuffix("\"") {
+        return String(text.dropFirst().dropLast())
+    }
+    if text.hasPrefix("'"), text.hasSuffix("'") {
+        return String(text.dropFirst().dropLast())
+    }
+    return text
+}
+
 private func renderYAMLValue(_ value: Any, indent: Int = 0) -> String {
     let indentText = String(repeating: "  ", count: indent)
     if value is NSNull { return "null" }
@@ -5215,6 +5289,28 @@ private func renderCSVValue(_ value: Any, delimiter: Character) -> String {
 private func decodeYQDelimiter(_ text: String) -> Character {
     if text == "\\t" { return "\t" }
     return text.first ?? ","
+}
+
+private func renderINIValue(_ value: Any) -> String {
+    guard let object = jqObjectDictionary(value) else { return "" }
+    var lines: [String] = []
+
+    for key in object.keys.sorted() {
+        if let childObject = jqObjectDictionary(object[key] as Any) {
+            lines.append("[\(key)]")
+            for childKey in childObject.keys.sorted() {
+                lines.append("\(childKey)=\(jqPlainTextValue(childObject[childKey] as Any))")
+            }
+            lines.append("")
+        } else {
+            lines.append("\(key)=\(jqPlainTextValue(object[key] as Any))")
+        }
+    }
+
+    if lines.last == "" {
+        lines.removeLast()
+    }
+    return lines.joined(separator: "\n")
 }
 
 extension Array {
