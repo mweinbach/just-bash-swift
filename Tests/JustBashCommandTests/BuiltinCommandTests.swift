@@ -173,4 +173,35 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertEqual(timed.stdout, "now\n")
         XCTAssertTrue(timed.stderr.contains("real 0.000"))
     }
+
+    func testGzipGunzipAndZcat() async {
+        let bash = Bash(options: .init(files: ["/tmp/data.txt": "Hello, World!"]))
+
+        let gzip = await bash.exec("gzip /tmp/data.txt")
+        XCTAssertEqual(gzip.exitCode, 0)
+        let ls = await bash.exec("ls /tmp")
+        XCTAssertFalse(ls.stdout.contains("data.txt\n"))
+        XCTAssertTrue(ls.stdout.contains("data.txt.gz\n"))
+
+        let zcat = await bash.exec("zcat /tmp/data.txt.gz")
+        XCTAssertEqual(zcat.stdout, "Hello, World!")
+
+        let gunzip = await bash.exec("gunzip /tmp/data.txt.gz")
+        XCTAssertEqual(gunzip.exitCode, 0)
+        let restored = await bash.exec("cat /tmp/data.txt")
+        XCTAssertEqual(restored.stdout, "Hello, World!")
+    }
+
+    func testGzipStdoutAndKeepModes() async {
+        let bash = Bash(options: .init(files: ["/tmp/data.txt": "swift gzip"]))
+
+        let stdoutGzip = await bash.exec("gzip -c /tmp/data.txt | gunzip -c")
+        XCTAssertEqual(stdoutGzip.stdout, "swift gzip")
+
+        let keep = await bash.exec("gzip -k /tmp/data.txt")
+        XCTAssertEqual(keep.exitCode, 0)
+        let ls = await bash.exec("ls /tmp")
+        XCTAssertTrue(ls.stdout.contains("data.txt\n"))
+        XCTAssertTrue(ls.stdout.contains("data.txt.gz\n"))
+    }
 }

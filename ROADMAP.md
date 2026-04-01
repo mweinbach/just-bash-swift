@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 74 passing tests
+- Current verification baseline: `swift test` with 76 passing tests
 
 ## Recently Completed
 
@@ -34,6 +34,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - `set -x` now emits xtrace lines to stderr
 - a large utility-command block now exists in the Swift port: `base64`, hashes, `expr`, `whoami`, `rmdir`, `tree`, `file`, `strings`, `split`, `join`, `tac`, `od`, `egrep`/`fgrep`/`rg`, `clear`, `help`, `history`, `bash`/`sh`, `time`, and `timeout`
 - brace expansion now supports comma form, numeric and alpha sequences, step values, nesting, and preamble/postscript composition for literal word segments
+- the gzip family now exists in the Swift port: `gzip`, `gunzip`, and `zcat`
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -69,7 +70,6 @@ The next command wave is the part of upstream parity that still materially chang
 - `yq`
 - `sqlite3`
 - `xan`
-- `gzip` / `gunzip` / `zcat`
 - `tar`
 - `curl` / `html-to-markdown`
 
@@ -80,6 +80,7 @@ Rationale:
 
 ## Later: Data Model And Shell Completeness
 
+- arrays remain the largest shell-core gap still open in the Swift runtime
 - indexed arrays
 - `${arr[n]}`, `${arr[@]}`, `${arr[*]}`
 - array length and indices
