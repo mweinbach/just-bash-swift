@@ -73,7 +73,7 @@ Everything in this section is intended to describe implemented behavior in the c
 
 | Feature | Status |
 |---|---|
-| **Pipes & redirections** | `\|`, `>`, `>>`, `<`, `2>`, `>&`, `<&`, `>|`, `<<<`, `<<` |
+| **Pipes & redirections** | `\|`, `|&`, `>`, `>>`, `<`, `2>`, `>&`, `<&`, `>|`, `<<<`, `<<` |
 | **Logic operators** | `&&`, `\|\|`, `!` (pipeline negation) |
 | **Control flow** | `if/elif/else/fi`, `for/do/done`, `while/until`, `case/esac` |
 | **Functions** | `name() { ... }`, `function name { ... }`, local scoping, `return` |
@@ -188,7 +188,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-58 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, redirections, output limits, noclobber, filesystem persistence, session isolation, and curated parity cases.
+59 tests covering: control flow, functions, command substitution, heredocs, variable operations, arithmetic, conditionals, pipes, `|&`, redirections, output limits, noclobber, filesystem persistence, session isolation, and curated parity cases.
 
 ## License
 

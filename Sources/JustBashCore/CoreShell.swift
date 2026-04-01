@@ -211,10 +211,12 @@ public enum AndOrOp: Sendable {
 public struct PipelineDef: Sendable {
     public var negated: Bool
     public var commands: [Command]
+    public var pipeStandardError: [Bool]
 
-    public init(negated: Bool = false, _ commands: [Command]) {
+    public init(negated: Bool = false, _ commands: [Command], pipeStandardError: [Bool] = []) {
         self.negated = negated
         self.commands = commands
+        self.pipeStandardError = pipeStandardError
     }
 }
 

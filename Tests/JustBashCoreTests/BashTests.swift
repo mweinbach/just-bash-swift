@@ -361,6 +361,16 @@ final class BashTests: XCTestCase {
         XCTAssertEqual(result.stdout, "1\n")
     }
 
+    func testPipeAmpPipesStandardErrorIntoNextCommand() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        missing_command |& grep "command not found"
+        """)
+        XCTAssertEqual(result.stdout, "missing_command: command not found\n")
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
     // MARK: - Tilde Expansion
 
     func testTildeExpansion() async {

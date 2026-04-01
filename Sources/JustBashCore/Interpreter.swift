@@ -83,14 +83,19 @@ public final class ShellInterpreter: @unchecked Sendable {
         var lastResult = ExecResult()
         var pipelineExitCodes: [Int] = []
 
-        for command in pipeline.commands {
+        for (index, command) in pipeline.commands.enumerated() {
             session.commandCount += 1
             if session.commandCount > limits.maxCommandCount {
                 return ExecResult.failure("maximum command count exceeded", exitCode: 1)
             }
             let result = enforceOutputLimit(try await executeCommand(command, session: &session, stdin: pipedInput))
-            allStderr += result.stderr
-            pipedInput = result.stdout
+            let pipeStderr = index < pipeline.pipeStandardError.count ? pipeline.pipeStandardError[index] : false
+            if pipeStderr {
+                pipedInput = result.stdout + result.stderr
+            } else {
+                allStderr += result.stderr
+                pipedInput = result.stdout
+            }
             lastResult = result
             pipelineExitCodes.append(result.exitCode)
         }

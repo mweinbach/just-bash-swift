@@ -1129,24 +1129,30 @@ private struct ParserState {
         }
 
         var commands: [Command] = []
+        var pipeStandardError: [Bool] = []
         commands.append(try parseCommand())
 
         while true {
             if case .pipe = current {
                 advance(); skipNewlines()
                 commands.append(try parseCommand())
+                pipeStandardError.append(false)
                 guard commands.count <= limits.maxPipelineLength else {
                     throw ParseError.tooManyTokens(commands.count)
                 }
             } else if case .pipeAmp = current {
                 advance(); skipNewlines()
                 commands.append(try parseCommand())
+                pipeStandardError.append(true)
+                guard commands.count <= limits.maxPipelineLength else {
+                    throw ParseError.tooManyTokens(commands.count)
+                }
             } else {
                 break
             }
         }
 
-        return PipelineDef(negated: negated, commands)
+        return PipelineDef(negated: negated, commands, pipeStandardError: pipeStandardError)
     }
 
     mutating func parseCommand() throws -> Command {

@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - One filesystem backend today: in-memory `VirtualFileSystem`
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 58 passing tests
+- Current verification baseline: `swift test` with 59 passing tests
 
 ## Recently Completed
 
@@ -26,6 +26,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - `maxOutputLength` is now enforced for visible shell output
 - `set -C` / `noclobber` now prevents overwriting existing files via `>`
 - `+=` assignments now survive parsing into runtime evaluation
+- `|&` now pipes stderr into the next command instead of only parsing the token
 
 ## Now: Parity Harness And Remaining Correctness Work
 
@@ -44,7 +45,6 @@ This is the only active milestone.
 
 ### 2. Finish The Remaining High-Confidence Runtime Fixes
 
-- `|&` should actually pipe stderr instead of only parsing the token
 - `nounset` should fail unset-variable expansion where the option requires it
 - field splitting should apply to unquoted expansions, not only `read`
 - glob character classes (`[abc]`, `[a-z]`) should match correctly
