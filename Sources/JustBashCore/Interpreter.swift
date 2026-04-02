@@ -3,9 +3,9 @@ import JustBashCommands
 import JustBashFS
 
 public final class ShellInterpreter: @unchecked Sendable {
-    private let fileSystem: VirtualFileSystem
-    private let registry: CommandRegistry
-    private let limits: ExecutionLimits
+    let fileSystem: VirtualFileSystem
+    let registry: CommandRegistry
+    let limits: ExecutionLimits
 
     public init(fileSystem: VirtualFileSystem, registry: CommandRegistry, limits: ExecutionLimits) {
         self.fileSystem = fileSystem
@@ -27,7 +27,7 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     // MARK: - Script execution
 
-    private func executeScript(_ script: Script, session: inout ShellSession, stdin: String) async throws -> ExecResult {
+    func executeScript(_ script: Script, session: inout ShellSession, stdin: String) async throws -> ExecResult {
         var combined = ExecResult()
         for entry in script.entries {
             let result = try await executeListEntry(entry, session: &session, stdin: stdin)
@@ -107,6 +107,8 @@ public final class ShellInterpreter: @unchecked Sendable {
         if pipeline.negated {
             exitCode = exitCode == 0 ? 1 : 0
         }
+
+        session.setArray("PIPESTATUS", pipelineExitCodes.map(String.init))
 
         return ExecResult(stdout: lastResult.stdout, stderr: allStderr, exitCode: exitCode)
     }
@@ -192,7 +194,11 @@ public final class ShellInterpreter: @unchecked Sendable {
                     let existing = session.getVariable(assignment.name) ?? ""
                     session.setVariable(assignment.name, existing + value)
                 } else {
-                    session.setVariable(assignment.name, value)
+                    var finalValue = value
+                    if session.integerVariables.contains(assignment.name) {
+                        finalValue = String(evaluateArithmetic(value, session: &session))
+                    }
+                    session.setVariable(assignment.name, finalValue)
                 }
                 environment[assignment.name] = session.getVariable(assignment.name)
             } else {
@@ -253,7 +259,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         // Execute
         let result: ExecResult
         if let funcBody = session.functions[commandName] {
-            result = try await executeFunction(funcBody, arguments: arguments, session: &session, stdin: effectiveStdin)
+            result = try await executeFunction(funcBody, name: commandName, arguments: arguments, session: &session, stdin: effectiveStdin)
         } else if let builtin = shellBuiltin(commandName) {
             result = try await builtin(arguments, &session, environment, effectiveStdin)
         } else if let command = registry.command(named: commandName) {
@@ -269,6 +275,11 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
 
         session.lastExitCode = result.exitCode
+
+        // Store last argument as $_
+        if let lastArg = expandedWords.last {
+            session.setVariable("_", lastArg)
+        }
 
         // Apply output redirections
         let redirected = try await applyOutputRedirections(result, redirects: cmd.redirections, commandName: commandName, session: &session, stdin: stdin)
@@ -291,8 +302,8 @@ public final class ShellInterpreter: @unchecked Sendable {
             return try await executeWhile(clause, isUntil: true, session: &session, stdin: stdin)
         case .caseClause(let clause):
             return try await executeCase(clause, session: &session, stdin: stdin)
-        case .selectClause:
-            return ExecResult.success() // select requires interactive input
+        case .selectClause(let clause):
+            return try await executeSelect(clause, session: &session, stdin: stdin)
         case .braceGroup(let script):
             return try await executeScript(script, session: &session, stdin: stdin)
         case .subshell(let script):
@@ -350,6 +361,39 @@ public final class ShellInterpreter: @unchecked Sendable {
                 if n > 1 { throw ControlFlow.continue(n - 1) }
                 continue
             }
+        }
+        return combined
+    }
+
+    private func executeSelect(_ clause: SelectClause, session: inout ShellSession, stdin: String) async throws -> ExecResult {
+        let items: [String]
+        if let words = clause.words {
+            items = try await expandWords(words, session: &session, stdin: stdin)
+        } else {
+            items = session.positionalParams
+        }
+        guard !items.isEmpty else { return ExecResult.success() }
+
+        // Build the numbered menu output
+        var menu = ""
+        for (i, item) in items.enumerated() {
+            menu += "\(i + 1)) \(item)\n"
+        }
+
+        // In a sandboxed shell without interactive input, select the first option and execute once
+        session.setVariable(clause.variable, items[0])
+        session.setVariable("REPLY", "1")
+        var combined = ExecResult()
+        combined.stderr += menu
+        do {
+            let result = try await executeScript(clause.body, session: &session, stdin: stdin)
+            combined.stdout += result.stdout
+            combined.stderr += result.stderr
+            combined.exitCode = result.exitCode
+        } catch ControlFlow.break(let n) {
+            if n > 1 { throw ControlFlow.break(n - 1) }
+        } catch ControlFlow.continue(let n) {
+            if n > 1 { throw ControlFlow.continue(n - 1) }
         }
         return combined
     }
@@ -420,7 +464,7 @@ public final class ShellInterpreter: @unchecked Sendable {
             if !matched {
                 for pattern in item.patterns {
                     let patternStr = try await expandWord(pattern, session: &session, stdin: stdin)
-                    if VirtualFileSystem.globMatch(name: word, pattern: patternStr) || patternStr == "*" {
+                    if VirtualFileSystem.globMatch(name: word, pattern: patternStr, extglob: session.options.extglob) || patternStr == "*" {
                         matched = true
                         break
                     }
@@ -445,7 +489,7 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     // MARK: - Functions
 
-    private func executeFunction(_ body: Command, arguments: [String], session: inout ShellSession, stdin: String) async throws -> ExecResult {
+    private func executeFunction(_ body: Command, name functionName: String = "", arguments: [String], session: inout ShellSession, stdin: String) async throws -> ExecResult {
         guard session.callDepth < limits.maxCallDepth else {
             return ExecResult.failure("maximum call depth exceeded", exitCode: 1)
         }
@@ -454,8 +498,10 @@ public final class ShellInterpreter: @unchecked Sendable {
         session.positionalParams = arguments
         session.callDepth += 1
         session.pushScope()
+        session.functionCallStack.append(functionName)
 
         defer {
+            session.functionCallStack.removeLast()
             session.popScope()
             session.positionalParams = savedParams
             session.callDepth = savedDepth
@@ -479,7 +525,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         case .binary(let left, let op, let right):
             let l = try await expandWord(left, session: &session, stdin: stdin)
             let r = try await expandWord(right, session: &session, stdin: stdin)
-            return evaluateBinaryTest(l, op, r)
+            return evaluateBinaryTest(l, op, r, session: session)
 
         case .and(let a, let b):
             let aResult = try await evaluateCondExpr(a, session: &session, stdin: stdin)
@@ -523,12 +569,13 @@ public final class ShellInterpreter: @unchecked Sendable {
         }
     }
 
-    private func evaluateBinaryTest(_ left: String, _ op: String, _ right: String) -> Bool {
+    func evaluateBinaryTest(_ left: String, _ op: String, _ right: String, session: ShellSession? = nil) -> Bool {
+        let extglob = session?.options.extglob ?? false
         switch op {
         case "==", "=":
-            return VirtualFileSystem.globMatch(name: left, pattern: right)
+            return VirtualFileSystem.globMatch(name: left, pattern: right, extglob: extglob)
         case "!=":
-            return !VirtualFileSystem.globMatch(name: left, pattern: right)
+            return !VirtualFileSystem.globMatch(name: left, pattern: right, extglob: extglob)
         case "<": return left < right
         case ">": return left > right
         case "-eq": return (Int(left) ?? 0) == (Int(right) ?? 0)
@@ -540,260 +587,33 @@ public final class ShellInterpreter: @unchecked Sendable {
         case "=~":
             guard let regex = try? NSRegularExpression(pattern: right) else { return false }
             return regex.firstMatch(in: left, range: NSRange(left.startIndex..., in: left)) != nil
+        case "-nt":
+            // Newer than: in VFS, no timestamps. If both exist, same age (false).
+            // If left exists and right doesn't, true.
+            let cwd = session?.cwd ?? "/"
+            let leftPath = VirtualPath.normalize(left, relativeTo: cwd)
+            let rightPath = VirtualPath.normalize(right, relativeTo: cwd)
+            let leftExists = fileSystem.exists(leftPath)
+            let rightExists = fileSystem.exists(rightPath)
+            if leftExists && !rightExists { return true }
+            return false
+        case "-ot":
+            // Older than: opposite of -nt.
+            let cwd = session?.cwd ?? "/"
+            let leftPath = VirtualPath.normalize(left, relativeTo: cwd)
+            let rightPath = VirtualPath.normalize(right, relativeTo: cwd)
+            let leftExists = fileSystem.exists(leftPath)
+            let rightExists = fileSystem.exists(rightPath)
+            if !leftExists && rightExists { return true }
+            return false
+        case "-ef":
+            // Same file: compare normalized paths.
+            let cwd = session?.cwd ?? "/"
+            let leftPath = VirtualPath.normalize(left, relativeTo: cwd)
+            let rightPath = VirtualPath.normalize(right, relativeTo: cwd)
+            return leftPath == rightPath
         default: return false
         }
-    }
-
-    // MARK: - Arithmetic
-
-    func evaluateArithmetic(_ expr: String, session: inout ShellSession) -> Int {
-        let expanded = expandArithVariables(expr, session: session)
-        return parseArithExpr(expanded, session: &session)
-    }
-
-    private func expandArithVariables(_ expr: String, session: ShellSession) -> String {
-        var result = ""
-        let chars = Array(expr)
-        var i = 0
-        while i < chars.count {
-            if chars[i] == "$" {
-                i += 1
-                if i < chars.count && chars[i] == "{" {
-                    i += 1
-                    var name = ""
-                    while i < chars.count && chars[i] != "}" { name.append(chars[i]); i += 1 }
-                    if i < chars.count { i += 1 }
-                    result += session.getVariable(name) ?? "0"
-                } else {
-                    var name = ""
-                    while i < chars.count && (chars[i].isLetter || chars[i].isNumber || chars[i] == "_") {
-                        name.append(chars[i]); i += 1
-                    }
-                    result += session.getVariable(name) ?? "0"
-                }
-            } else if chars[i].isLetter || chars[i] == "_" {
-                var name = ""
-                while i < chars.count && (chars[i].isLetter || chars[i].isNumber || chars[i] == "_") {
-                    name.append(chars[i]); i += 1
-                }
-                // Check if this is an operator keyword or a variable name in arithmetic context
-                if ["le", "ge", "lt", "gt", "eq", "ne"].contains(name) {
-                    result += name
-                } else {
-                    result += session.getVariable(name) ?? "0"
-                }
-            } else {
-                result.append(chars[i]); i += 1
-            }
-        }
-        return result
-    }
-
-    private func parseArithExpr(_ expr: String, session: inout ShellSession) -> Int {
-        var tokens = tokenizeArith(expr)
-        return parseArithTernary(&tokens, session: &session)
-    }
-
-    private struct ArithToken {
-        enum Kind { case number(Int), op(String) }
-        var kind: Kind
-    }
-
-    private func tokenizeArith(_ expr: String) -> [ArithToken] {
-        var tokens: [ArithToken] = []
-        let chars = Array(expr.trimmingCharacters(in: .whitespaces))
-        var i = 0
-        while i < chars.count {
-            if chars[i].isWhitespace { i += 1; continue }
-            if chars[i].isNumber || (chars[i] == "-" && (tokens.isEmpty || { if case .op = tokens.last?.kind { return true }; return false }())) {
-                var numStr = ""
-                if chars[i] == "-" { numStr.append("-"); i += 1 }
-                // Hex
-                if i < chars.count && chars[i] == "0" && i + 1 < chars.count && (chars[i + 1] == "x" || chars[i + 1] == "X") {
-                    i += 2
-                    while i < chars.count && chars[i].isHexDigit { numStr.append(chars[i]); i += 1 }
-                    tokens.append(ArithToken(kind: .number(Int(numStr, radix: 16) ?? 0)))
-                } else {
-                    while i < chars.count && chars[i].isNumber { numStr.append(chars[i]); i += 1 }
-                    tokens.append(ArithToken(kind: .number(Int(numStr) ?? 0)))
-                }
-            } else {
-                // Two-char operators
-                let twoChar = i + 1 < chars.count ? String(chars[i]) + String(chars[i + 1]) : ""
-                let threeChar = i + 2 < chars.count ? twoChar + String(chars[i + 2]) : ""
-                if ["<<=", ">>="].contains(threeChar) {
-                    tokens.append(ArithToken(kind: .op(threeChar))); i += 3
-                } else if ["==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "**", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--"].contains(twoChar) {
-                    tokens.append(ArithToken(kind: .op(twoChar))); i += 2
-                } else {
-                    tokens.append(ArithToken(kind: .op(String(chars[i])))); i += 1
-                }
-            }
-        }
-        return tokens
-    }
-
-    private func parseArithTernary(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        let val = parseArithOr(&tokens, session: &session)
-        if tokens.first.map({ if case .op("?") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst()
-            let trueVal = parseArithTernary(&tokens, session: &session)
-            if tokens.first.map({ if case .op(":") = $0.kind { return true }; return false }) == true {
-                tokens.removeFirst()
-            }
-            let falseVal = parseArithTernary(&tokens, session: &session)
-            return val != 0 ? trueVal : falseVal
-        }
-        return val
-    }
-
-    private func parseArithOr(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithAnd(&tokens, session: &session)
-        while tokens.first.map({ if case .op("||") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst()
-            let right = parseArithAnd(&tokens, session: &session)
-            val = (val != 0 || right != 0) ? 1 : 0
-        }
-        return val
-    }
-
-    private func parseArithAnd(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithBitOr(&tokens, session: &session)
-        while tokens.first.map({ if case .op("&&") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst()
-            let right = parseArithBitOr(&tokens, session: &session)
-            val = (val != 0 && right != 0) ? 1 : 0
-        }
-        return val
-    }
-
-    private func parseArithBitOr(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithBitXor(&tokens, session: &session)
-        while tokens.first.map({ if case .op("|") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst(); val |= parseArithBitXor(&tokens, session: &session)
-        }
-        return val
-    }
-
-    private func parseArithBitXor(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithBitAnd(&tokens, session: &session)
-        while tokens.first.map({ if case .op("^") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst(); val ^= parseArithBitAnd(&tokens, session: &session)
-        }
-        return val
-    }
-
-    private func parseArithBitAnd(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithEquality(&tokens, session: &session)
-        while tokens.first.map({ if case .op("&") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst(); val &= parseArithEquality(&tokens, session: &session)
-        }
-        return val
-    }
-
-    private func parseArithEquality(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithComparison(&tokens, session: &session)
-        while let tok = tokens.first {
-            if case .op(let op) = tok.kind, op == "==" || op == "!=" {
-                tokens.removeFirst()
-                let right = parseArithComparison(&tokens, session: &session)
-                val = op == "==" ? (val == right ? 1 : 0) : (val != right ? 1 : 0)
-            } else { break }
-        }
-        return val
-    }
-
-    private func parseArithComparison(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithShift(&tokens, session: &session)
-        while let tok = tokens.first {
-            if case .op(let op) = tok.kind, ["<", ">", "<=", ">="].contains(op) {
-                tokens.removeFirst()
-                let right = parseArithShift(&tokens, session: &session)
-                switch op {
-                case "<": val = val < right ? 1 : 0
-                case ">": val = val > right ? 1 : 0
-                case "<=": val = val <= right ? 1 : 0
-                case ">=": val = val >= right ? 1 : 0
-                default: break
-                }
-            } else { break }
-        }
-        return val
-    }
-
-    private func parseArithShift(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithAdd(&tokens, session: &session)
-        while let tok = tokens.first {
-            if case .op(let op) = tok.kind, op == "<<" || op == ">>" {
-                tokens.removeFirst()
-                let right = parseArithAdd(&tokens, session: &session)
-                val = op == "<<" ? val << right : val >> right
-            } else { break }
-        }
-        return val
-    }
-
-    private func parseArithAdd(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithMul(&tokens, session: &session)
-        while let tok = tokens.first {
-            if case .op(let op) = tok.kind, op == "+" || op == "-" {
-                tokens.removeFirst()
-                let right = parseArithMul(&tokens, session: &session)
-                val = op == "+" ? val + right : val - right
-            } else { break }
-        }
-        return val
-    }
-
-    private func parseArithMul(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        var val = parseArithPower(&tokens, session: &session)
-        while let tok = tokens.first {
-            if case .op(let op) = tok.kind, op == "*" || op == "/" || op == "%" {
-                tokens.removeFirst()
-                let right = parseArithPower(&tokens, session: &session)
-                switch op {
-                case "*": val = val * right
-                case "/": val = right == 0 ? 0 : val / right
-                case "%": val = right == 0 ? 0 : val % right
-                default: break
-                }
-            } else { break }
-        }
-        return val
-    }
-
-    private func parseArithPower(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        let base = parseArithUnary(&tokens, session: &session)
-        if tokens.first.map({ if case .op("**") = $0.kind { return true }; return false }) == true {
-            tokens.removeFirst()
-            let exp = parseArithPower(&tokens, session: &session)
-            if exp < 0 { return 0 }
-            var result = 1
-            for _ in 0..<exp { result *= base }
-            return result
-        }
-        return base
-    }
-
-    private func parseArithUnary(_ tokens: inout [ArithToken], session: inout ShellSession) -> Int {
-        if let tok = tokens.first {
-            if case .op(let op) = tok.kind {
-                if op == "!" { tokens.removeFirst(); return parseArithUnary(&tokens, session: &session) == 0 ? 1 : 0 }
-                if op == "~" { tokens.removeFirst(); return ~parseArithUnary(&tokens, session: &session) }
-                if op == "+" { tokens.removeFirst(); return parseArithUnary(&tokens, session: &session) }
-                if op == "-" { tokens.removeFirst(); return -parseArithUnary(&tokens, session: &session) }
-                if op == "(" {
-                    tokens.removeFirst()
-                    let val = parseArithTernary(&tokens, session: &session)
-                    if tokens.first.map({ if case .op(")") = $0.kind { return true }; return false }) == true {
-                        tokens.removeFirst()
-                    }
-                    return val
-                }
-            }
-            if case .number(let n) = tok.kind { tokens.removeFirst(); return n }
-        }
-        return 0
     }
 
     // MARK: - Word Expansion
@@ -808,7 +628,19 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     func expandWords(_ words: [ShellWord], session: inout ShellSession, stdin: String) async throws -> [String] {
         var result: [String] = []
-        for word in words.flatMap(braceExpand) {
+        wordLoop: for word in words.flatMap(braceExpand) {
+            // Handle quoted "${arr[@]}" — each element becomes a separate word
+            for part in word.parts {
+                if case .doubleQuoted(let innerParts) = part {
+                    if innerParts.count == 1, case .variable(let ref) = innerParts[0] {
+                        if case .arrayAll(let name, let allElements) = ref, allElements {
+                            let arr = session.getArray(name) ?? []
+                            result.append(contentsOf: arr)
+                            continue wordLoop
+                        }
+                    }
+                }
+            }
             let expanded = try await expandWord(word, session: &session, stdin: stdin)
             let fields: [String]
             if word.suppressesFieldSplitting {
@@ -820,9 +652,12 @@ public final class ShellInterpreter: @unchecked Sendable {
 
             for field in fields {
                 if word.mayContainGlob && !session.options.noglob {
-                    let matches = fileSystem.glob(field, relativeTo: session.cwd)
+                    let matches = fileSystem.glob(field, relativeTo: session.cwd, dotglob: session.options.dotglob, extglob: session.options.extglob)
                     if matches.isEmpty {
-                        result.append(field)
+                        if !session.options.nullglob {
+                            result.append(field)
+                        }
+                        // nullglob: drop the pattern entirely when no matches
                     } else {
                         result.append(contentsOf: matches)
                     }
@@ -941,9 +776,14 @@ public final class ShellInterpreter: @unchecked Sendable {
         let end = parts[2]
         let stepText = parts.count == 5 ? parts[4] : nil
 
+        let maxBraceExpansion = 10_000
+
         if let startInt = Int(start), let endInt = Int(end) {
             let step = Int(stepText ?? "") ?? (startInt <= endInt ? 1 : -1)
             guard step != 0 else { return nil }
+            let count = step > 0 ? (endInt >= startInt ? (endInt - startInt) / step + 1 : 0)
+                                 : (startInt >= endInt ? (startInt - endInt) / (-step) + 1 : 0)
+            guard count <= maxBraceExpansion else { return nil }
             var values: [String] = []
             var current = startInt
             if step > 0 {
@@ -968,16 +808,20 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         let step = Int(stepText ?? "") ?? (startScalar.value <= endScalar.value ? 1 : -1)
         guard step != 0 else { return nil }
+        let startVal = Int(startScalar.value)
+        let targetVal = Int(endScalar.value)
+        let alphaCount = step > 0 ? (targetVal >= startVal ? (targetVal - startVal) / step + 1 : 0)
+                                  : (startVal >= targetVal ? (startVal - targetVal) / (-step) + 1 : 0)
+        guard alphaCount <= maxBraceExpansion else { return nil }
         var values: [String] = []
-        var current = Int(startScalar.value)
-        let target = Int(endScalar.value)
+        var current = startVal
         if step > 0 {
-            while current <= target {
+            while current <= targetVal {
                 values.append(String(UnicodeScalar(current)!))
                 current += step
             }
         } else {
-            while current >= target {
+            while current >= targetVal {
                 values.append(String(UnicodeScalar(current)!))
                 current += step
             }
@@ -1015,6 +859,18 @@ public final class ShellInterpreter: @unchecked Sendable {
                 return session.getVariable("HOME") ?? "/home/user"
             }
             return "/home/\(user)"
+        case .processSubstitution(let script, let isInput):
+            let tempPath = "/tmp/.proc_sub_\(UUID().uuidString.prefix(8))"
+            if isInput {
+                let parsed = try ShellParser(limits: limits).parse(script)
+                var subSession = session
+                subSession.callDepth += 1
+                let execResult = try await executeScript(parsed, session: &subSession, stdin: stdin)
+                try? fileSystem.writeFile(execResult.stdout, to: tempPath)
+            } else {
+                try? fileSystem.writeFile("", to: tempPath)
+            }
+            return tempPath
         }
     }
 
@@ -1079,6 +935,20 @@ public final class ShellInterpreter: @unchecked Sendable {
                 throw ShellRuntimeError.unboundVariable(name)
             }
             return ""
+        case .indirect(let name):
+            let intermediateValue = session.getVariable(name) ?? ""
+            return session.getVariable(intermediateValue) ?? ""
+        case .namesByPrefix(let prefix, _):
+            let names = session.environment.keys.filter { $0.hasPrefix(prefix) }.sorted()
+            return names.joined(separator: " ")
+        case .arrayKeys(let name, _):
+            if let arr = session.getArray(name) {
+                return (0..<arr.count).map(String.init).joined(separator: " ")
+            }
+            if let assoc = session.getAssociativeArray(name) {
+                return assoc.keys.sorted().joined(separator: " ")
+            }
+            return ""
         }
     }
 
@@ -1133,29 +1003,30 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         case .removeSmallestPrefix(let pattern):
             guard let val = value else { return "" }
-            return removePrefix(val, pattern: pattern, greedy: false)
+            return removePrefix(val, pattern: pattern, greedy: false, extglob: session.options.extglob)
 
         case .removeLargestPrefix(let pattern):
             guard let val = value else { return "" }
-            return removePrefix(val, pattern: pattern, greedy: true)
+            return removePrefix(val, pattern: pattern, greedy: true, extglob: session.options.extglob)
 
         case .removeSmallestSuffix(let pattern):
             guard let val = value else { return "" }
-            return removeSuffix(val, pattern: pattern, greedy: false)
+            return removeSuffix(val, pattern: pattern, greedy: false, extglob: session.options.extglob)
 
         case .removeLargestSuffix(let pattern):
             guard let val = value else { return "" }
-            return removeSuffix(val, pattern: pattern, greedy: true)
+            return removeSuffix(val, pattern: pattern, greedy: true, extglob: session.options.extglob)
 
         case .replace(let pattern, let replacement, let all):
             guard let val = value else { return "" }
-            return replacePattern(val, pattern: pattern, replacement: replacement, all: all)
+            return replacePattern(val, pattern: pattern, replacement: replacement, all: all, extglob: session.options.extglob)
 
         case .replacePrefix(let pattern, let replacement):
             guard let val = value else { return "" }
+            let ext = session.options.extglob
             for i in (0...val.count).reversed() {
                 let prefix = String(val.prefix(i))
-                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern, extglob: ext) {
                     return replacement + String(val.dropFirst(i))
                 }
             }
@@ -1163,9 +1034,10 @@ public final class ShellInterpreter: @unchecked Sendable {
 
         case .replaceSuffix(let pattern, let replacement):
             guard let val = value else { return "" }
+            let ext = session.options.extglob
             for i in 0...val.count {
                 let suffix = String(val.suffix(i))
-                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern, extglob: ext) {
                     return String(val.dropLast(i)) + replacement
                 }
             }
@@ -1196,6 +1068,23 @@ public final class ShellInterpreter: @unchecked Sendable {
             if all { return val.lowercased() }
             if val.isEmpty { return val }
             return val.prefix(1).lowercased() + val.dropFirst()
+
+        case .transform(let op):
+            guard let val = value else { return "" }
+            switch op {
+            case .quote:
+                return "'\(val.replacingOccurrences(of: "'", with: "'\\''"))'"
+            case .escape:
+                return val.map { ch in
+                    "\\\"'$ \t\n".contains(ch) ? "\\\(ch)" : String(ch)
+                }.joined()
+            case .assign:
+                return "declare -- \(name)=\"\(val)\""
+            case .attributes:
+                return ""  // simplified — no attribute tracking
+            case .prompt:
+                return val  // simplified — no prompt expansion
+            }
         }
     }
 
@@ -1223,18 +1112,18 @@ public final class ShellInterpreter: @unchecked Sendable {
 
     // MARK: - Pattern matching helpers
 
-    private func removePrefix(_ value: String, pattern: String, greedy: Bool) -> String {
+    private func removePrefix(_ value: String, pattern: String, greedy: Bool, extglob: Bool = false) -> String {
         if greedy {
             for i in (0...value.count).reversed() {
                 let prefix = String(value.prefix(i))
-                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern, extglob: extglob) {
                     return String(value.dropFirst(i))
                 }
             }
         } else {
             for i in 0...value.count {
                 let prefix = String(value.prefix(i))
-                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: prefix, pattern: pattern, extglob: extglob) {
                     return String(value.dropFirst(i))
                 }
             }
@@ -1242,18 +1131,18 @@ public final class ShellInterpreter: @unchecked Sendable {
         return value
     }
 
-    private func removeSuffix(_ value: String, pattern: String, greedy: Bool) -> String {
+    private func removeSuffix(_ value: String, pattern: String, greedy: Bool, extglob: Bool = false) -> String {
         if greedy {
-            for i in (0...value.count).reversed() {
+            for i in 0...value.count {
                 let suffix = String(value.suffix(value.count - i))
-                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern, extglob: extglob) {
                     return String(value.prefix(i))
                 }
             }
         } else {
             for i in (0...value.count).reversed() {
                 let suffix = String(value.suffix(value.count - i))
-                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: suffix, pattern: pattern, extglob: extglob) {
                     return String(value.prefix(i))
                 }
             }
@@ -1261,7 +1150,7 @@ public final class ShellInterpreter: @unchecked Sendable {
         return value
     }
 
-    private func replacePattern(_ value: String, pattern: String, replacement: String, all: Bool) -> String {
+    private func replacePattern(_ value: String, pattern: String, replacement: String, all: Bool, extglob: Bool = false) -> String {
         // Simple implementation: try to match pattern at each position
         var result = ""
         let chars = Array(value)
@@ -1271,7 +1160,7 @@ public final class ShellInterpreter: @unchecked Sendable {
             // Try match from position i with increasing lengths
             for len in (1...(chars.count - i)).reversed() {
                 let sub = String(chars[i..<(i + len)])
-                if VirtualFileSystem.globMatch(name: sub, pattern: pattern) {
+                if VirtualFileSystem.globMatch(name: sub, pattern: pattern, extglob: extglob) {
                     result += replacement
                     i += len
                     matched = true
@@ -1293,6 +1182,21 @@ public final class ShellInterpreter: @unchecked Sendable {
         guard session.callDepth < limits.maxSubstitutionDepth else {
             return ""
         }
+
+        // Handle $(< file) shorthand — equivalent to $(cat file)
+        let trimmed = script.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("<") {
+            let rest = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty && !rest.contains(" ") && !rest.contains("|") && !rest.contains(";") {
+                let path = VirtualPath.normalize(rest, relativeTo: session.cwd)
+                if let content = try? fileSystem.readFile(path) {
+                    var output = content
+                    while output.hasSuffix("\n") { output = String(output.dropLast()) }
+                    return output
+                }
+            }
+        }
+
         let parsed = try ShellParser(limits: limits).parse(script)
         var subSession = session
         subSession.callDepth += 1
@@ -1382,6 +1286,9 @@ public final class ShellInterpreter: @unchecked Sendable {
                 } else if redir.effectiveFD == 2 {
                     try fileSystem.writeFile(stderr, to: target, relativeTo: session.cwd)
                     stderr = ""
+                } else {
+                    // Stub: for fd > 2 (e.g. exec 3>file), just create the file
+                    try fileSystem.writeFile("", to: target, relativeTo: session.cwd)
                 }
             case .append:
                 let target = try await expandWord(redir.target, session: &session, stdin: stdin)
@@ -1391,6 +1298,9 @@ public final class ShellInterpreter: @unchecked Sendable {
                 } else if redir.effectiveFD == 2 {
                     try fileSystem.writeFile(stderr, to: target, relativeTo: session.cwd, append: true)
                     stderr = ""
+                } else {
+                    // Stub: for fd > 2, just create/touch the file
+                    try fileSystem.writeFile("", to: target, relativeTo: session.cwd, append: true)
                 }
             case .duplicateOutput:
                 let target = try await expandWord(redir.target, session: &session, stdin: stdin)
@@ -1399,9 +1309,22 @@ public final class ShellInterpreter: @unchecked Sendable {
                 } else if target == "2" && (redir.fd == nil || redir.fd == 1) {
                     stderr += stdout; stdout = ""
                 }
+                // fd > 2 duplicate targets are silently accepted
             case .duplicateInput:
+                break // silently accept all fd duplicate inputs
+            case .input:
+                // For fd > 2 (e.g. exec 3<file), silently accept if not fd 0
+                // fd 0 input is handled earlier in executeSimple
                 break
-            case .input, .inputOutput, .heredoc, .heredocStripTabs, .herestring:
+            case .inputOutput:
+                if redir.effectiveFD > 2 {
+                    // Stub: for fd > 2 (e.g. exec 3<>file), just create the file if it doesn't exist
+                    let target = try await expandWord(redir.target, session: &session, stdin: stdin)
+                    if !fileSystem.exists(target, relativeTo: session.cwd) {
+                        try fileSystem.writeFile("", to: target, relativeTo: session.cwd)
+                    }
+                }
+            case .heredoc, .heredocStripTabs, .herestring:
                 break // handled earlier in executeSimple
             }
         }
@@ -1417,379 +1340,9 @@ public final class ShellInterpreter: @unchecked Sendable {
         return result
     }
 
-    // MARK: - Shell Builtins
+    // MARK: - Shared Helpers
 
-    typealias BuiltinFn = ([String], inout ShellSession, [String: String], String) async throws -> ExecResult
-
-    func shellBuiltin(_ name: String) -> BuiltinFn? {
-        switch name {
-        case "cd": return builtinCd
-        case "pwd": return builtinPwd
-        case "echo": return builtinEcho
-        case "printf": return builtinPrintf
-        case "env": return builtinEnv
-        case "printenv": return builtinPrintenv
-        case "which", "type": return builtinWhich
-        case "true": return { _, _, _, _ in ExecResult.success() }
-        case "false": return { _, _, _, _ in ExecResult(stdout: "", stderr: "", exitCode: 1) }
-        case "export": return builtinExport
-        case "unset": return builtinUnset
-        case "local": return builtinLocal
-        case "declare", "typeset": return builtinDeclare
-        case "read": return builtinRead
-        case "set": return builtinSet
-        case "shift": return builtinShift
-        case "return": return builtinReturn
-        case "exit": return builtinExit
-        case "break": return builtinBreak
-        case "continue": return builtinContinue
-        case "test", "[": return builtinTest
-        case "eval": return builtinEval
-        case "source", ".": return builtinSource
-        case "trap": return { _, _, _, _ in ExecResult.success() }
-        case "alias": return builtinAlias
-        case "unalias": return { args, session, _, _ in args.forEach { session.aliases.removeValue(forKey: $0) }; return .success() }
-        case ":": return { _, _, _, _ in ExecResult.success() }
-        case "command": return builtinCommand
-        case "let": return builtinLet
-        case "getopts": return builtinGetopts
-        case "mapfile", "readarray": return builtinMapfile
-        case "pushd": return builtinPushd
-        case "popd": return builtinPopd
-        case "dirs": return builtinDirs
-        case "builtin": return builtinBuiltin
-        case "hash": return builtinHash
-        case "exec": return builtinExec
-        case "readonly": return builtinReadonly
-        case "shopt": return builtinShopt
-        default: return nil
-        }
-    }
-
-    // MARK: Builtin implementations
-
-    private func builtinCd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let dest: String
-        if args.isEmpty || args[0] == "~" {
-            dest = env["HOME"] ?? session.getVariable("HOME") ?? "/home/user"
-        } else if args[0] == "-" {
-            dest = session.getVariable("OLDPWD") ?? session.cwd
-        } else {
-            dest = args[0]
-        }
-        let target = VirtualPath.normalize(dest, relativeTo: session.cwd)
-        guard fileSystem.isDirectory(target) else {
-            return ExecResult.failure("cd: no such directory: \(dest)")
-        }
-        let old = session.cwd
-        session.cwd = target
-        session.setVariable("OLDPWD", old)
-        session.setVariable("PWD", target)
-        return ExecResult.success()
-    }
-
-    private func builtinPwd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        ExecResult.success(session.cwd + "\n")
-    }
-
-    private func builtinEcho(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var items = args
-        var newline = true
-        var interpretEscapes = false
-        while let first = items.first {
-            if first == "-n" { newline = false; items.removeFirst() }
-            else if first == "-e" { interpretEscapes = true; items.removeFirst() }
-            else if first == "-E" { interpretEscapes = false; items.removeFirst() }
-            else if first == "-en" || first == "-ne" { newline = false; interpretEscapes = true; items.removeFirst() }
-            else { break }
-        }
-        var output = items.joined(separator: " ")
-        if interpretEscapes {
-            output = interpretEscapeSequences(output)
-        }
-        if newline { output += "\n" }
-        return ExecResult.success(output)
-    }
-
-    private func interpretEscapeSequences(_ s: String) -> String {
-        var result = ""
-        var chars = s.makeIterator()
-        while let ch = chars.next() {
-            if ch == "\\" {
-                guard let next = chars.next() else { result.append("\\"); break }
-                switch next {
-                case "n": result.append("\n")
-                case "t": result.append("\t")
-                case "r": result.append("\r")
-                case "\\": result.append("\\")
-                case "a": result.append("\u{07}")
-                case "b": result.append("\u{08}")
-                case "e", "E": result.append("\u{1B}")
-                case "0":
-                    var oct = ""
-                    for _ in 0..<3 { if let c = chars.next(), "01234567".contains(c) { oct.append(c) } }
-                    if let val = UInt32(oct.isEmpty ? "0" : oct, radix: 8), let s = Unicode.Scalar(val) { result.append(Character(s)) }
-                default: result.append("\\"); result.append(next)
-                }
-            } else {
-                result.append(ch)
-            }
-        }
-        return result
-    }
-
-    private func builtinPrintf(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard let format = args.first else { return ExecResult.success() }
-        var remaining = Array(args.dropFirst())
-        var output = ""
-
-        // Repeat format string while arguments remain
-        repeat {
-            var iter = format.makeIterator()
-            var usedArg = false
-            while let ch = iter.next() {
-                if ch == "%" {
-                    guard let spec = iter.next() else { output.append("%"); break }
-                    switch spec {
-                    case "%": output.append("%")
-                    case "s": output += remaining.isEmpty ? "" : remaining.removeFirst(); usedArg = true
-                    case "d", "i":
-                        let arg = remaining.isEmpty ? "0" : remaining.removeFirst(); usedArg = true
-                        output += String(Int(arg) ?? 0)
-                    case "f":
-                        let arg = remaining.isEmpty ? "0" : remaining.removeFirst(); usedArg = true
-                        output += String(format: "%.6f", Double(arg) ?? 0.0)
-                    case "x":
-                        let arg = remaining.isEmpty ? "0" : remaining.removeFirst(); usedArg = true
-                        output += String(Int(arg) ?? 0, radix: 16)
-                    case "o":
-                        let arg = remaining.isEmpty ? "0" : remaining.removeFirst(); usedArg = true
-                        output += String(Int(arg) ?? 0, radix: 8)
-                    case "c":
-                        let arg = remaining.isEmpty ? "" : remaining.removeFirst(); usedArg = true
-                        output += String(arg.prefix(1))
-                    default:
-                        output.append("%"); output.append(spec)
-                    }
-                } else if ch == "\\" {
-                    guard let esc = iter.next() else { output.append("\\"); break }
-                    switch esc {
-                    case "n": output.append("\n")
-                    case "t": output.append("\t")
-                    case "r": output.append("\r")
-                    case "\\": output.append("\\")
-                    default: output.append("\\"); output.append(esc)
-                    }
-                } else {
-                    output.append(ch)
-                }
-            }
-            if !usedArg { break }
-        } while !remaining.isEmpty
-
-        return ExecResult.success(output)
-    }
-
-    private func builtinEnv(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let rendered = env.keys.sorted().map { "\($0)=\(env[$0] ?? "")" }.joined(separator: "\n")
-        return ExecResult.success(rendered + (rendered.isEmpty ? "" : "\n"))
-    }
-
-    private func builtinPrintenv(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            return try await builtinEnv(args, &session, env, stdin)
-        }
-        let values = args.compactMap { env[$0] }
-        if values.isEmpty { return ExecResult(stdout: "", stderr: "", exitCode: 1) }
-        return ExecResult.success(values.joined(separator: "\n") + "\n")
-    }
-
-    private func builtinWhich(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var lines: [String] = []
-        for arg in args {
-            if shellBuiltin(arg) != nil || registry.contains(arg) || session.functions[arg] != nil {
-                lines.append("/bin/\(arg)")
-            }
-        }
-        return ExecResult(stdout: lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"), stderr: "", exitCode: lines.count == args.count ? 0 : 1)
-    }
-
-    private func builtinExport(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            // Print all exported variables
-            let lines = session.environment.keys.sorted().map { "declare -x \($0)=\"\(session.environment[$0] ?? "")\"" }
-            return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
-        }
-        for arg in args {
-            if arg == "-n" { continue }
-            if let eq = arg.firstIndex(of: "=") {
-                let name = String(arg[..<eq])
-                let value = String(arg[arg.index(after: eq)...])
-                if session.readonlyVariables.contains(name) {
-                    return ExecResult.failure("bash: \(name): readonly variable")
-                }
-                session.setVariable(name, value)
-                session.environment[name] = value
-            } else if let val = session.getVariable(arg) {
-                session.environment[arg] = val
-            } else {
-                session.environment[arg] = ""
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinUnset(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var names = args
-        if names.first == "-v" || names.first == "-f" {
-            let flag = names.removeFirst()
-            if flag == "-f" {
-                for name in names { session.functions.removeValue(forKey: name) }
-                return ExecResult.success()
-            }
-        }
-        for name in names {
-            if session.readonlyVariables.contains(name) || parseArrayElementAssignmentTarget(name).map({ session.readonlyVariables.contains($0.0) }) == true {
-                return ExecResult.failure("bash: \(name.replacingOccurrences(of: "\\[.*\\]$", with: "", options: .regularExpression)): readonly variable")
-            }
-            if let (arrayName, key) = parseArrayElementAssignmentTarget(name) {
-                if let index = Int(key) {
-                    session.unsetArrayElement(arrayName, index: index)
-                } else {
-                    session.unsetAssociativeElement(arrayName, key: key)
-                }
-            } else {
-                session.unsetVariable(name)
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinLocal(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        for arg in args {
-            if let (name, values) = parseInlineArrayArgument(arg) {
-                if session.readonlyVariables.contains(name) {
-                    return ExecResult.failure("bash: \(name): readonly variable")
-                }
-                session.declareLocalArray(name, values: values)
-            } else if let eq = arg.firstIndex(of: "=") {
-                let name = String(arg[..<eq])
-                let value = String(arg[arg.index(after: eq)...])
-                if session.readonlyVariables.contains(name) {
-                    return ExecResult.failure("bash: \(name): readonly variable")
-                }
-                session.declareLocal(name, value: value)
-            } else {
-                session.declareLocal(arg)
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinDeclare(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        // Simplified declare - just handle variable assignment
-        var isLocal = false
-        var isExport = false
-        var isArray = false
-        var isAssociativeArray = false
-        var filtered: [String] = []
-        for arg in args {
-            if arg.hasPrefix("-") {
-                if arg.contains("x") { isExport = true }
-                if arg.contains("a") { isArray = true }
-                if arg.contains("A") { isAssociativeArray = true }
-                // -g means global (opposite of local)
-                if !arg.contains("g") { isLocal = true }
-            } else {
-                filtered.append(arg)
-            }
-        }
-        for arg in filtered {
-            if isAssociativeArray {
-                if let name = arg.components(separatedBy: "=").first {
-                    if isLocal {
-                        session.declareAssociativeArray(name)
-                    } else {
-                        session.declareAssociativeArray(name)
-                    }
-                }
-            } else if isArray, let (name, values) = parseInlineArrayArgument(arg) {
-                if session.readonlyVariables.contains(name) {
-                    return ExecResult.failure("bash: \(name): readonly variable")
-                }
-                if isLocal {
-                    session.declareLocalArray(name, values: values)
-                } else {
-                    session.setArray(name, values)
-                }
-            } else if let eq = arg.firstIndex(of: "=") {
-                let name = String(arg[..<eq])
-                let value = String(arg[arg.index(after: eq)...])
-                if session.readonlyVariables.contains(name) {
-                    return ExecResult.failure("bash: \(name): readonly variable")
-                }
-                if isLocal {
-                    session.declareLocal(name, value: value)
-                } else {
-                    session.setVariable(name, value)
-                }
-                if isExport { session.environment[name] = value }
-            } else {
-                if isLocal { session.declareLocal(arg) }
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinRead(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var delimiter = "\n"
-        var varNames: [String] = []
-        var i = 0
-        while i < args.count {
-            switch args[i] {
-            case "-r": i += 1 // raw mode (no backslash processing)
-            case "-p":
-                i += 2 // skip prompt string (no interactive terminal)
-            case "-d":
-                i += 1; if i < args.count { delimiter = args[i]; i += 1 }
-            case "-n", "-N", "-t", "-u":
-                i += 2 // skip option and its argument
-            default:
-                varNames.append(args[i]); i += 1
-            }
-        }
-        if varNames.isEmpty { varNames = ["REPLY"] }
-
-        let input: String
-        if let delimChar = delimiter.first {
-            if let idx = stdin.firstIndex(of: delimChar) {
-                input = String(stdin[..<idx])
-            } else {
-                input = stdin.trimmingCharacters(in: .newlines)
-            }
-        } else {
-            input = stdin.trimmingCharacters(in: .newlines)
-        }
-
-        let ifs = session.getVariable("IFS") ?? " \t\n"
-        let fields = splitByIFS(input, ifs: ifs)
-
-        for (idx, name) in varNames.enumerated() {
-            if idx == varNames.count - 1 {
-                // Last variable gets remaining fields
-                let remaining = fields.dropFirst(idx)
-                session.setVariable(name, remaining.joined(separator: " "))
-            } else if idx < fields.count {
-                session.setVariable(name, fields[idx])
-            } else {
-                session.setVariable(name, "")
-            }
-        }
-
-        return stdin.isEmpty ? ExecResult(stdout: "", stderr: "", exitCode: 1) : ExecResult.success()
-    }
-
-    private func splitByIFS(_ input: String, ifs: String) -> [String] {
+    func splitByIFS(_ input: String, ifs: String) -> [String] {
         if ifs.isEmpty { return [input] }
         var fields: [String] = []
         var current = ""
@@ -1810,227 +1363,13 @@ public final class ShellInterpreter: @unchecked Sendable {
         return fields
     }
 
-    private func addXtraceIfNeeded(_ result: ExecResult, traceComponents: [String], session: ShellSession) -> ExecResult {
+    func addXtraceIfNeeded(_ result: ExecResult, traceComponents: [String], session: ShellSession) -> ExecResult {
         guard session.options.xtrace, !traceComponents.isEmpty else { return result }
         let traceLine = "+ " + traceComponents.joined(separator: " ") + "\n"
         return ExecResult(stdout: result.stdout, stderr: traceLine + result.stderr, exitCode: result.exitCode)
     }
 
-    private func parseAliasWords(_ aliasValue: String) throws -> [ShellWord] {
-        let parsed = try ShellParser(limits: limits).parse(aliasValue)
-        guard parsed.entries.count == 1,
-              parsed.entries[0].andOr.rest.isEmpty else {
-            return [ShellWord(literal: aliasValue)]
-        }
-        let pipeline = parsed.entries[0].andOr.first
-        guard pipeline.commands.count == 1,
-              case .simple(let simple) = pipeline.commands[0],
-              simple.assignments.isEmpty,
-              simple.redirections.isEmpty,
-              !simple.words.isEmpty else {
-            return [ShellWord(literal: aliasValue)]
-        }
-        return simple.words
-    }
-
-    private func builtinSet(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            // Print all variables
-            let lines = session.environment.keys.sorted().map { "\($0)='\(session.environment[$0] ?? "")'" }
-            return ExecResult.success(lines.joined(separator: "\n") + "\n")
-        }
-        if args[0] == "--" {
-            session.positionalParams = Array(args.dropFirst())
-            return ExecResult.success()
-        }
-        for arg in args {
-            if arg.hasPrefix("-") {
-                for ch in arg.dropFirst() {
-                    switch ch {
-                    case "e": session.options.errexit = true
-                    case "u": session.options.nounset = true
-                    case "x": session.options.xtrace = true
-                    case "f": session.options.noglob = true
-                    case "C": session.options.noclobber = true
-                    case "o":
-                        // Handled below
-                        break
-                    default: break
-                    }
-                }
-            } else if arg.hasPrefix("+") {
-                for ch in arg.dropFirst() {
-                    switch ch {
-                    case "e": session.options.errexit = false
-                    case "u": session.options.nounset = false
-                    case "x": session.options.xtrace = false
-                    case "f": session.options.noglob = false
-                    case "C": session.options.noclobber = false
-                    default: break
-                    }
-                }
-            }
-        }
-        // Handle set -o pipefail etc.
-        var i = 0
-        while i < args.count {
-            if args[i] == "-o" && i + 1 < args.count {
-                switch args[i + 1] {
-                case "pipefail": session.options.pipefail = true
-                case "errexit": session.options.errexit = true
-                case "nounset": session.options.nounset = true
-                case "xtrace": session.options.xtrace = true
-                case "noglob": session.options.noglob = true
-                case "noclobber": session.options.noclobber = true
-                default: break
-                }
-                i += 2
-            } else if args[i] == "+o" && i + 1 < args.count {
-                switch args[i + 1] {
-                case "pipefail": session.options.pipefail = false
-                default: break
-                }
-                i += 2
-            } else {
-                i += 1
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinShift(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let n = args.first.flatMap(Int.init) ?? 1
-        if n > session.positionalParams.count {
-            return ExecResult.failure("shift: shift count out of range")
-        }
-        session.positionalParams = Array(session.positionalParams.dropFirst(n))
-        return ExecResult.success()
-    }
-
-    private func builtinReturn(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let code = args.first.flatMap(Int.init) ?? session.lastExitCode
-        throw ControlFlow.return(code)
-    }
-
-    private func builtinExit(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let code = args.first.flatMap(Int.init) ?? session.lastExitCode
-        throw ControlFlow.exit(code)
-    }
-
-    private func builtinBreak(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let n = args.first.flatMap(Int.init) ?? 1
-        throw ControlFlow.break(max(1, n))
-    }
-
-    private func builtinContinue(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let n = args.first.flatMap(Int.init) ?? 1
-        throw ControlFlow.continue(max(1, n))
-    }
-
-    private func builtinTest(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var testArgs = args
-        // Remove trailing ] if present (for [ command)
-        if testArgs.last == "]" { testArgs.removeLast() }
-        let result = evaluateTestExpr(&testArgs, session: session)
-        return ExecResult(stdout: "", stderr: "", exitCode: result ? 0 : 1)
-    }
-
-    private func evaluateTestExpr(_ args: inout [String], session: ShellSession) -> Bool {
-        if args.isEmpty { return false }
-        if args.count == 1 { return !args[0].isEmpty }
-
-        // Unary operators
-        if args.count >= 2 && args[0].hasPrefix("-") {
-            let op = args[0]
-            let val = args[1]
-            args = Array(args.dropFirst(2))
-            let path = VirtualPath.normalize(val, relativeTo: session.cwd)
-            switch op {
-            case "-z": return val.isEmpty
-            case "-n": return !val.isEmpty
-            case "-e": return fileSystem.exists(path)
-            case "-f": return fileSystem.exists(path) && !fileSystem.isDirectory(path)
-            case "-d": return fileSystem.isDirectory(path)
-            case "-s":
-                guard let info = try? fileSystem.fileInfo(path) else { return false }
-                return info.size > 0
-            case "-r", "-w", "-x": return fileSystem.exists(path)
-            case "-L", "-h": return (try? fileSystem.readlink(path)) != nil
-            default: return false
-            }
-        }
-
-        // Binary operators
-        if args.count >= 3 {
-            let left = args[0], op = args[1], right = args[2]
-            args = Array(args.dropFirst(3))
-            return evaluateBinaryTest(left, op, right)
-        }
-
-        return !args.removeFirst().isEmpty
-    }
-
-    private func builtinEval(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        let script = args.joined(separator: " ")
-        if script.isEmpty { return ExecResult.success() }
-        do {
-            let parsed = try ShellParser(limits: limits).parse(script)
-            return try await executeScript(parsed, session: &session, stdin: stdin)
-        } catch {
-            return ExecResult(stdout: "", stderr: "eval: \(error.localizedDescription)\n", exitCode: 1)
-        }
-    }
-
-    private func builtinSource(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard let path = args.first else {
-            return ExecResult.failure("source: filename argument required")
-        }
-        do {
-            let content = try fileSystem.readFile(path, relativeTo: session.cwd)
-            let parsed = try ShellParser(limits: limits).parse(content)
-            return try await executeScript(parsed, session: &session, stdin: stdin)
-        } catch {
-            return ExecResult(stdout: "", stderr: "source: \(error.localizedDescription)\n", exitCode: 1)
-        }
-    }
-
-    private func builtinAlias(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            let lines = session.aliases.keys.sorted().map { "alias \($0)='\(session.aliases[$0]!)'" }
-            return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
-        }
-        for arg in args {
-            if let eq = arg.firstIndex(of: "=") {
-                let name = String(arg[..<eq])
-                let rawValue = String(arg[arg.index(after: eq)...])
-                let value = stripMatchingQuotes(rawValue)
-                session.aliases[name] = value
-            } else {
-                if let val = session.aliases[arg] {
-                    return ExecResult.success("alias \(arg)='\(val)'\n")
-                }
-                return ExecResult.failure("alias: \(arg): not found")
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func stripMatchingQuotes(_ text: String) -> String {
-        var result = text
-        if result.count >= 2,
-           ((result.hasPrefix("'") && result.hasSuffix("'")) || (result.hasPrefix("\"") && result.hasSuffix("\""))) {
-            return String(result.dropFirst().dropLast())
-        }
-        if let first = result.first, first == "'" || first == "\"" {
-            result.removeFirst()
-        }
-        if let last = result.last, last == "'" || last == "\"" {
-            result.removeLast()
-        }
-        return result
-    }
-
-    private func parseArrayElementAssignmentTarget(_ name: String) -> (String, String)? {
+    func parseArrayElementAssignmentTarget(_ name: String) -> (String, String)? {
         guard let bracket = name.firstIndex(of: "["),
               name.hasSuffix("]") else {
             return nil
@@ -2043,243 +1382,5 @@ public final class ShellInterpreter: @unchecked Sendable {
             return nil
         }
         return (base, indexText)
-    }
-
-    private func parseInlineArrayArgument(_ arg: String) -> (String, [String])? {
-        guard let eq = arg.firstIndex(of: "="),
-              arg[arg.index(after: eq)] == "(",
-              arg.hasSuffix(")") else {
-            return nil
-        }
-        let name = String(arg[..<eq])
-        let start = arg.index(arg.index(after: eq), offsetBy: 1)
-        let inner = String(arg[start..<arg.index(before: arg.endIndex)])
-        guard !name.isEmpty else { return nil }
-        do {
-            let parsed = try ShellParser(limits: limits).parse("echo \(inner)")
-            guard let entry = parsed.entries.first,
-                  case .simple(let command) = entry.andOr.first.commands.first else {
-                return nil
-            }
-            let values = command.words.dropFirst().map(\.rawText)
-            return (name, values)
-        } catch {
-            return nil
-        }
-    }
-
-    private func builtinCommand(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var filteredArgs = args
-        // Skip -v flag
-        if filteredArgs.first == "-v" {
-            filteredArgs.removeFirst()
-            return try await builtinWhich(filteredArgs, &session, env, stdin)
-        }
-        guard let name = filteredArgs.first else { return ExecResult.success() }
-        let cmdArgs = Array(filteredArgs.dropFirst())
-        // Execute command, bypassing functions
-        if let cmd = registry.command(named: name) {
-            let ctx = CommandContext(fileSystem: fileSystem, cwd: session.cwd, environment: env, stdin: stdin)
-            return await cmd.execute(cmdArgs, ctx)
-        }
-        if let builtin = shellBuiltin(name) {
-            return try await builtin(cmdArgs, &session, env, stdin)
-        }
-        return ExecResult.failure("\(name): command not found", exitCode: 127)
-    }
-
-    private func builtinLet(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var lastVal = 0
-        for arg in args {
-            lastVal = evaluateArithmetic(arg, session: &session)
-        }
-        return ExecResult(stdout: "", stderr: "", exitCode: lastVal != 0 ? 0 : 1)
-    }
-
-    private func builtinGetopts(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard args.count >= 2 else { return ExecResult(stdout: "", stderr: "", exitCode: 1) }
-        let optstring = args[0]
-        let varName = args[1]
-        let optArgs = args.count > 2 ? Array(args.dropFirst(2)) : session.positionalParams
-        let optind = Int(session.getVariable("OPTIND") ?? "1") ?? 1
-
-        if optind > optArgs.count {
-            session.setVariable(varName, "?")
-            return ExecResult(stdout: "", stderr: "", exitCode: 1)
-        }
-
-        let arg = optArgs[optind - 1]
-        guard arg.hasPrefix("-") && arg != "-" && arg != "--" else {
-            session.setVariable(varName, "?")
-            return ExecResult(stdout: "", stderr: "", exitCode: 1)
-        }
-
-        let opt = arg.dropFirst().first!
-        session.setVariable(varName, String(opt))
-
-        if let idx = optstring.firstIndex(of: opt) {
-            let nextIdx = optstring.index(after: idx)
-            if nextIdx < optstring.endIndex && optstring[nextIdx] == ":" {
-                // Requires argument
-                if arg.count > 2 {
-                    session.setVariable("OPTARG", String(arg.dropFirst(2)))
-                    session.setVariable("OPTIND", String(optind + 1))
-                } else if optind < optArgs.count {
-                    session.setVariable("OPTARG", optArgs[optind])
-                    session.setVariable("OPTIND", String(optind + 2))
-                } else {
-                    session.setVariable(varName, ":")
-                    session.setVariable("OPTIND", String(optind + 1))
-                }
-            } else {
-                session.setVariable("OPTIND", String(optind + 1))
-            }
-        } else {
-            session.setVariable(varName, "?")
-            session.setVariable("OPTIND", String(optind + 1))
-        }
-
-        return ExecResult.success()
-    }
-
-    private func builtinMapfile(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        var stripTerminators = false
-        var variableName = "MAPFILE"
-        var index = 0
-        while index < args.count {
-            switch args[index] {
-            case "-t":
-                stripTerminators = true
-                index += 1
-            default:
-                variableName = args[index]
-                index += 1
-            }
-        }
-
-        var lines = stdin.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        if stripTerminators {
-            if lines.last == "" && stdin.hasSuffix("\n") {
-                lines.removeLast()
-            }
-        } else if !stdin.isEmpty {
-            lines = lines.map { $0 + "\n" }
-            if stdin.hasSuffix("\n"), !lines.isEmpty {
-                _ = lines.removeLast()
-            }
-        }
-        session.setArray(variableName, lines)
-        return ExecResult.success()
-    }
-
-    private func builtinPushd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard let targetArg = args.first else {
-            return ExecResult.failure("pushd: no other directory")
-        }
-        let target = VirtualPath.normalize(targetArg, relativeTo: session.cwd)
-        guard fileSystem.isDirectory(target) else {
-            return ExecResult.failure("pushd: no such directory: \(targetArg)")
-        }
-        session.directoryStack.insert(session.cwd, at: 0)
-        session.cwd = target
-        session.setVariable("PWD", target)
-        return ExecResult.success(formatDirectoryStack(session) + "\n")
-    }
-
-    private func builtinPopd(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard !session.directoryStack.isEmpty else {
-            return ExecResult.failure("popd: directory stack empty")
-        }
-        let target = session.directoryStack.removeFirst()
-        session.cwd = target
-        session.setVariable("PWD", target)
-        return ExecResult.success(formatDirectoryStack(session) + "\n")
-    }
-
-    private func builtinDirs(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.contains("-p") {
-            return ExecResult.success(([session.cwd] + session.directoryStack).joined(separator: "\n") + "\n")
-        }
-        return ExecResult.success(formatDirectoryStack(session) + "\n")
-    }
-
-    private func builtinBuiltin(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard let builtinName = args.first else { return ExecResult.success() }
-        guard let builtin = shellBuiltin(builtinName) else {
-            return ExecResult.failure("builtin: \(builtinName): not a shell builtin")
-        }
-        return try await builtin(Array(args.dropFirst()), &session, env, stdin)
-    }
-
-    private func builtinHash(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.contains("-r") {
-            return ExecResult.success()
-        }
-        if args.isEmpty {
-            return ExecResult.success()
-        }
-        let lines = args.filter { shellBuiltin($0) != nil || registry.contains($0) || session.functions[$0] != nil }
-            .map { "\($0)=/bin/\($0)" }
-        return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
-    }
-
-    private func builtinExec(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        guard !args.isEmpty else { return ExecResult.success() }
-        let script = args.joined(separator: " ")
-        let parsed = try ShellParser(limits: limits).parse(script)
-        return try await executeScript(parsed, session: &session, stdin: stdin)
-    }
-
-    private func builtinReadonly(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            let lines = session.readonlyVariables.sorted().map { "readonly \($0)" }
-            return ExecResult.success(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
-        }
-        for arg in args {
-            if let (name, values) = parseInlineArrayArgument(arg) {
-                if !session.readonlyVariables.contains(name) {
-                    session.setArray(name, values)
-                }
-                session.readonlyVariables.insert(name)
-            } else if let eq = arg.firstIndex(of: "=") {
-                let name = String(arg[..<eq])
-                let value = String(arg[arg.index(after: eq)...])
-                if !session.readonlyVariables.contains(name) {
-                    session.setVariable(name, value)
-                }
-                session.readonlyVariables.insert(name)
-            } else {
-                session.readonlyVariables.insert(arg)
-            }
-        }
-        return ExecResult.success()
-    }
-
-    private func builtinShopt(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
-        if args.isEmpty {
-            let value = session.options.expandAliases ? "shopt -s expand_aliases\n" : "shopt -u expand_aliases\n"
-            return ExecResult.success(value)
-        }
-        if args.count >= 2 {
-            switch (args[0], args[1]) {
-            case ("-s", "expand_aliases"):
-                session.options.expandAliases = true
-                return ExecResult.success()
-            case ("-u", "expand_aliases"):
-                session.options.expandAliases = false
-                return ExecResult.success()
-            default:
-                break
-            }
-        }
-        let lines = args.map { option in
-            let enabled = (option == "expand_aliases") ? session.options.expandAliases : false
-            return enabled ? "shopt -s \(option)" : "shopt -u \(option)"
-        }
-        return ExecResult.success(lines.joined(separator: "\n") + "\n")
-    }
-
-    private func formatDirectoryStack(_ session: ShellSession) -> String {
-        ([session.cwd] + session.directoryStack).joined(separator: " ")
     }
 }

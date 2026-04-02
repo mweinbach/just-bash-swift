@@ -55,7 +55,11 @@ public struct ShellWord: Sendable {
     public var mayContainGlob: Bool {
         parts.contains { part in
             if case .literal(let s) = part {
-                return s.contains("*") || s.contains("?") || s.contains("[")
+                if s.contains("*") || s.contains("?") || s.contains("[") { return true }
+                // Extglob patterns: ?(, *(, +(, @(, !(
+                for prefix in ["?(", "*(", "+(", "@(", "!("] {
+                    if s.contains(prefix) { return true }
+                }
             }
             return false
         }
@@ -90,6 +94,7 @@ public indirect enum WordPart: Sendable {
     case backtickSub(String)
     case arithmeticSub(String)
     case tilde(String)
+    case processSubstitution(String, Bool)  // (script, isInput) - <(cmd) is input=true, >(cmd) is input=false
 
     var rawText: String {
         switch self {
@@ -103,6 +108,7 @@ public indirect enum WordPart: Sendable {
         case .backtickSub(let s): return "`\(s)`"
         case .arithmeticSub(let s): return "$((\(s)))"
         case .tilde(let s): return "~\(s)"
+        case .processSubstitution(let s, let isInput): return isInput ? "<(\(s))" : ">(\(s))"
         }
     }
 }
@@ -116,6 +122,9 @@ public indirect enum VarRef: Sendable {
     case withOp(String, VarOp)                    // ${foo<op>...}
     case arrayElement(String, ShellWord)          // ${arr[idx]}
     case arrayAll(String, Bool)                   // ${arr[@]} or ${arr[*]}
+    case indirect(String)                         // ${!var}
+    case namesByPrefix(String, Bool)              // ${!prefix*} or ${!prefix@}
+    case arrayKeys(String, Bool)                  // ${!arr[@]} or ${!arr[*]} — returns indices/keys
 
     var rawText: String {
         switch self {
@@ -126,6 +135,9 @@ public indirect enum VarRef: Sendable {
         case .withOp(_, _): return "${...}" // simplified
         case .arrayElement(let n, _): return "${\(n)[...]}"
         case .arrayAll(let n, _): return "${\(n)[@]}"
+        case .indirect(let n): return "${!\(n)}"
+        case .namesByPrefix(let p, _): return "${!\(p)*}"
+        case .arrayKeys(let n, _): return "${!\(n)[@]}"
         }
     }
 }
@@ -146,6 +158,16 @@ public indirect enum VarOp: Sendable {
     case substring(String, String?)                     // ${v:off} / ${v:off:len}
     case uppercase(all: Bool)                           // ${v^} / ${v^^}
     case lowercase(all: Bool)                           // ${v,} / ${v,,}
+    case transform(TransformOp)                         // ${v@op}
+}
+
+/// Transformation operations for ${var@op}
+public enum TransformOp: Sendable {
+    case quote      // Q - single-quote the value
+    case escape     // E - backslash-escape special chars
+    case prompt     // P - expand prompt sequences (simplified)
+    case assign     // A - print as assignment statement
+    case attributes // a - print variable attributes
 }
 
 // MARK: - Redirections
@@ -357,6 +379,7 @@ public struct ShellSession: Sendable {
     public var arrayEnvironment: [String: [String]] = [:]
     public var associativeArrayEnvironment: [String: [String: String]] = [:]
     public var readonlyVariables: Set<String> = []
+    public var integerVariables: Set<String> = []
     public var directoryStack: [String] = []
     public var commandCount: Int = 0
     public var lastExitCode: Int = 0
@@ -370,6 +393,10 @@ public struct ShellSession: Sendable {
     public var aliasExpansionDepth: Int = 0
     public var options: ShellOptions = .init()
     public var aliases: [String: String] = [:]
+    public var traps: [String: String] = [:]
+    public var namerefs: [String: String] = [:]  // nameref name -> target name
+    public var functionCallStack: [String] = []  // for FUNCNAME
+    public var sourceFileStack: [String] = []    // for BASH_SOURCE
 
     public init(cwd: String, environment: [String: String]) {
         self.cwd = VirtualPath.normalize(cwd)
@@ -379,6 +406,10 @@ public struct ShellSession: Sendable {
 
     /// Set a variable, respecting local scope
     public mutating func setVariable(_ name: String, _ value: String) {
+        if let target = namerefs[name] {
+            setVariable(target, value)
+            return
+        }
         if let scopeIndex = localScopes.lastIndex(where: { $0.keys.contains(name) }) {
             localScopes[scopeIndex][name] = value
         } else {
@@ -411,7 +442,34 @@ public struct ShellSession: Sendable {
         if let values = associativeArrayEnvironment[name] {
             return values.values.sorted().first
         }
-        return environment[name]
+        if let envValue = environment[name] {
+            return envValue
+        }
+        // Nameref: follow the reference to the target variable
+        if let target = namerefs[name] {
+            return getVariable(target)
+        }
+        // Dynamic special variables (fallback when not explicitly set)
+        switch name {
+        case "RANDOM":
+            return String(Int.random(in: 0..<32768))
+        case "SECONDS":
+            return "0"
+        case "LINENO":
+            return "0"
+        case "BASH_VERSION":
+            return "5.0.0(1)-release"
+        case "HOSTNAME":
+            return "localhost"
+        case "FUNCNAME":
+            return functionCallStack.last ?? "main"
+        case "BASH_SOURCE":
+            return sourceFileStack.last ?? ""
+        case "BASH_LINENO":
+            return "0"
+        default:
+            return nil
+        }
     }
 
     public mutating func setArray(_ name: String, _ values: [String]) {
@@ -513,6 +571,7 @@ public struct ShellSession: Sendable {
 
     /// Unset a variable
     public mutating func unsetVariable(_ name: String) {
+        namerefs.removeValue(forKey: name)
         for i in localScopes.indices.reversed() {
             if localScopes[i].keys.contains(name) {
                 localScopes[i].removeValue(forKey: name)
@@ -560,6 +619,16 @@ public struct ShellOptions: Sendable {
     public var noglob = false     // set -f
     public var noclobber = false  // set -C
     public var expandAliases = true
+
+    // shopt options
+    public var extglob: Bool = false
+    public var nullglob: Bool = false
+    public var failglob: Bool = false
+    public var globstar: Bool = false
+    public var dotglob: Bool = false
+    public var nocaseglob: Bool = false
+    public var nocasematch: Bool = false
+    public var lastpipe: Bool = false
 
     public init() {}
 

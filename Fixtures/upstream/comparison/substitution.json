@@ -1,0 +1,186 @@
+[
+  {
+    "name": "command substitution captures stdout",
+    "script": "x=$(echo hello); echo $x",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nested command substitution",
+    "script": "echo $(echo $(echo deep))",
+    "files": {},
+    "stdout": "deep\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "backtick command substitution",
+    "script": "x=`echo world`; echo hello $x",
+    "files": {},
+    "stdout": "hello world\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "arithmetic substitution basic",
+    "script": "echo $((2 + 3 * 4))",
+    "files": {},
+    "stdout": "14\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "arithmetic substitution with variables",
+    "script": "x=10; y=3; echo $((x / y))",
+    "files": {},
+    "stdout": "3\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "default value for unset variable",
+    "script": "echo ${unset:-fallback}",
+    "files": {},
+    "stdout": "fallback\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "default value not used when set",
+    "script": "x=real; echo ${x:-fallback}",
+    "files": {},
+    "stdout": "real\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "assign default value",
+    "script": "echo ${y:=assigned}; echo $y",
+    "files": {},
+    "stdout": "assigned\nassigned\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "alternate value when set",
+    "script": "x=val; echo ${x:+alt}; echo ${unset:+alt}",
+    "files": {},
+    "stdout": "alt\n\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "string length",
+    "script": "x=hello; echo ${#x}",
+    "files": {},
+    "stdout": "5\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "substring extraction",
+    "script": "x=abcdef; echo ${x:2:3}",
+    "files": {},
+    "stdout": "cde\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix removal short",
+    "script": "f=/a/b/c.txt; echo ${f#*/}",
+    "files": {},
+    "stdout": "a/b/c.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix removal greedy",
+    "script": "f=/a/b/c.txt; echo ${f##*/}",
+    "files": {},
+    "stdout": "c.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "suffix removal short",
+    "script": "f=photo.tar.gz; echo ${f%.*}",
+    "files": {},
+    "stdout": "photo.tar\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "suffix removal greedy",
+    "script": "f=photo.tar.gz; echo ${f%%.*}",
+    "files": {},
+    "stdout": "photo\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "pattern substitution single",
+    "script": "x=hello; echo ${x/l/L}",
+    "files": {},
+    "stdout": "heLlo\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "pattern substitution global",
+    "script": "x=hello; echo ${x//l/L}",
+    "files": {},
+    "stdout": "heLLo\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "case modification uppercase all",
+    "script": "x=hello; echo ${x^^}",
+    "files": {},
+    "stdout": "HELLO\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "case modification lowercase all",
+    "script": "x=HELLO; echo ${x,,}",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "case modification first char",
+    "script": "x=hello; echo ${x^}",
+    "files": {},
+    "stdout": "Hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "error if unset with message",
+    "script": "echo ${unset:?custom error} 2>/dev/null",
+    "files": {},
+    "stdout": "",
+    "stderr": "",
+    "exitCode": 1
+  },
+  {
+    "name": "substring from offset",
+    "script": "x=abcdefgh; echo ${x:3}",
+    "files": {},
+    "stdout": "defgh\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "indirect variable reference",
+    "script": "ref=value; value=hello; echo ${!ref}",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

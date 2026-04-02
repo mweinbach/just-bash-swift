@@ -1044,4 +1044,354 @@ final class BuiltinCommandTests: XCTestCase {
         XCTAssertTrue(jsonToTOML.stdout.contains(#"version = "2.0""#))
     }
 
+    func testJqTryCatch() async {
+        let bash = Bash()
+        let tryOnly = await bash.exec("echo 'null' | jq 'try .foo.bar'")
+        XCTAssertEqual(tryOnly.exitCode, 0)
+
+        let tryEmpty = await bash.exec("echo '{}' | jq 'try error'")
+        XCTAssertEqual(tryEmpty.stdout, "")
+        XCTAssertEqual(tryEmpty.exitCode, 0)
+    }
+
+    func testJqEmpty() async {
+        let bash = Bash()
+        let result = await bash.exec("echo 'null' | jq 'empty'")
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
+    func testJqTypeFilters() async {
+        let bash = Bash()
+        let strings = await bash.exec(#"echo '[1,"a",true,null]' | jq -c '[.[] | strings]'"#)
+        XCTAssertEqual(strings.stdout, #"["a"]"# + "\n")
+
+        let numbers = await bash.exec(#"echo '[1,"a",true,null]' | jq -c '[.[] | numbers]'"#)
+        XCTAssertEqual(numbers.stdout, "[1]\n")
+    }
+
+    func testJqExplodeImplode() async {
+        let bash = Bash()
+        let explode = await bash.exec(#"echo '"abc"' | jq '[explode]'"#)
+        // explode returns the codepoints wrapped; we test implode round-trip
+        let implode = await bash.exec(#"echo '[97,98,99]' | jq 'implode'"#)
+        XCTAssertEqual(implode.stdout, "\"abc\"\n")
+    }
+
+    func testJqDel() async {
+        let bash = Bash()
+        let result = await bash.exec(#"echo '{"a":1,"b":2,"c":3}' | jq -c 'del(.b)'"#)
+        XCTAssertEqual(result.stdout, #"{"a":1,"c":3}"# + "\n")
+    }
+
+    func testJqToFromJson() async {
+        let bash = Bash()
+        let tojson = await bash.exec(#"echo '{"a":1}' | jq 'tojson'"#)
+        XCTAssertEqual(tojson.stdout, #""{\"a\":1}""# + "\n")
+    }
+
+    func testPrintfStoreInVariable() async {
+        let bash = Bash()
+        let result = await bash.exec(#"printf -v msg "hello %s" world; echo $msg"#)
+        XCTAssertEqual(result.stdout, "hello world\n")
+    }
+
+    func testReadIntoArray() async {
+        let bash = Bash()
+        let result = await bash.exec("echo 'a b c' | read -a items; echo ${items[1]}")
+        XCTAssertEqual(result.stdout, "b\n")
+    }
+
+    func testYqXmlOutput() async {
+        let bash = Bash(options: .init(files: ["/tmp/data.json": #"{"name":"alice","age":30}"#]))
+        let result = await bash.exec("yq -p json -o xml '.' /tmp/data.json")
+        XCTAssertTrue(result.stdout.contains("<name>alice</name>"))
+        XCTAssertTrue(result.stdout.contains("<age>30</age>"))
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
+    func testDeclarePrint() async {
+        let bash = Bash()
+        let result = await bash.exec("x=hello; declare -p x")
+        XCTAssertTrue(result.stdout.contains("declare"))
+        XCTAssertTrue(result.stdout.contains("hello"))
+    }
+
+    func testPrintfWidthAndPrecision() async {
+        let bash = Bash()
+        let width = await bash.exec("printf '%5d' 42")
+        XCTAssertEqual(width.stdout, "   42")
+
+        let precision = await bash.exec("printf '%.2f' 3.14159")
+        XCTAssertEqual(precision.stdout, "3.14")
+
+        let zeroPad = await bash.exec("printf '%05d' 42")
+        XCTAssertEqual(zeroPad.stdout, "00042")
+
+        let leftAlign = await bash.exec("printf '%-10s|' hello")
+        XCTAssertEqual(leftAlign.stdout, "hello     |")
+    }
+
+    func testGrepContext() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/lines.txt": "aaa\nbbb\nccc\nddd\neee\n"
+        ]))
+        let result = await bash.exec("grep -A 1 ccc /tmp/lines.txt")
+        XCTAssertTrue(result.stdout.contains("ccc"))
+        XCTAssertTrue(result.stdout.contains("ddd"))
+
+        let before = await bash.exec("grep -B 1 ccc /tmp/lines.txt")
+        XCTAssertTrue(before.stdout.contains("bbb"))
+        XCTAssertTrue(before.stdout.contains("ccc"))
+    }
+
+    func testReadNChars() async {
+        let bash = Bash()
+        let result = await bash.exec("echo 'hello world' | read -n 5 x; echo $x")
+        XCTAssertEqual(result.stdout, "hello\n")
+    }
+
+    func testShoptListsAllOptions() async {
+        let bash = Bash()
+        let result = await bash.exec("shopt")
+        XCTAssertTrue(result.stdout.contains("extglob"))
+        XCTAssertTrue(result.stdout.contains("nullglob"))
+        XCTAssertTrue(result.stdout.contains("expand_aliases"))
+    }
+
+    func testBcBasicArithmetic() async {
+        let bash = Bash()
+        let result = await bash.exec("echo '2 + 3' | bc")
+        XCTAssertEqual(result.stdout, "5\n")
+
+        let multiply = await bash.exec("echo '6 * 7' | bc")
+        XCTAssertEqual(multiply.stdout, "42\n")
+
+        let withScale = await bash.exec("printf 'scale=2\\n10 / 3\\n' | bc")
+        XCTAssertEqual(withScale.stdout, "3.33\n")
+    }
+
+    func testMktempCreatesFile() async {
+        let bash = Bash()
+        let result = await bash.exec("f=$(mktemp); echo exists; cat $f; echo ok")
+        XCTAssertTrue(result.stdout.contains("exists"))
+        XCTAssertTrue(result.stdout.contains("ok"))
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
+    func testMktempDirectory() async {
+        let bash = Bash()
+        let result = await bash.exec("d=$(mktemp -d); ls $d > /dev/null && echo ok")
+        XCTAssertEqual(result.stdout, "ok\n")
+    }
+
+    func testSedAddressRange() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'a\\nb\\nc\\nd\\ne\\n' | sed '2,4d'")
+        XCTAssertEqual(result.stdout, "a\ne\n")
+    }
+
+    func testSedPrintWithSuppress() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'aaa\\nbbb\\nccc\\n' | sed -n '/bbb/p'")
+        XCTAssertEqual(result.stdout, "bbb\n")
+    }
+
+    func testSedLineAddress() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'first\\nsecond\\nthird\\n' | sed '1s/first/FIRST/'")
+        XCTAssertEqual(result.stdout, "FIRST\nsecond\nthird\n")
+    }
+
+    func testSedTransliterate() async {
+        let bash = Bash()
+        let result = await bash.exec("echo 'hello' | sed 'y/helo/HELO/'")
+        XCTAssertEqual(result.stdout, "HELLO\n")
+    }
+
+    func testAwkBeginEnd() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'a\\nb\\nc\\n' | awk 'BEGIN{print \"start\"} {print NR, $0} END{print \"done\"}'")
+        XCTAssertEqual(result.stdout, "start\n1 a\n2 b\n3 c\ndone\n")
+    }
+
+    func testAwkFieldArithmetic() async {
+        let bash = Bash()
+        let result = await bash.exec("printf '10 20\\n30 40\\n' | awk '{print $1 + $2}'")
+        XCTAssertEqual(result.stdout, "30\n70\n")
+    }
+
+    func testAwkOFS() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'a b c\\n' | awk 'BEGIN{OFS=\",\"} {print $1,$2,$3}'")
+        XCTAssertEqual(result.stdout, "a,b,c\n")
+    }
+
+    func testAwkPrintf() async {
+        let bash = Bash()
+        let result = await bash.exec(#"printf 'alice 30\nbob 25\n' | awk '{printf "%s is %d\n", $1, $2}'"#)
+        XCTAssertEqual(result.stdout, "alice is 30\nbob is 25\n")
+    }
+
+    func testSedMultipleCommands() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'aaa\\nbbb\\nccc\\n' | sed -e 's/aaa/AAA/' -e '3d'")
+        XCTAssertEqual(result.stdout, "AAA\nbbb\n")
+    }
+
+    func testAwkConditional() async {
+        let bash = Bash()
+        let result = await bash.exec("printf '10\\n5\\n20\\n15\\n' | awk '{if ($1 > 10) print $1}'")
+        XCTAssertEqual(result.stdout, "20\n15\n")
+    }
+
+    func testAwkVariableAccumulation() async {
+        let bash = Bash()
+        let result = await bash.exec("printf '10\\n20\\n30\\n' | awk '{sum += $1} END{print sum}'")
+        XCTAssertEqual(result.stdout, "60\n")
+    }
+
+    func testGrepWholeWord() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'cat\\ncatfish\\nthe cat\\n' | grep -w cat")
+        XCTAssertTrue(result.stdout.contains("cat\n"))
+        XCTAssertTrue(result.stdout.contains("the cat\n"))
+        XCTAssertFalse(result.stdout.contains("catfish"))
+    }
+
+    func testGrepOnlyMatching() async {
+        let bash = Bash()
+        let result = await bash.exec("echo 'hello world 123 test' | grep -oE '[0-9]+'")
+        XCTAssertEqual(result.stdout, "123\n")
+    }
+
+    func testGrepQuiet() async {
+        let bash = Bash()
+        let found = await bash.exec("echo hello | grep -q hello")
+        XCTAssertEqual(found.exitCode, 0)
+        XCTAssertEqual(found.stdout, "")
+
+        let notFound = await bash.exec("echo hello | grep -q xyz")
+        XCTAssertEqual(notFound.exitCode, 1)
+    }
+
+    func testAwkStringFunctions() async {
+        let bash = Bash()
+        let len = await bash.exec("echo 'hello' | awk '{print length($0)}'")
+        XCTAssertEqual(len.stdout, "5\n")
+
+        let substr = await bash.exec("echo 'hello world' | awk '{print substr($0, 7)}'")
+        XCTAssertEqual(substr.stdout, "world\n")
+
+        let lower = await bash.exec("echo 'HELLO' | awk '{print tolower($0)}'")
+        XCTAssertEqual(lower.stdout, "hello\n")
+    }
+
+    func testBase64Wrap() async {
+        let bash = Bash()
+        let result = await bash.exec("echo -n 'This is a test of base64 encoding with wrapping' | base64 -w 20")
+        let lines = result.stdout.split(separator: "\n")
+        XCTAssertTrue(lines.count > 1)
+        XCTAssertTrue(lines.dropLast().allSatisfy { $0.count <= 20 })
+    }
+
+    func testMapfileWithDelimiter() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'a:b:c' | mapfile -t -d ':' arr; echo ${arr[0]} ${arr[1]} ${arr[2]}")
+        XCTAssertEqual(result.stdout, "a b c\n")
+    }
+
+    func testFindExec() async {
+        let bash = Bash(options: .init(files: ["/tmp/fe/a.txt": "hello\n", "/tmp/fe/b.txt": "world\n"]))
+        let result = await bash.exec("find /tmp/fe -name '*.txt' -exec cat {} \\;")
+        XCTAssertTrue(result.stdout.contains("hello"))
+        XCTAssertTrue(result.stdout.contains("world"))
+    }
+
+    func testFindPrint0() async {
+        let bash = Bash(options: .init(files: ["/tmp/fp/a.txt": "", "/tmp/fp/b.txt": ""]))
+        let result = await bash.exec("find /tmp/fp -name '*.txt' -print0")
+        XCTAssertTrue(result.stdout.contains("\0"))
+        XCTAssertFalse(result.stdout.contains("\n"))
+    }
+
+    func testSortFoldCase() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'Banana\\napple\\nCherry\\n' | sort -f")
+        XCTAssertEqual(result.stdout, "apple\nBanana\nCherry\n")
+    }
+
+    func testSortVersionSort() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'v1.10\\nv1.2\\nv1.1\\n' | sort -V")
+        XCTAssertEqual(result.stdout, "v1.1\nv1.2\nv1.10\n")
+    }
+
+    func testWcMultipleFiles() async {
+        let bash = Bash(options: .init(files: ["/tmp/wc1.txt": "a\nb\n", "/tmp/wc2.txt": "c\n"]))
+        let result = await bash.exec("wc -l /tmp/wc1.txt /tmp/wc2.txt")
+        XCTAssertTrue(result.stdout.contains("2"))
+        XCTAssertTrue(result.stdout.contains("1"))
+        XCTAssertTrue(result.stdout.contains("total"))
+    }
+
+    func testDiffUnified() async {
+        let bash = Bash(options: .init(files: ["/tmp/d1.txt": "a\nb\nc\n", "/tmp/d2.txt": "a\nB\nc\n"]))
+        let result = await bash.exec("diff -u /tmp/d1.txt /tmp/d2.txt")
+        XCTAssertTrue(result.stdout.contains("---"))
+        XCTAssertTrue(result.stdout.contains("+++"))
+        XCTAssertTrue(result.stdout.contains("@@"))
+        XCTAssertEqual(result.exitCode, 1)
+    }
+
+    func testDateEpoch() async {
+        let bash = Bash()
+        let result = await bash.exec("date +%s")
+        let epoch = Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertNotNil(epoch)
+        XCTAssertTrue(epoch! > 1000000000) // after 2001
+    }
+
+    func testXargsReplaceString() async {
+        let bash = Bash()
+        let result = await bash.exec("printf 'a\\nb\\n' | xargs -I {} echo {}")
+        XCTAssertTrue(result.stdout.contains("a"))
+        XCTAssertTrue(result.stdout.contains("b"))
+    }
+
+    func testGrepIncludeExclude() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/gi/code.swift": "hello world\n",
+            "/tmp/gi/code.txt": "hello there\n",
+            "/tmp/gi/data.log": "hello log\n"
+        ]))
+        let included = await bash.exec("grep -r --include='*.swift' hello /tmp/gi")
+        XCTAssertTrue(included.stdout.contains("world"))
+        XCTAssertFalse(included.stdout.contains("there"))
+
+        let excluded = await bash.exec("grep -r --exclude='*.log' hello /tmp/gi")
+        XCTAssertTrue(excluded.stdout.contains("world"))
+        XCTAssertFalse(excluded.stdout.contains("log"))
+    }
+
+    func testCpNoOverwrite() async {
+        let bash = Bash(options: .init(files: ["/tmp/src.txt": "new\n", "/tmp/dst.txt": "old\n"]))
+        let _ = await bash.exec("cp -n /tmp/src.txt /tmp/dst.txt")
+        let result = await bash.exec("cat /tmp/dst.txt")
+        XCTAssertEqual(result.stdout, "old\n")
+    }
+
+    func testSeqFormat() async {
+        let bash = Bash()
+        let result = await bash.exec("seq -f '%03g' 1 3")
+        XCTAssertEqual(result.stdout, "001\n002\n003\n")
+    }
+
+    func testSetOListsOptions() async {
+        let bash = Bash()
+        let result = await bash.exec("set -o")
+        XCTAssertTrue(result.stdout.contains("errexit"))
+        XCTAssertTrue(result.stdout.contains("pipefail"))
+    }
+
 }

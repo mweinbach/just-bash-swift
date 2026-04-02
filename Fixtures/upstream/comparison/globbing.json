@@ -1,0 +1,58 @@
+[
+  {
+    "name": "star glob matches txt files",
+    "script": "for f in /tmp/g/*.txt; do basename $f; done",
+    "files": {"/tmp/g/a.txt": "a\n", "/tmp/g/b.txt": "b\n", "/tmp/g/c.log": "c\n"},
+    "stdout": "a.txt\nb.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "question mark matches single char",
+    "script": "for f in /tmp/q/?.txt; do basename $f; done",
+    "files": {"/tmp/q/a.txt": "", "/tmp/q/bb.txt": "", "/tmp/q/c.txt": ""},
+    "stdout": "a.txt\nc.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "character class matches listed chars",
+    "script": "for f in /tmp/cc/[ab].txt; do basename $f; done",
+    "files": {"/tmp/cc/a.txt": "", "/tmp/cc/b.txt": "", "/tmp/cc/c.txt": ""},
+    "stdout": "a.txt\nb.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "character range matches a-c",
+    "script": "for f in /tmp/cr/[a-c].txt; do basename $f; done",
+    "files": {"/tmp/cr/a.txt": "", "/tmp/cr/b.txt": "", "/tmp/cr/c.txt": "", "/tmp/cr/d.txt": ""},
+    "stdout": "a.txt\nb.txt\nc.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "set -f disables globbing",
+    "script": "set -f; echo /tmp/ng/*",
+    "files": {"/tmp/ng/a": ""},
+    "stdout": "/tmp/ng/*\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "glob in for loop iterates files",
+    "script": "for f in /tmp/fl/*.txt; do cat $f; done",
+    "files": {"/tmp/fl/x.txt": "X\n", "/tmp/fl/y.txt": "Y\n"},
+    "stdout": "X\nY\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "glob with no matches stays literal",
+    "script": "echo /tmp/empty/*.xyz",
+    "files": {},
+    "stdout": "/tmp/empty/*.xyz\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "basic alias expansion",
+    "script": "alias greet='echo hello'\ngreet world",
+    "files": {},
+    "stdout": "hello world\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "alias in pipeline",
+    "script": "alias upper='tr a-z A-Z'\necho hello | upper",
+    "files": {},
+    "stdout": "HELLO\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "unalias removes alias",
+    "script": "alias hi='echo hello'\nhi\nunalias hi\nhi",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "hi: command not found\n",
+    "exitCode": 127
+  },
+  {
+    "name": "shopt expand_aliases off prevents expansion",
+    "script": "shopt -u expand_aliases\nalias hi='echo hello'\nhi",
+    "files": {},
+    "stdout": "",
+    "stderr": "hi: command not found\n",
+    "exitCode": 127
+  },
+  {
+    "name": "shopt expand_aliases on restores expansion",
+    "script": "shopt -s expand_aliases\nalias hi='echo hello'\nhi",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "alias overwrites previous definition",
+    "script": "alias x='echo first'\nalias x='echo second'\nx",
+    "files": {},
+    "stdout": "second\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

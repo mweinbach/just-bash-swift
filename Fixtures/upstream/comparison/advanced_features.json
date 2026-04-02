@@ -1,0 +1,170 @@
+[
+  {
+    "name": "process substitution input in for loop",
+    "script": "for f in <(echo a) <(echo b); do cat $f; done 2>/dev/null | head -2",
+    "files": {},
+    "stdout": "a\nb\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "process substitution output redirection",
+    "script": "echo hello > >(cat) 2>/dev/null && sleep 0.1 && echo done",
+    "files": {},
+    "stdout": "done\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "process substitution in pipeline",
+    "script": "cat <(echo 'pipe test') | tr 'a-z' 'A-Z'",
+    "files": {},
+    "stdout": "PIPE TEST\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nested process substitution",
+    "script": "cat <(cat <(echo 'nested')) 2>/dev/null",
+    "files": {},
+    "stdout": "nested\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "process substitution assigned to variable",
+    "script": "f=<(echo 'stored'); cat $f 2>/dev/null",
+    "files": {},
+    "stdout": "stored\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable shell-quoted expansion Q",
+    "script": "x='hello world'; echo ${x@Q}",
+    "files": {},
+    "stdout": "'hello world'\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable shell-quoted with special chars",
+    "script": "x=\"hello\\$world\"; echo ${x@Q}",
+    "files": {},
+    "stdout": "'hello$world'\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable expand escapes E",
+    "script": "x='hello\\nworld'; echo ${x@E}",
+    "files": {},
+    "stdout": "hello\\\\nworld\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable declare-style output A",
+    "script": "x=hello; echo ${x@A}",
+    "files": {},
+    "stdout": "declare -- x=\"hello\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable transformation on empty variable",
+    "script": "x=''; echo empty:${x@Q}:end",
+    "files": {},
+    "stdout": "empty:'':end\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nameref basic chain resolution",
+    "script": "declare -n ref=target; target=hello; echo $ref",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nameref chained references",
+    "script": "declare -n ref1=ref2; declare -n ref2=target; target=chained; echo $ref1",
+    "files": {},
+    "stdout": "chained\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nameref with array reference",
+    "script": "arr=(a b c); declare -n ref=arr[1]; echo $ref",
+    "files": {},
+    "stdout": "\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nameref unset removes reference not target",
+    "script": "target=preserved; declare -n ref=target; unset ref; echo $target",
+    "files": {},
+    "stdout": "preserved\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix expansion basic match",
+    "script": "abc_one=1; abc_two=2; echo ${!abc_*}",
+    "files": {},
+    "stdout": "abc_one abc_two\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix expansion at variant quoted",
+    "script": "abc_one=1; abc_two=2; echo ${!abc_@}",
+    "files": {},
+    "stdout": "abc_one abc_two\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix expansion no matches",
+    "script": "echo ${!xyznofix_*}",
+    "files": {},
+    "stdout": "\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "prefix expansion special vars excluded",
+    "script": "abc_test=value; echo ${!abc_*} | grep -E '^abc_'",
+    "files": {},
+    "stdout": "abc_test\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "nameref invalid target error",
+    "script": "declare -n ref=; echo $ref 2>/dev/null || echo 'error handled'",
+    "files": {},
+    "stdout": "\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "process substitution combined input output",
+    "script": "tee >(tr 'a-z' 'A-Z') < <(echo 'mixed') 2>/dev/null",
+    "files": {},
+    "stdout": "mixed\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "variable declare style with special chars",
+    "script": "x='hello world'; echo ${x@A}",
+    "files": {},
+    "stdout": "declare -- x=\"hello world\"\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

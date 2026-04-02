@@ -139,6 +139,10 @@ public final class VirtualFileSystem: @unchecked Sendable {
     public init(initialFiles: [String: String] = [:], processInfo: VirtualProcessInfo = .init()) {
         seedDefaultLayout(processInfo: processInfo)
         for (path, content) in initialFiles {
+            let parentDir = VirtualPath.dirname(path)
+            if parentDir != "/" && !isDirectory(parentDir) {
+                try? createDirectory(parentDir, recursive: true)
+            }
             try? writeFile(content, to: path)
         }
     }
@@ -286,7 +290,7 @@ public final class VirtualFileSystem: @unchecked Sendable {
         return results
     }
 
-    public func glob(_ pattern: String, relativeTo cwd: String = "/") -> [String] {
+    public func glob(_ pattern: String, relativeTo cwd: String = "/", dotglob: Bool = false, extglob: Bool = false) -> [String] {
         let isAbsolute = pattern.hasPrefix("/")
         let baseComponents = isAbsolute ? [] : VirtualPath.components(for: cwd)
         let patternComponents = pattern.split(separator: "/").map(String.init)
@@ -307,14 +311,15 @@ public final class VirtualFileSystem: @unchecked Sendable {
                 descend(node: root, remaining: remaining.dropFirst(), built: [])
                 return
             }
-            if !segment.contains("*") && !segment.contains("?") && !segment.contains("[") {
+            let hasExtglobPattern = extglob && (segment.contains("?(") || segment.contains("*(") || segment.contains("+(") || segment.contains("@(") || segment.contains("!("))
+            if !segment.contains("*") && !segment.contains("?") && !segment.contains("[") && !hasExtglobPattern {
                 guard let child = node.children[segment] else { return }
                 descend(node: child, remaining: remaining.dropFirst(), built: built + [segment])
                 return
             }
             for name in node.children.keys.sorted() {
-                if !segment.hasPrefix(".") && name.hasPrefix(".") { continue }
-                if Self.globMatch(name: name, pattern: segment), let child = node.children[name] {
+                if !dotglob && !segment.hasPrefix(".") && name.hasPrefix(".") { continue }
+                if Self.globMatch(name: name, pattern: segment, extglob: extglob), let child = node.children[name] {
                     descend(node: child, remaining: remaining.dropFirst(), built: built + [name])
                 }
             }
@@ -330,13 +335,42 @@ public final class VirtualFileSystem: @unchecked Sendable {
         try? writeFile(stub, to: "/usr/bin/\(name)")
     }
 
-    public static func globMatch(name: String, pattern: String) -> Bool {
+    public static func globMatch(name: String, pattern: String, extglob: Bool = false) -> Bool {
         let chars = Array(pattern)
         var regex = "^"
         var index = 0
 
         while index < chars.count {
             let character = chars[index]
+
+            // Extended glob patterns: ?(pat), *(pat), +(pat), @(pat), !(pat)
+            if extglob && "?*+@!".contains(character) && index + 1 < chars.count && chars[index + 1] == "(" {
+                let op = character
+                index += 2 // skip op and (
+                var depth = 1
+                var inner = ""
+                while index < chars.count && depth > 0 {
+                    if chars[index] == "(" { depth += 1 }
+                    if chars[index] == ")" { depth -= 1; if depth == 0 { break } }
+                    inner.append(chars[index])
+                    index += 1
+                }
+                if index < chars.count && chars[index] == ")" { index += 1 }
+                // Convert inner patterns (pipe-separated) to regex alternatives
+                let alternatives = inner.split(separator: "|", omittingEmptySubsequences: false).map { alt in
+                    globPatternToRegex(String(alt), extglob: extglob)
+                }.joined(separator: "|")
+                switch op {
+                case "?": regex += "(\(alternatives))?"
+                case "*": regex += "(\(alternatives))*"
+                case "+": regex += "(\(alternatives))+"
+                case "@": regex += "(\(alternatives))"
+                case "!": regex += "(?!(\(alternatives))$).*"
+                default: break
+                }
+                continue
+            }
+
             switch character {
             case "*":
                 regex += ".*"
@@ -365,6 +399,55 @@ public final class VirtualFileSystem: @unchecked Sendable {
         }
         let range = NSRange(name.startIndex..<name.endIndex, in: name)
         return expression.firstMatch(in: name, options: [], range: range) != nil
+    }
+
+    /// Convert a glob pattern fragment to a regex string (for extglob inner patterns)
+    private static func globPatternToRegex(_ pattern: String, extglob: Bool) -> String {
+        let chars = Array(pattern)
+        var regex = ""
+        var index = 0
+        while index < chars.count {
+            let character = chars[index]
+            if extglob && "?*+@!".contains(character) && index + 1 < chars.count && chars[index + 1] == "(" {
+                let op = character
+                index += 2
+                var depth = 1
+                var inner = ""
+                while index < chars.count && depth > 0 {
+                    if chars[index] == "(" { depth += 1 }
+                    if chars[index] == ")" { depth -= 1; if depth == 0 { break } }
+                    inner.append(chars[index])
+                    index += 1
+                }
+                if index < chars.count && chars[index] == ")" { index += 1 }
+                let alternatives = inner.split(separator: "|", omittingEmptySubsequences: false).map { alt in
+                    globPatternToRegex(String(alt), extglob: extglob)
+                }.joined(separator: "|")
+                switch op {
+                case "?": regex += "(\(alternatives))?"
+                case "*": regex += "(\(alternatives))*"
+                case "+": regex += "(\(alternatives))+"
+                case "@": regex += "(\(alternatives))"
+                case "!": regex += "(?!(\(alternatives))$).*"
+                default: break
+                }
+                continue
+            }
+            switch character {
+            case "*": regex += ".*"; index += 1
+            case "?": regex += "."; index += 1
+            case "[":
+                if let endIndex = chars[index...].firstIndex(of: "]") {
+                    regex += String(chars[index...endIndex])
+                    index = endIndex + 1
+                } else {
+                    regex += "\\["; index += 1
+                }
+            default:
+                regex += escapeRegex(character); index += 1
+            }
+        }
+        return regex
     }
 
     private static func escapeRegex(_ character: Character) -> String {

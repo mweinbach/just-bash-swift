@@ -641,4 +641,259 @@ final class BashTests: XCTestCase {
         let readBack = await bash.exec("cat /tmp/existing.txt")
         XCTAssertEqual(readBack.stdout, "old\n")
     }
+
+    func testRandomVariable() async {
+        let bash = Bash()
+        let result = await bash.exec("echo $RANDOM")
+        let value = Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertNotNil(value)
+        XCTAssertTrue(value! >= 0 && value! < 32768)
+    }
+
+    func testBashVersionVariable() async {
+        let bash = Bash()
+        let result = await bash.exec("echo $BASH_VERSION")
+        XCTAssertTrue(result.stdout.contains("5.2"))
+    }
+
+    func testSelectClauseExecutesFirstOption() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        select opt in a b c; do
+            echo "selected: $opt"
+        done
+        """)
+        XCTAssertEqual(result.stdout, "selected: a\n")
+        XCTAssertTrue(result.stderr.contains("1) a"))
+    }
+
+    func testTrapRegistersAndLists() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        trap 'echo done' EXIT
+        trap
+        """)
+        XCTAssertTrue(result.stdout.contains("EXIT"))
+    }
+
+    func testBraceExpansionLimit() async {
+        let bash = Bash()
+        let result = await bash.exec("echo {1..100000}")
+        // Should treat as literal since it exceeds limit
+        XCTAssertEqual(result.stdout, "{1..100000}\n")
+    }
+
+    func testPipestatusArray() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        true | false | true
+        echo ${PIPESTATUS[0]} ${PIPESTATUS[1]} ${PIPESTATUS[2]}
+        """)
+        XCTAssertEqual(result.stdout, "0 1 0\n")
+    }
+
+    func testIndirectVariableReference() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        x=greeting
+        greeting=hello
+        echo ${!x}
+        """)
+        XCTAssertEqual(result.stdout, "hello\n")
+    }
+
+    func testFileComparisonTests() async {
+        let bash = Bash(options: .init(files: ["/tmp/a.txt": "a\n"]))
+        let result = await bash.exec("""
+        if [[ /tmp/a.txt -nt /tmp/nonexistent ]]; then echo newer; fi
+        if [[ /tmp/nonexistent -ot /tmp/a.txt ]]; then echo older; fi
+        if [[ /tmp/a.txt -ef /tmp/a.txt ]]; then echo same; fi
+        """)
+        XCTAssertEqual(result.stdout, "newer\nolder\nsame\n")
+    }
+
+    func testNullglobOption() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        shopt -s nullglob
+        for f in /tmp/nonexistent_pattern_*.xyz; do echo $f; done
+        echo done
+        """)
+        XCTAssertEqual(result.stdout, "done\n")
+    }
+
+    func testFuncnameVariable() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        myFunc() { echo $FUNCNAME; }
+        myFunc
+        """)
+        XCTAssertEqual(result.stdout, "myFunc\n")
+    }
+
+    func testUnderscoreVariable() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        echo hello world
+        echo $_
+        """)
+        XCTAssertEqual(result.stdout, "hello world\nworld\n")
+    }
+
+    func testProcessSubstitution() async {
+        let bash = Bash()
+        let result = await bash.exec("cat <(echo hello)")
+        XCTAssertEqual(result.stdout, "hello\n")
+    }
+
+    func testProcessSubstitutionInDiff() async {
+        let bash = Bash()
+        let result = await bash.exec("diff <(echo 'a') <(echo 'a')")
+        XCTAssertEqual(result.exitCode, 0)
+    }
+
+    func testExtglobPattern() async {
+        let bash = Bash(options: .init(files: [
+            "/tmp/eg/foo.txt": "", "/tmp/eg/bar.log": "", "/tmp/eg/baz.txt": ""
+        ]))
+        let result = await bash.exec("""
+        shopt -s extglob
+        for f in /tmp/eg/+(foo|baz).txt; do basename $f; done
+        """)
+        XCTAssertTrue(result.stdout.contains("foo.txt"))
+        XCTAssertTrue(result.stdout.contains("baz.txt"))
+        XCTAssertFalse(result.stdout.contains("bar.log"))
+    }
+
+    func testNamerefVariable() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        target=hello
+        declare -n ref=target
+        echo $ref
+        ref=world
+        echo $target
+        """)
+        XCTAssertEqual(result.stdout, "hello\nworld\n")
+    }
+
+    func testVariableTransformQuote() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        x='hello world'
+        echo ${x@Q}
+        """)
+        XCTAssertEqual(result.stdout, "'hello world'\n")
+    }
+
+    func testNamesByPrefix() async {
+        let bash = Bash(options: .init(env: ["APP_NAME": "test", "APP_VERSION": "1.0", "OTHER": "x"]))
+        let result = await bash.exec("echo ${!APP_*}")
+        XCTAssertTrue(result.stdout.contains("APP_NAME"))
+        XCTAssertTrue(result.stdout.contains("APP_VERSION"))
+        XCTAssertFalse(result.stdout.contains("OTHER"))
+    }
+
+    func testTypeBuiltinOutput() async {
+        let bash = Bash()
+        let result = await bash.exec("type echo")
+        XCTAssertTrue(result.stdout.contains("builtin"))
+
+        let typeT = await bash.exec("type -t echo")
+        XCTAssertEqual(typeT.stdout, "builtin\n")
+
+        let funcType = await bash.exec("myfn() { :; }; type -t myfn")
+        XCTAssertEqual(funcType.stdout, "function\n")
+    }
+
+    func testDeclareInteger() async {
+        let bash = Bash()
+        let result = await bash.exec("declare -i x=5+3; echo $x")
+        XCTAssertEqual(result.stdout, "8\n")
+
+        let reassign = await bash.exec("declare -i y=10; y=y+5; echo $y")
+        XCTAssertEqual(reassign.stdout, "15\n")
+    }
+
+    func testTestAndOr() async {
+        let bash = Bash(options: .init(files: ["/tmp/t.txt": "hi\n"]))
+        let result = await bash.exec("""
+        [ -f /tmp/t.txt -a -f /tmp/t.txt ] && echo both
+        [ -f /tmp/missing -o -f /tmp/t.txt ] && echo either
+        """)
+        XCTAssertEqual(result.stdout, "both\neither\n")
+    }
+
+    func testExportUnexport() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        export X=hello
+        printenv X
+        export -n X
+        printenv X
+        echo done
+        """)
+        XCTAssertEqual(result.stdout, "hello\ndone\n")
+    }
+
+    func testArrayKeyExpansion() async {
+        let bash = Bash()
+        let indexed = await bash.exec("""
+        arr=(a b c)
+        echo ${!arr[@]}
+        """)
+        XCTAssertEqual(indexed.stdout, "0 1 2\n")
+
+        let assoc = await bash.exec("""
+        declare -A map
+        map[x]=1
+        map[y]=2
+        echo ${!map[@]}
+        """)
+        // Keys should be present (order may vary)
+        XCTAssertTrue(assoc.stdout.contains("x"))
+        XCTAssertTrue(assoc.stdout.contains("y"))
+    }
+
+    func testLocalNameref() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        setvar() {
+            local -n ref=$1
+            ref=hello
+        }
+        target=old
+        setvar target
+        echo $target
+        """)
+        XCTAssertEqual(result.stdout, "hello\n")
+    }
+
+    func testArithmeticForLoop() async {
+        let bash = Bash()
+        let result = await bash.exec("""
+        for ((i=0; i<5; i++)); do
+            printf '%d ' $i
+        done
+        echo
+        """)
+        XCTAssertEqual(result.stdout, "0 1 2 3 4 \n")
+    }
+
+    func testPrintfQuoteFormat() async {
+        let bash = Bash()
+        let result = await bash.exec("printf '%q' \"hello world\"")
+        XCTAssertTrue(result.stdout.contains("hello"))
+        XCTAssertTrue(result.stdout.contains("world"))
+        // Should be shell-quoted (with quotes or escapes)
+        XCTAssertTrue(result.stdout.contains("'") || result.stdout.contains("\\"))
+    }
+
+    func testReadPrompt() async {
+        let bash = Bash()
+        let result = await bash.exec("echo hello | read -p 'Enter: ' val; echo $val")
+        XCTAssertEqual(result.stdout, "hello\n")
+        // Prompt should appear on stderr
+        XCTAssertTrue(result.stderr.contains("Enter:"))
+    }
 }

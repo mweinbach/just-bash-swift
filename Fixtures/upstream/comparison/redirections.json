@@ -1,0 +1,122 @@
+[
+  {
+    "name": "basic output redirect creates file",
+    "script": "echo hello > /tmp/out.txt; cat /tmp/out.txt",
+    "files": {},
+    "stdout": "hello\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "append redirect adds to existing file",
+    "script": "echo a > /tmp/app.txt; echo b >> /tmp/app.txt; cat /tmp/app.txt",
+    "files": {},
+    "stdout": "a\nb\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "stderr redirect captures error output",
+    "script": "echo ok; nosuchcmd 2>/dev/null",
+    "files": {},
+    "stdout": "ok\n",
+    "stderr": "",
+    "exitCode": 127
+  },
+  {
+    "name": "stderr redirect to file captures error",
+    "script": "nosuchcmd 2>/tmp/err.txt; cat /tmp/err.txt",
+    "files": {},
+    "stdout": "nosuchcmd: command not found\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "input redirect reads from file",
+    "script": "wc -w < /tmp/in.txt",
+    "files": {"/tmp/in.txt": "one two three\n"},
+    "stdout": "3\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "heredoc feeds stdin to command",
+    "script": "cat <<EOF\nhello world\nEOF",
+    "files": {},
+    "stdout": "hello world\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "heredoc expands variables",
+    "script": "name=bash\ncat <<EOF\nhello $name\nEOF",
+    "files": {},
+    "stdout": "hello bash\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "quoted heredoc suppresses expansion",
+    "script": "name=bash\ncat <<'EOF'\nhello $name\nEOF",
+    "files": {},
+    "stdout": "hello $name\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "here-string passes text as stdin",
+    "script": "cat <<< \"hello there\"",
+    "files": {},
+    "stdout": "hello there\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "redirect to /dev/null discards output",
+    "script": "echo hidden > /dev/null; echo visible",
+    "files": {},
+    "stdout": "visible\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "redirect target undergoes variable expansion",
+    "script": "dest=/tmp/expanded.txt\necho data > $dest\ncat /tmp/expanded.txt",
+    "files": {},
+    "stdout": "data\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "noclobber blocks overwrite but >| forces it",
+    "script": "set -C\necho forced >| /tmp/f.txt\ncat /tmp/f.txt",
+    "files": {"/tmp/f.txt": "old\n"},
+    "stdout": "forced\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "multiple redirects on one command",
+    "script": "echo out > /tmp/o.txt 2>/dev/null; cat /tmp/o.txt",
+    "files": {},
+    "stdout": "out\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "append creates file if not exists",
+    "script": "echo first >> /tmp/new.txt; echo second >> /tmp/new.txt; cat /tmp/new.txt",
+    "files": {},
+    "stdout": "first\nsecond\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "stderr redirect to file via 2>",
+    "script": "nosuchcmd 2>/tmp/e.txt; cat /tmp/e.txt",
+    "files": {},
+    "stdout": "nosuchcmd: command not found\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "name": "missing fi for if block",
+    "script": "if true; then echo yes",
+    "files": {},
+    "stdout": "",
+    "stderr": "bash: syntax error: expected `fi'\n",
+    "exitCode": 2
+  },
+  {
+    "name": "missing done for for loop",
+    "script": "for x in 1 2; do echo $x",
+    "files": {},
+    "stdout": "",
+    "stderr": "bash: syntax error: expected `done'\n",
+    "exitCode": 2
+  },
+  {
+    "name": "missing done for while loop",
+    "script": "while true; do echo loop",
+    "files": {},
+    "stdout": "",
+    "stderr": "bash: syntax error: expected `done'\n",
+    "exitCode": 2
+  },
+  {
+    "name": "missing esac for case statement",
+    "script": "case x in a) echo A;;",
+    "files": {},
+    "stdout": "",
+    "stderr": "bash: syntax error: expected `esac'\n",
+    "exitCode": 2
+  },
+  {
+    "name": "command not found gives 127",
+    "script": "totallynotacommand",
+    "files": {},
+    "stdout": "",
+    "stderr": "totallynotacommand: command not found\n",
+    "exitCode": 127
+  }
+]

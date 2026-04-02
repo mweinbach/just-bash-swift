@@ -75,33 +75,57 @@ Everything in this section is intended to describe implemented behavior in the c
 |---|---|
 | **Pipes & redirections** | `\|`, `|&`, `>`, `>>`, `<`, `2>`, `>&`, `<&`, `>|`, `<<<`, `<<` |
 | **Logic operators** | `&&`, `\|\|`, `!` (pipeline negation) |
-| **Control flow** | `if/elif/else/fi`, `for/do/done`, `while/until`, `case/esac` |
+| **Control flow** | `if/elif/else/fi`, `for/do/done`, `while/until`, `case/esac`, `select` |
 | **Functions** | `name() { ... }`, `function name { ... }`, local scoping, `return` |
 | **Subshells** | `( ... )` — isolated environment |
 | **Brace groups** | `{ ...; }` |
 | **Brace expansion** | `{a,b}`, `{1..5}`, `{1..9..2}`, `{a..z}`, nested brace expansion in literal word segments |
 | **Command substitution** | `$(...)`, `` `...` `` |
 | **Arithmetic** | `$(( ))`, `(( ))` — full precedence: `**`, `*/%`, `+-`, shifts, bitwise, comparison, logical, ternary |
-| **Conditionals** | `[[ ]]` — file tests, string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
+| **Process substitution** | `<(cmd)`, `>(cmd)` via VFS temp files |
+| **Conditionals** | `[[ ]]` — file tests (`-f`, `-d`, `-e`, `-nt`, `-ot`, `-ef`), string comparison, regex `=~`, `-eq`/`-ne`/`-lt`/etc. |
 | **test / [** | Unary and binary operators |
 | **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
 | **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`), indexed and associative array assignment and element assignment |
-| **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-` |
-| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `${map[key]}` |
+| **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-`, `$_`, `$RANDOM`, `$FUNCNAME`, `$BASH_VERSION`, `$PIPESTATUS`, `$HOSTNAME`, `$SECONDS`, `$LINENO` |
+| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${!var}` (indirect), `${!prefix*}`, `${var@Q}`, `${var@E}`, `${var@A}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `${map[key]}` |
 | **Tilde expansion** | `~`, `~user` |
 | **Field splitting** | Unquoted expansion splits on `IFS` |
-| **Glob patterns** | `*`, `?`, `[abc]`, `[a-z]` via virtual filesystem |
+| **Glob patterns** | `*`, `?`, `[abc]`, `[a-z]`, extended globs (`?(pat)`, `*(pat)`, `+(pat)`, `@(pat)`, `!(pat)`) via virtual filesystem |
 | **Heredocs** | `<< EOF`, `<<- EOF` (tab stripping), quoted delimiters suppress expansion |
 | **Here-strings** | `<<<` |
 | **Comments** | `# ...` |
-| **Shell options** | enforced: `set -e`, `set -u`, `set -x`, `set -f`, `set -C`, `set -o pipefail` |
-| **Aliases** | `alias`/`unalias`, basic command-position alias expansion |
+| **Shell options** | `set -e`, `set -u`, `set -x`, `set -f`, `set -C`, `set -o pipefail`; `shopt` options: `extglob`, `nullglob`, `globstar`, `dotglob`, `nocaseglob`, `nocasematch`, `lastpipe`, `expand_aliases` |
+| **Nameref** | `declare -n ref=target` — transparent variable aliasing |
+| **Aliases** | `alias`/`unalias`, basic command-position alias expansion (see [Alias Expansion](#alias-expansion)) |
+
+#### Alias Expansion
+
+The shell supports basic alias expansion with the following behavior:
+
+- Aliases are expanded in command position (first word of simple commands)
+- Alias expansion must be enabled via `shopt -s expand_aliases` (off by default in non-interactive mode)
+- Recursive alias chains are supported (e.g., `alias a=b; alias b='echo done'`)
+- Arguments are passed through (e.g., `alias greet='echo'; greet hello` outputs "hello")
+- Maximum alias expansion depth is 16 levels (cycle protection)
+
+**Intentional Limitations:**
+
+The following bash alias behaviors are intentionally not implemented to keep the runtime simple and predictable:
+
+1. **Self-referential aliases**: `alias ls='ls -F'` will hit the depth limit instead of working as in bash. Use the full command with flags instead.
+
+2. **Trailing-blank multi-word aliases**: Aliases ending with a space that enable expansion of the following word are not supported. Use shell functions for multi-word command substitutions.
+
+3. **Same-line definition timing**: In bash, an alias defined on the same line as its use does not take effect until the next line. Our implementation applies aliases immediately.
+
+For complex command substitutions, shell functions are recommended over aliases.
 
 ### Commands
 
-**Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`, `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, `exec`, `readonly`, `shopt`
+**Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`, `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, `exec`, `readonly`, `shopt`, `wait`, `select`
 
-**External commands:** `cat`, `tee`, `ls`, `mkdir`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `tar`, `sqlite3`, `jq`, `yq`, `curl`, `html-to-markdown`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
+**External commands:** `cat`, `tee`, `ls`, `mkdir`, `mktemp`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `bc`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `tar`, `sqlite3`, `jq`, `yq`, `xan`, `curl`, `html-to-markdown`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
 
 ### Execution Limits
 
@@ -190,7 +214,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-120 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, jq and yq support, readonly/shopt behavior, filesystem persistence, session isolation, and curated parity cases.
+215 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
 
 ## License
 

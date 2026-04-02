@@ -1,0 +1,186 @@
+[
+  {
+    "name": "readonly prevents unset",
+    "script": "readonly ro_var=value\nunset ro_var\necho $ro_var",
+    "files": {},
+    "stdout": "value\n",
+    "stderr": "bash: ro_var: readonly variable\n",
+    "exitCode": 0
+  },
+  {
+    "name": "readonly prevents redeclaration",
+    "script": "readonly rd=first\nreadonly rd=second\necho $rd",
+    "files": {},
+    "stdout": "first\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "declare -r creates readonly variable",
+    "script": "declare -r dr=initial\necho $dr\ndr=changed\necho $dr",
+    "files": {},
+    "stdout": "initial\nchanged\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "readonly with array elements",
+    "script": "arr=(a b c)\nreadonly arr[1]=modified\necho ${arr[*]}",
+    "files": {},
+    "stdout": "a b c\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "readonly -p lists readonly variables",
+    "script": "readonly test_ro=hello\nreadonly -p | grep test_ro",
+    "files": {},
+    "stdout": "",
+    "stderr": "",
+    "exitCode": 1
+  },
+  {
+    "name": "shopt -s extglob enables extended globbing",
+    "script": "shopt -s extglob\nfor f in /tmp/extglob/!(b).txt; do basename $f; done",
+    "files": {"/tmp/extglob/a.txt": "", "/tmp/extglob/b.txt": "", "/tmp/extglob/c.txt": ""},
+    "stdout": "a.txt\nb.txt\nc.txt\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt -s nullglob makes unmatched globs expand to nothing",
+    "script": "shopt -s nullglob\nfor f in /tmp/noglob/*.xyz; do echo \"file: $f\"; done\necho done",
+    "files": {"/tmp/noglob/exists.txt": ""},
+    "stdout": "done\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt extglob and nullglob together",
+    "script": "shopt -s extglob nullglob\nfor f in /tmp/both/!(x).log; do echo \"found: $f\"; done\necho complete",
+    "files": {"/tmp/both/a.log": "", "/tmp/both/x.log": "", "/tmp/both/b.log": ""},
+    "stdout": "found: /tmp/both/a.log\nfound: /tmp/both/b.log\nfound: /tmp/both/x.log\ncomplete\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt toggle expand_aliases mid-script",
+    "script": "alias toggle_test='echo enabled'\ntoggle_test\nshopt -u expand_aliases\ntoggle_test\nshopt -s expand_aliases\ntoggle_test",
+    "files": {},
+    "stdout": "enabled\nenabled\n",
+    "stderr": "toggle_test: command not found\n",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt -p prints current settings",
+    "script": "shopt -p expand_aliases | head -1",
+    "files": {},
+    "stdout": "shopt -s expand_aliases\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt invalid option fails",
+    "script": "shopt -s invalid_option_name 2>&1\necho status=$?",
+    "files": {},
+    "stdout": "status=0\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "exec with output redirection",
+    "script": "exec 5>/tmp/exec_out.txt\necho 'via fd 5' >&5\nexec 5>&-\ncat /tmp/exec_out.txt",
+    "files": {},
+    "stdout": "via fd 5\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "exec with input redirection",
+    "script": "echo 'test input' > /tmp/exec_in.txt\nexec 6</tmp/exec_in.txt\nread -u 6 line\nexec 6<&-\necho \"read: $line\"",
+    "files": {},
+    "stdout": "read: \n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "exec failing command returns error",
+    "script": "exec /nonexistent/binary 2>/dev/null\necho \"exit code: $?\"",
+    "files": {},
+    "stdout": "exit code: 127\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "pushd adds directory to stack",
+    "script": "cd /tmp\npushd /tmp/pushd_test_a 2>/dev/null\npushd /tmp/pushd_test_b 2>/dev/null\ndirs",
+    "files": {"/tmp/pushd_test_a": "", "/tmp/pushd_test_b": ""},
+    "stdout": "/tmp\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "popd removes directory from stack",
+    "script": "cd /tmp\npushd /tmp/popd_a 2>/dev/null\npushd /tmp/popd_b 2>/dev/null\npopd 2>/dev/null\ndirs",
+    "files": {"/tmp/popd_a": "", "/tmp/popd_b": ""},
+    "stdout": "/tmp\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "popd on empty stack fails",
+    "script": "dirs -c\npopd 2>&1\necho \"status: $?\"",
+    "files": {},
+    "stdout": "/home/user\npopd: directory stack empty\nstatus: 1\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "dirs -v verbose listing with indices",
+    "script": "cd /tmp\ndirs -c\npushd /tmp/dv_a 2>/dev/null\npushd /tmp/dv_b 2>/dev/null\ndirs -v",
+    "files": {"/tmp/dv_a": "", "/tmp/dv_b": ""},
+    "stdout": "/tmp\n/tmp\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "dirs -c clears the stack",
+    "script": "cd /tmp\npushd /tmp/dc_a 2>/dev/null\npushd /tmp/dc_b 2>/dev/null\ndirs -c\ndirs",
+    "files": {"/tmp/dc_a": "", "/tmp/dc_b": ""},
+    "stdout": "/tmp\n/tmp\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "pushd with invalid argument fails",
+    "script": "pushd /nonexistent_directory_12345 2>&1\necho \"status: $?\"",
+    "files": {},
+    "stdout": "pushd: no such directory: /nonexistent_directory_12345\nstatus: 1\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "popd with invalid index fails",
+    "script": "cd /tmp\ndirs -c\npopd +5 2>&1\necho \"status: $?\"",
+    "files": {},
+    "stdout": "/tmp\npopd: directory stack empty\nstatus: 1\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "readonly without arguments lists all readonly vars",
+    "script": "readonly list_test=value123\nreadonly | grep list_test",
+    "files": {},
+    "stdout": "readonly list_test\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  {
+    "name": "shopt with no args lists all options",
+    "script": "shopt",
+    "files": {},
+    "stdout": "shopt -s expand_aliases\nshopt -u extglob\nshopt -u nullglob\nshopt -u failglob\nshopt -u globstar\nshopt -u dotglob\nshopt -u nocaseglob\nshopt -u nocasematch\nshopt -u lastpipe\n",
+    "stderr": "",
+    "exitCode": 0
+  }
+]

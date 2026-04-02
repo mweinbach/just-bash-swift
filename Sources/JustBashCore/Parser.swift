@@ -58,6 +58,7 @@ private enum Token: CustomStringConvertible {
     case clobber        // >|
     case ioNumber(Int)  // digit before redirection
     case heredocBody(String, Bool) // content, quoted (suppress expansion)
+    case forArithExpr(String, String, String) // for (( init; cond; update ))
     case eof
 
     var description: String {
@@ -90,6 +91,7 @@ private enum Token: CustomStringConvertible {
         case .clobber: return ">|"
         case .ioNumber(let n): return "\(n)"
         case .heredocBody: return "<<BODY>>"
+        case .forArithExpr: return "for(())"
         case .eof: return "EOF"
         }
     }
@@ -236,6 +238,34 @@ private struct Tokenizer {
 
             // Word
             let word = try scanWord()
+            // Check for C-style for loop: for ((init; cond; update))
+            if wordText(word) == "for" {
+                skipSpacesAndTabs()
+                if pos + 1 < chars.count && chars[pos] == "(" && chars[pos + 1] == "(" {
+                    pos += 2 // skip ((
+                    var expr = ""
+                    var depth = 1
+                    while pos < chars.count && depth > 0 {
+                        if chars[pos] == ")" && pos + 1 < chars.count && chars[pos + 1] == ")" && depth == 1 {
+                            pos += 2; depth = 0
+                        } else if chars[pos] == "(" {
+                            depth += 1; expr.append(chars[pos]); pos += 1
+                        } else if chars[pos] == ")" {
+                            depth -= 1; expr.append(chars[pos]); pos += 1
+                        } else {
+                            expr.append(chars[pos]); pos += 1
+                        }
+                    }
+                    let parts = expr.split(separator: ";", maxSplits: 2).map { $0.trimmingCharacters(in: .whitespaces) }
+                    tokens.append(.word(word))
+                    tokens.append(.forArithExpr(
+                        parts.count > 0 ? parts[0] : "",
+                        parts.count > 1 ? parts[1] : "",
+                        parts.count > 2 ? parts[2] : ""
+                    ))
+                    continue
+                }
+            }
             // Check if it's an assignment (name=value or name+=value)
             if let (name, value, append) = detectAssignment(word) {
                 tokens.append(.assignment(name, value, append))
@@ -290,6 +320,7 @@ private struct Tokenizer {
             pos += 1; return .rparen
 
         case "<":
+            if next == "(" { return nil }  // process substitution — handled in scanWord
             if next == "<" {
                 if peek(offset: 2) == "<" { pos += 3; return .tless }
                 if peek(offset: 2) == "-" { pos += 3; return .dlessDash }
@@ -300,6 +331,7 @@ private struct Tokenizer {
             pos += 1; return .less
 
         case ">":
+            if next == "(" { return nil }  // process substitution — handled in scanWord
             if next == ">" { pos += 2; return .dgreat }
             if next == "&" { pos += 2; return .greatAnd }
             if next == "|" { pos += 2; return .clobber }
@@ -328,7 +360,37 @@ private struct Tokenizer {
 
             // Word-breaking characters
             if ch == " " || ch == "\t" || ch == "\n" { break }
-            if ch == ";" || ch == "&" || ch == "|" || ch == "(" || ch == ")" { break }
+            if ch == ";" || ch == "&" || ch == "|" { break }
+            // ( and ) break words UNLESS preceded by extglob prefix (?, *, +, @, !)
+            if ch == "(" {
+                if !literal.isEmpty, let last = literal.last, "?*+@!".contains(last) {
+                    // extglob pattern like +(foo|bar) — scan the parens as part of the word
+                    pos += 1
+                    var depth = 1
+                    literal.append("(")
+                    while pos < chars.count && depth > 0 {
+                        let c = chars[pos]
+                        if c == "(" { depth += 1 }
+                        else if c == ")" { depth -= 1; if depth == 0 { literal.append(")"); pos += 1; break } }
+                        literal.append(c)
+                        pos += 1
+                    }
+                    continue
+                }
+                break
+            }
+            if ch == ")" { break }
+
+            // Process substitution: <(cmd) or >(cmd)
+            if (ch == "<" || ch == ">") && peek(offset: 1) == "(" {
+                flushLiteral()
+                let isInput = ch == "<"
+                pos += 2  // skip <( or >(
+                let content = try scanNestedParens()
+                parts.append(.processSubstitution(content, isInput))
+                continue
+            }
+
             if ch == "<" || ch == ">" { break }
             if ch == "#" && !parts.isEmpty && literal.isEmpty {
                 // # after whitespace starts comment, but mid-word is literal
@@ -707,8 +769,41 @@ private struct Tokenizer {
             return .variable(.length(name))
         }
 
+        // ${!name} indirect variable reference, ${!prefix*} / ${!prefix@}, or ${!arr[@]} / ${!arr[*]}
+        if prefix == "!" {
+            // Check if this is ${!} (special) first
+            if pos + 1 < chars.count && chars[pos + 1] == "}" {
+                pos += 2
+                return .variable(.special(prefix))
+            }
+            pos += 1
+            let indirectName = scanVarName()
+            // ${!arr[@]} or ${!arr[*]} — list array indices/keys
+            if pos < chars.count && chars[pos] == "[" {
+                let saved = pos
+                pos += 1
+                if pos < chars.count && (chars[pos] == "@" || chars[pos] == "*") {
+                    let allType = chars[pos]
+                    pos += 1
+                    if pos < chars.count && chars[pos] == "]" { pos += 1 }
+                    if pos < chars.count && chars[pos] == "}" { pos += 1 }
+                    return .variable(.arrayKeys(indirectName, allType == "@"))
+                }
+                pos = saved // restore if not [@] or [*]
+            }
+            // ${!prefix*} or ${!prefix@} — expand to variable names matching prefix
+            if pos < chars.count && (chars[pos] == "*" || chars[pos] == "@") {
+                let asSeparateWords = chars[pos] == "@"
+                pos += 1
+                if pos < chars.count && chars[pos] == "}" { pos += 1 }
+                return .variable(.namesByPrefix(indirectName, asSeparateWords))
+            }
+            if pos < chars.count && chars[pos] == "}" { pos += 1 }
+            return .variable(.indirect(indirectName))
+        }
+
         // Special single-char variables in braces
-        if "?@*$!-0".contains(prefix) && pos + 1 < chars.count && chars[pos + 1] == "}" {
+        if "?@*$-0".contains(prefix) && pos + 1 < chars.count && chars[pos + 1] == "}" {
             pos += 2
             return .variable(.special(prefix))
         }
@@ -879,6 +974,26 @@ private struct Tokenizer {
             return .lowercase(all: all)
         }
 
+        // Transformation: ${var@op}
+        if ch == "@" {
+            pos += 1
+            let transformOp: TransformOp
+            if pos < chars.count {
+                switch chars[pos] {
+                case "Q": transformOp = .quote; pos += 1
+                case "E": transformOp = .escape; pos += 1
+                case "P": transformOp = .prompt; pos += 1
+                case "A": transformOp = .assign; pos += 1
+                case "a": transformOp = .attributes; pos += 1
+                default: transformOp = .attributes
+                }
+            } else {
+                transformOp = .attributes
+            }
+            if pos < chars.count && chars[pos] == "}" { pos += 1 }
+            return .transform(transformOp)
+        }
+
         // Unknown operator, skip to }
         while pos < chars.count && chars[pos] != "}" { pos += 1 }
         if pos < chars.count { pos += 1 }
@@ -979,7 +1094,7 @@ private struct Tokenizer {
                 if trimmed == heredoc.delimiter {
                     break
                 }
-                body += line + "\n"
+                body += trimmed + "\n"
             }
             tokens.append(.heredocBody(body, heredoc.quoted))
         }
@@ -1438,14 +1553,23 @@ private struct ParserState {
     mutating func parseFor() throws -> CompoundCommand {
         try expectWord("for")
         skipNewlines()
+
+        // Check for C-style for: for (( init; cond; update )); do body; done
+        if case .forArithExpr(let initExpr, let condExpr, let updateExpr) = current {
+            advance()
+            skipTerminators()
+            try expectWord("do")
+            skipNewlines()
+            let body = try parseScript()
+            try expectWord("done")
+            return .forArithClause(ForArithClause(initialize: initExpr, condition: condExpr, update: updateExpr, body: body))
+        }
+
         guard case .word(let varWord) = current, let varName = wordText(varWord) else {
             throw ParseError.expectedToken("variable name")
         }
         advance()
         skipNewlines()
-
-        // Check for C-style for: for (( init; cond; update ))
-        // This would be detected earlier as (( so handle here if needed
 
         var words: [ShellWord]? = nil
         if isWordWithText("in") {

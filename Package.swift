@@ -20,14 +20,12 @@ let package = Package(
         .target(
             name: "JustBashCommands",
             dependencies: ["JustBashFS"],
-            path: "Sources/JustBashCommands",
-            sources: ["Commands.swift"]
+            path: "Sources/JustBashCommands"
         ),
         .target(
             name: "JustBashCore",
             dependencies: ["JustBashFS", "JustBashCommands"],
-            path: "Sources/JustBashCore",
-            sources: ["CoreShell.swift", "Parser.swift", "Interpreter.swift"]
+            path: "Sources/JustBashCore"
         ),
         .target(
             name: "JustBash",
