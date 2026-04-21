@@ -84,7 +84,7 @@ func tar() -> AnyBashCommand {
                 if gzipMode {
                     data = try gzipData(data)
                 }
-                try ctx.fileSystem.writeFile(stringFromVirtualData(data, preferUTF8: false), to: archivePath, relativeTo: ctx.cwd)
+                try ctx.fileSystem.writeFile(path: archivePath, content: data, relativeTo: ctx.cwd)
                 let stderr = verbose ? entries.map(\.name).joined(separator: "\n") + (entries.isEmpty ? "" : "\n") : ""
                 return ExecResult(stdout: "", stderr: stderr, exitCode: 0)
             case "t":
@@ -97,16 +97,16 @@ func tar() -> AnyBashCommand {
                 let entries = try parseTarArchive(data)
                 let filtered = filterTarEntries(entries, paths: paths, stripComponents: stripComponents)
                 let targetBase = VirtualPath.normalize(changeDir ?? ctx.cwd, relativeTo: ctx.cwd)
-                if !ctx.fileSystem.isDirectory(targetBase) {
-                    try ctx.fileSystem.createDirectory(targetBase, recursive: true)
+                if !ctx.fileSystem.isDirectory(path: targetBase, relativeTo: ctx.cwd) {
+                    try ctx.fileSystem.createDirectory(path: targetBase, relativeTo: ctx.cwd, recursive: true)
                 }
                 for entry in filtered {
                     let dest = targetBase == "/" ? "/\(entry.name)" : "\(targetBase)/\(entry.name)"
                     if entry.isDirectory {
-                        try ctx.fileSystem.createDirectory(dest, recursive: true)
+                        try ctx.fileSystem.createDirectory(path: dest, relativeTo: ctx.cwd, recursive: true)
                     } else {
-                        try ctx.fileSystem.createDirectory(VirtualPath.dirname(dest), recursive: true)
-                        try ctx.fileSystem.writeFile(stringFromVirtualData(entry.data, preferUTF8: false), to: dest)
+                        try ctx.fileSystem.createDirectory(path: VirtualPath.dirname(dest), relativeTo: ctx.cwd, recursive: true)
+                        try ctx.fileSystem.writeFile(path: dest, content: entry.data, relativeTo: ctx.cwd)
                     }
                 }
                 let stderr = verbose ? filtered.map(\.name).joined(separator: "\n") + (filtered.isEmpty ? "" : "\n") : ""
@@ -154,23 +154,23 @@ private func buildTarEntries(paths: [String], changeDir: String?, ctx: CommandCo
         }
         let archiveRoot = requested.hasPrefix("/") ? String(source.drop(while: { $0 == "/" })) : requested
 
-        if ctx.fileSystem.isDirectory(source) {
+        if ctx.fileSystem.isDirectory(path: source, relativeTo: ctx.cwd) {
             entries.append(TarEntry(name: archiveRoot.hasSuffix("/") ? archiveRoot : archiveRoot + "/", data: Data(), isDirectory: true))
-            let walked = try ctx.fileSystem.walk(source)
+            let walked = try ctx.fileSystem.walk(path: source, relativeTo: ctx.cwd)
             for path in walked where path != source {
                 let relative = String(path.dropFirst(source.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 guard !relative.isEmpty else { continue }
                 let name = archiveRoot.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/" + relative
-                if ctx.fileSystem.isDirectory(path) {
+                if ctx.fileSystem.isDirectory(path: path, relativeTo: ctx.cwd) {
                     entries.append(TarEntry(name: name.hasSuffix("/") ? name : name + "/", data: Data(), isDirectory: true))
                 } else {
-                    let content = try ctx.fileSystem.readFile(path)
-                    entries.append(TarEntry(name: name, data: dataFromVirtualString(content, treatAsBinary: true), isDirectory: false))
+                    let data = try ctx.fileSystem.readFile(path: path, relativeTo: ctx.cwd)
+                    entries.append(TarEntry(name: name, data: data, isDirectory: false))
                 }
             }
         } else {
-            let content = try ctx.fileSystem.readFile(source)
-            entries.append(TarEntry(name: archiveRoot, data: dataFromVirtualString(content, treatAsBinary: true), isDirectory: false))
+            let data = try ctx.fileSystem.readFile(path: source, relativeTo: ctx.cwd)
+            entries.append(TarEntry(name: archiveRoot, data: data, isDirectory: false))
         }
     }
 
@@ -233,9 +233,8 @@ private func writeTarChecksum(_ value: Int, into header: inout Data, offset: Int
     header[offset + 7] = 32
 }
 
-private func loadTarArchiveData(path: String, relativeTo cwd: String, fileSystem: VirtualFileSystem) throws -> Data {
-    let content = try fileSystem.readFile(path, relativeTo: cwd)
-    var data = dataFromVirtualString(content, treatAsBinary: true)
+private func loadTarArchiveData(path: String, relativeTo cwd: String, fileSystem: BashFilesystem) throws -> Data {
+    var data = try fileSystem.readFile(path: path, relativeTo: cwd)
     if data.count >= 2 && data[0] == 0x1f && data[1] == 0x8b {
         data = try gunzipData(data)
     }

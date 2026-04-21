@@ -45,7 +45,7 @@ Four modules, zero dependencies beyond Foundation:
 │ JustBashCore │  Parser (recursive descent), Interpreter (tree-walking),
 │              │  AST types, ShellSession, Arithmetic evaluator
 ├─────────────┤
-│JustBashCmds │  40+ commands: grep, sed, awk, sort, tr, cut, find, etc.
+│JustBashCmds │  70+ commands: grep, sed, awk, jq, yq, xan, zip, sqlite3, etc.
 ├─────────────┤
 │  JustBashFS  │  In-memory virtual filesystem with /proc, /dev layout
 └─────────────┘
@@ -62,8 +62,51 @@ Four modules, zero dependencies beyond Foundation:
 
 - Fully in-process execution through the Swift parser, interpreter, builtins, and virtual commands
 - Shared in-memory filesystem across `exec()` calls, with fresh shell state per call
-- One filesystem backend today: `VirtualFileSystem`
+- Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
+- Optional embedded language runtimes via the `EmbeddedRuntime` protocol (see [Optional Products](#optional-products))
 - Selective, test-driven parity with upstream `just-bash`, not line-for-line feature parity yet
+
+## Optional Products
+
+The package ships additional opt-in products you can depend on alongside the
+core `JustBash` library. They are not loaded unless you reference them.
+
+### `JustBashJavaScript`
+
+Adds a `js-exec` command backed by Apple's system JavaScriptCore framework.
+
+```swift
+.product(name: "JustBashJavaScript", package: "just-bash-swift")
+```
+
+```swift
+import JustBash
+import JustBashJavaScript
+
+let bash = Bash(options: .init(embeddedRuntimes: [
+    JavaScriptRuntime(options: BashJavaScriptOptions(
+        bootstrap: "globalThis.APP_NAME = 'demo';"
+    ))
+]))
+
+let result = await bash.exec(#"""
+    js-exec -c 'console.log("hi from", APP_NAME)'
+"""#)
+print(result.stdout)  // "hi from demo\n"
+```
+
+Node-compat surface: `fs` (sync subset + `.promises.*`), `path`, `process`,
+`console`, `Buffer`, `URL`, `URLSearchParams`, `child_process` (`execSync`,
+`spawnSync` route through `ctx.executeSubshell`), `fetch` (gated by
+`allowedURLPrefixes`), plus pure-JS shims for `os`, `assert`, `util`, `events`,
+`stream`, `string_decoder`, `querystring`. Modules registered via
+`BashJavaScriptOptions.addonModules` are discoverable through `require()`.
+
+**Caveats**: JavaScriptCore JIT is enabled on macOS but disabled on iOS / Mac
+Catalyst (no JIT entitlement for non-WebKit apps), so iOS execution runs in
+LLInt interpreter mode — roughly 5–10× slower than macOS for compute-heavy
+scripts. Memory limits are advisory on Apple platforms; the wall-clock timeout
+is enforced (default 10s, 60s when `allowedURLPrefixes` is non-empty).
 
 ## What's Supported
 
@@ -88,7 +131,7 @@ Everything in this section is intended to describe implemented behavior in the c
 | **Quoting** | Single, double, `$'...'` (ANSI-C), `\\` escaping |
 | **Variables** | `$var`, `${var}`, assignment, `+=`, command-scoped (`VAR=x cmd`), indexed and associative array assignment and element assignment |
 | **Special vars** | `$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$0`, `$-`, `$_`, `$RANDOM`, `$FUNCNAME`, `$BASH_VERSION`, `$PIPESTATUS`, `$HOSTNAME`, `$SECONDS`, `$LINENO` |
-| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${!var}` (indirect), `${!prefix*}`, `${var@Q}`, `${var@E}`, `${var@A}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `${map[key]}` |
+| **Expansions** | `${var:-default}`, `${var:=}`, `${var:+}`, `${var:?}`, `${#var}`, `${var:off:len}`, `${var#pat}`, `${var##}`, `${var%}`, `${var%%}`, `${var/p/r}`, `${var//p/r}`, `${var^}`, `${var^^}`, `${var,}`, `${var,,}`, `${!var}` (indirect), `${!prefix*}`, `${!prefix@}`, `${var@Q}`, `${var@E}`, `${var@A}`, `${arr[n]}`, `${arr[@]}`, `${arr[*]}`, `${#arr[@]}`, `${!arr[@]}`, `${map[key]}`, `${map[key]:-default}`, `${#map[key]}` |
 | **Tilde expansion** | `~`, `~user` |
 | **Field splitting** | Unquoted expansion splits on `IFS` |
 | **Glob patterns** | `*`, `?`, `[abc]`, `[a-z]`, extended globs (`?(pat)`, `*(pat)`, `+(pat)`, `@(pat)`, `!(pat)`) via virtual filesystem |
@@ -156,6 +199,67 @@ let result = await bash.exec("greet World")
 // stdout: "Hello, World!\n"
 ```
 
+### Filesystem Abstraction
+
+By default, `Bash` uses an in-memory `VirtualFileSystem`. You can inject a custom filesystem implementation by conforming to the `BashFilesystem` protocol:
+
+```swift
+import JustBashFS
+
+struct LoggingFilesystem: BashFilesystem {
+    private let wrapped: BashFilesystem
+    private let logger: (String) -> Void
+    
+    init(wrapping filesystem: BashFilesystem, logger: @escaping (String) -> Void) {
+        self.wrapped = filesystem
+        self.logger = logger
+    }
+    
+    func readFile(path: String, relativeTo: String) throws -> Data {
+        logger("[FS] read: \(path)")
+        return try wrapped.readFile(path: path, relativeTo: relativeTo)
+    }
+    
+    func writeFile(path: String, content: Data, relativeTo: String) throws {
+        logger("[FS] write: \(path) (\(content.count) bytes)")
+        try wrapped.writeFile(path: path, content: content, relativeTo: relativeTo)
+    }
+    
+    // ... implement remaining protocol methods by delegating to wrapped
+}
+
+// Usage
+let baseFS = VirtualFileSystem(initialFiles: ["/data/input.txt": "hello"])
+let loggingFS = LoggingFilesystem(wrapping: baseFS) { log in
+    print(log)
+}
+
+let bash = Bash(options: .init(filesystem: loggingFS))
+let result = await bash.exec("cat /data/input.txt")
+```
+
+The `BashFilesystem` protocol requires methods for:
+- **File operations**: `readFile`, `writeFile`, `deleteFile`
+- **Path queries**: `fileExists`, `isDirectory`
+- **Directory operations**: `listDirectory`, `createDirectory`
+- **File info**: `fileInfo` (returns `FileInfo` with path, kind, size)
+- **Tree walking**: `walk` (depth-first traversal)
+- **Path normalization**: `normalizePath` (resolves relative paths, collapses `.` and `..`)
+- **Glob matching**: `glob` (supports `*`, `?`, `[...]`, extended globs)
+
+**Use cases for custom filesystems:**
+
+| Use Case | Implementation Approach |
+|----------|------------------------|
+| **Read-only wrapper** | Reject write operations, delegate reads to underlying FS |
+| **Logging layer** | Wrap an existing FS and log all operations |
+| **Filtering** | Block access to sensitive paths by checking path prefixes |
+| **Remote storage** | Back filesystem operations with S3, Redis, or database |
+| **Quota enforcement** | Track total size in writes, throw `ioError` when limit exceeded |
+| **Audit trail** | Record all file operations for compliance |
+
+**Note:** All filesystem implementations must be `Sendable` and handle their own synchronization for thread safety.
+
 ## API Reference
 
 ### `Bash` (actor)
@@ -214,7 +318,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-215 tests covering: control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
+270+ tests covering: 60+ commands, control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, gzip-family and zip compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, custom filesystem abstraction, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
 
 ## License
 

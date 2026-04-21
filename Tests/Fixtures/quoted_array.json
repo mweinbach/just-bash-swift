@@ -1,0 +1,132 @@
+{
+  "description": "Quoted array expansion test cases - ${arr[@]} vs ${arr[*]} behavior",
+  "tests": [
+    {
+      "name": "quoted_array_at_expands_to_separate_words",
+      "script": "arr=(hello world); for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello<\n>world<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_star_expands_to_single_word",
+      "script": "arr=(hello world); for x in \"${arr[*]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello world<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_at_with_spaces_in_elements",
+      "script": "arr=('hello world' 'foo bar'); for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello world<\n>foo bar<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_star_with_spaces_in_elements",
+      "script": "arr=('hello world' 'foo bar'); for x in \"${arr[*]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello world foo bar<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_at_empty_array",
+      "script": "arr=(); for x in \"${arr[@]}\"; do echo \">$x<\"; done; echo done",
+      "expected_stdout": "done\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_star_empty_array",
+      "script": "arr=(); for x in \"${arr[*]}\"; do echo \">$x<\"; done; echo done",
+      "expected_stdout": "><\ndone\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_star_custom_ifs",
+      "script": "IFS=':'; arr=(a b c); for x in \"${arr[*]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">a:b:c<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_at_custom_ifs_unchanged",
+      "script": "IFS=':'; arr=(a b c); for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">a<\n>b<\n>c<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_assoc_at_expands_to_separate_words",
+      "script": "declare -A assoc; assoc[a]=hello; assoc[b]=world; for x in \"${assoc[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout_contains": "hello",
+      "expected_stdout_contains": "world",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_assoc_star_expands_to_single_word",
+      "script": "declare -A assoc; assoc[a]=hello; assoc[b]=world; for x in \"${assoc[*]}\"; do echo \">$x<\"; done",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_assoc_at_with_spaces_in_values",
+      "script": "declare -A assoc; assoc[a]='hello world'; assoc[b]='foo bar'; for x in \"${assoc[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout_contains": "hello world",
+      "expected_stdout_contains": "foo bar",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_keys_at_expands_to_separate_words",
+      "script": "arr=(zero one two); for x in \"${!arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">0<\n>1<\n>2<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_array_keys_star_expands_to_single_word",
+      "script": "arr=(zero one two); for x in \"${!arr[*]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">0 1 2<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_assoc_keys_at_expands_to_separate_words",
+      "script": "declare -A assoc; assoc[foo]=1; assoc[bar]=2; for x in \"${!assoc[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout_contains": "foo",
+      "expected_stdout_contains": "bar",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "quoted_assoc_keys_star_expands_to_single_word",
+      "script": "declare -A assoc; assoc[foo]=1; assoc[bar]=2; for x in \"${!assoc[*]}\"; do echo \">$x<\"; done",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "unquoted_array_at_splits_by_ifs",
+      "script": "arr=('a b' c); for x in ${arr[@]}; do echo \">$x<\"; done",
+      "expected_stdout": ">a<\n>b<\n>c<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "unquoted_array_star_splits_by_ifs",
+      "script": "arr=('a b' c); for x in ${arr[*]}; do echo \">$x<\"; done",
+      "expected_stdout": ">a<\n>b<\n>c<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "single_element_array_quoted_at",
+      "script": "arr=('hello world'); for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello world<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "single_element_array_quoted_star",
+      "script": "arr=('hello world'); for x in \"${arr[*]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">hello world<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "array_with_special_chars_quoted_at",
+      "script": "arr=('a*b' 'c?d'); for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">a*b<\n>c?d<\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "array_with_newlines_quoted_at",
+      "script": "arr=$'line1\nline2'; for x in \"${arr[@]}\"; do echo \">$x<\"; done",
+      "expected_stdout": ">line1<\n>line2<\n",
+      "expected_exit_code": 0
+    }
+  ]
+}

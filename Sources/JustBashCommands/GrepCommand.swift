@@ -75,20 +75,23 @@ func grep() -> AnyBashCommand {
                 var collected: [(String?, String)] = []
                 for path in paths {
                     let normalized = VirtualPath.normalize(path, relativeTo: ctx.cwd)
-                    if recursive && ctx.fileSystem.isDirectory(normalized) {
-                        let walked = (try? ctx.fileSystem.walk(path, relativeTo: ctx.cwd)) ?? []
+                    if recursive && ctx.fileSystem.isDirectory(path: normalized, relativeTo: ctx.cwd) {
+                        let walked = (try? ctx.fileSystem.walk(path: path, relativeTo: ctx.cwd)) ?? []
                         for child in walked {
-                            if !ctx.fileSystem.isDirectory(child) {
+                            if !ctx.fileSystem.isDirectory(path: child, relativeTo: ctx.cwd) {
                                 let baseName = VirtualPath.basename(child)
                                 if let inc = includePattern, !VirtualFileSystem.globMatch(name: baseName, pattern: inc) { continue }
                                 if let exc = excludePattern, VirtualFileSystem.globMatch(name: baseName, pattern: exc) { continue }
-                                if let content = try? ctx.fileSystem.readFile(child) {
-                                    collected.append((child, content))
+                                if let content = try? ctx.fileSystem.readFile(path: child, relativeTo: ctx.cwd) {
+                                    let contentStr = String(decoding: content, as: UTF8.self)
+                                    collected.append((child, contentStr))
                                 }
                             }
                         }
                     } else {
-                        collected.append((path, try ctx.fileSystem.readFile(path, relativeTo: ctx.cwd)))
+                        let data = try ctx.fileSystem.readFile(path: path, relativeTo: ctx.cwd)
+                        let content = String(decoding: data, as: UTF8.self)
+                        collected.append((path, content))
                     }
                 }
                 sources = collected

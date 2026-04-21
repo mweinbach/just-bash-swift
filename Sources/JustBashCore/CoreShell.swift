@@ -376,7 +376,7 @@ public indirect enum CondExpr: Sendable {
 public struct ShellSession: Sendable {
     public var cwd: String
     public var environment: [String: String]
-    public var arrayEnvironment: [String: [String]] = [:]
+    public var arrayEnvironment: [String: [Int: String]] = [:]  // Sparse array storage
     public var associativeArrayEnvironment: [String: [String: String]] = [:]
     public var readonlyVariables: Set<String> = []
     public var integerVariables: Set<String> = []
@@ -386,7 +386,7 @@ public struct ShellSession: Sendable {
     public var positionalParams: [String] = []
     public var functions: [String: Command] = [:]
     public var localScopes: [[String: String?]] = []
-    public var localArrayScopes: [[String: [String]?]] = []
+    public var localArrayScopes: [[String: [Int: String]?]] = []  // Sparse array storage
     public var localAssociativeArrayScopes: [[String: [String: String]?]] = []
     public var shellName: String = "bash"
     public var callDepth: Int = 0
@@ -428,7 +428,11 @@ public struct ShellSession: Sendable {
         }
         for scope in localArrayScopes.reversed() {
             if let entry = scope[name] {
-                return entry?.first
+                // Return first value from sparse dictionary (sorted by key)
+                if let dict = entry, let firstKey = dict.keys.sorted().first {
+                    return dict[firstKey]
+                }
+                return nil
             }
         }
         for scope in localAssociativeArrayScopes.reversed() {
@@ -437,7 +441,11 @@ public struct ShellSession: Sendable {
             }
         }
         if let values = arrayEnvironment[name] {
-            return values.first
+            // Return first value from sparse dictionary (sorted by key)
+            if let firstKey = values.keys.sorted().first {
+                return values[firstKey]
+            }
+            return nil
         }
         if let values = associativeArrayEnvironment[name] {
             return values.values.sorted().first
@@ -467,33 +475,67 @@ public struct ShellSession: Sendable {
             return sourceFileStack.last ?? ""
         case "BASH_LINENO":
             return "0"
+        case "PPID":
+            return "1"
+        case "UID", "EUID":
+            return "1000"
+        case "GROUPS":
+            return "1000"
+        case "BASHPID":
+            return "1"
+        case "BASH_SUBSHELL":
+            return "0"
         default:
             return nil
         }
     }
 
     public mutating func setArray(_ name: String, _ values: [String]) {
+        // Convert array to sparse dictionary
+        var dict: [Int: String] = [:]
+        for (index, value) in values.enumerated() {
+            if !value.isEmpty {
+                dict[index] = value
+            }
+        }
         if let scopeIndex = localArrayScopes.lastIndex(where: { $0.keys.contains(name) }) {
-            localArrayScopes[scopeIndex][name] = values
+            localArrayScopes[scopeIndex][name] = dict
         } else {
-            arrayEnvironment[name] = values
+            arrayEnvironment[name] = dict
         }
         environment.removeValue(forKey: name)
         associativeArrayEnvironment.removeValue(forKey: name)
     }
 
     public mutating func declareLocalArray(_ name: String, values: [String]? = nil) {
+        // Convert to sparse dictionary
+        var dict: [Int: String] = [:]
+        if let vals = values {
+            for (index, value) in vals.enumerated() {
+                if !value.isEmpty {
+                    dict[index] = value
+                }
+            }
+        }
         guard !localArrayScopes.isEmpty else {
-            arrayEnvironment[name] = values ?? []
+            arrayEnvironment[name] = dict
             environment.removeValue(forKey: name)
             associativeArrayEnvironment.removeValue(forKey: name)
             return
         }
-        localArrayScopes[localArrayScopes.count - 1][name] = values ?? []
+        localArrayScopes[localArrayScopes.count - 1][name] = dict
         localScopes[localScopes.count - 1].removeValue(forKey: name)
     }
 
     public func getArray(_ name: String) -> [String]? {
+        guard let dict = getArrayDictionary(name) else { return nil }
+        // Return sorted values
+        let sortedKeys = dict.keys.sorted()
+        return sortedKeys.map { dict[$0]! }
+    }
+    
+    /// Get the underlying sparse dictionary for an array
+    public func getArrayDictionary(_ name: String) -> [Int: String]? {
         for scope in localArrayScopes.reversed() {
             if let entry = scope[name] {
                 return entry
@@ -541,23 +583,30 @@ public struct ShellSession: Sendable {
 
     public mutating func setArrayElement(_ name: String, index: Int, value: String) {
         guard index >= 0 else { return }
-        var values = getArray(name) ?? []
-        if index >= values.count {
-            values.append(contentsOf: Array(repeating: "", count: index - values.count + 1))
+        var dict = getArrayDictionary(name) ?? [:]
+        dict[index] = value
+        if let scopeIndex = localArrayScopes.lastIndex(where: { $0.keys.contains(name) }) {
+            localArrayScopes[scopeIndex][name] = dict
+        } else {
+            arrayEnvironment[name] = dict
         }
-        values[index] = value
-        setArray(name, values)
+        environment.removeValue(forKey: name)
+        associativeArrayEnvironment.removeValue(forKey: name)
     }
 
     public func getArrayElement(_ name: String, index: Int) -> String? {
-        guard index >= 0, let values = getArray(name), index < values.count else { return nil }
-        return values[index]
+        guard index >= 0 else { return nil }
+        return getArrayDictionary(name)?[index]
     }
 
     public mutating func unsetArrayElement(_ name: String, index: Int) {
-        guard index >= 0, var values = getArray(name), index < values.count else { return }
-        values.remove(at: index)
-        setArray(name, values)
+        guard index >= 0, var dict = getArrayDictionary(name) else { return }
+        dict.removeValue(forKey: index)
+        if let scopeIndex = localArrayScopes.lastIndex(where: { $0.keys.contains(name) }) {
+            localArrayScopes[scopeIndex][name] = dict.isEmpty ? nil : dict
+        } else {
+            arrayEnvironment[name] = dict.isEmpty ? nil : dict
+        }
     }
 
     /// Declare a local variable in the current scope
@@ -615,6 +664,8 @@ public struct ShellOptions: Sendable {
     public var errexit = false    // set -e
     public var nounset = false    // set -u
     public var xtrace = false     // set -x
+    public var verbose = false    // set -v
+    public var allexport = false  // set -a
     public var pipefail = false   // set -o pipefail
     public var noglob = false     // set -f
     public var noclobber = false  // set -C
@@ -637,6 +688,8 @@ public struct ShellOptions: Sendable {
         if errexit { flags += "e" }
         if nounset { flags += "u" }
         if xtrace { flags += "x" }
+        if verbose { flags += "v" }
+        if allexport { flags += "a" }
         if pipefail { flags += "p" }
         if noglob { flags += "f" }
         if noclobber { flags += "C" }

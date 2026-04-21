@@ -15,6 +15,14 @@ public struct BashOptions: Sendable {
     public var executionLimits: ExecutionLimits
     public var customCommands: [AnyBashCommand]
     public var processInfo: VirtualProcessInfo
+    /// URL prefixes that network commands (curl) are allowed to access.
+    /// An empty array means no network access (default, matching upstream).
+    /// Examples: `["https://"]` for all HTTPS, `["https://api.example.com/"]` for specific hosts.
+    public var allowedURLPrefixes: [String]
+    /// Optional embedded-language runtimes (e.g. `JavaScriptRuntime`, `PythonRuntime`).
+    /// Each runtime contributes a set of commands that are registered alongside the
+    /// builtins. Leaving this empty preserves the default shell surface.
+    public var embeddedRuntimes: [any EmbeddedRuntime]
 
     public init(
         files: [String: String] = [:],
@@ -22,7 +30,9 @@ public struct BashOptions: Sendable {
         cwd: String = "/home/user",
         executionLimits: ExecutionLimits = .init(),
         customCommands: [AnyBashCommand] = [],
-        processInfo: VirtualProcessInfo = .init()
+        processInfo: VirtualProcessInfo = .init(),
+        allowedURLPrefixes: [String] = [],
+        embeddedRuntimes: [any EmbeddedRuntime] = []
     ) {
         self.files = files
         self.env = env
@@ -30,6 +40,8 @@ public struct BashOptions: Sendable {
         self.executionLimits = executionLimits
         self.customCommands = customCommands
         self.processInfo = processInfo
+        self.allowedURLPrefixes = allowedURLPrefixes
+        self.embeddedRuntimes = embeddedRuntimes
     }
 }
 
@@ -49,6 +61,7 @@ public struct ExecOptions: Sendable {
 
 public actor Bash {
     private let fileSystem: VirtualFileSystem
+    private let registry: CommandRegistry
     private let baseEnv: [String: String]
     private let baseCwd: String
     private let parser: ShellParser
@@ -60,14 +73,21 @@ public actor Bash {
         for command in options.customCommands {
             registry.register(command)
         }
+        for runtime in options.embeddedRuntimes {
+            for command in runtime.commands() {
+                registry.register(command)
+            }
+        }
         for name in ["cd", "pwd", "env", "printenv", "which", "true", "false", "export",
                       "echo", "printf", "test", "[", "read", "set", "unset", "local",
                       "declare", "typeset", "eval", "source", ".", "shift", "return",
                       "exit", "break", "continue", "trap", "alias", "unalias",
                       "command", "type", "let", ":", "getopts", "mapfile", "readarray",
-                      "pushd", "popd", "dirs", "builtin", "hash", "exec", "readonly", "shopt"] + registry.names {
+                      "pushd", "popd", "dirs", "builtin", "hash", "exec", "readonly", "shopt",
+                      "compgen", "complete", "compopt"] + registry.names {
             fileSystem.seedCommandStub(named: name)
         }
+        self.registry = registry
         self.baseCwd = VirtualPath.normalize(options.cwd)
         self.baseEnv = [
             "HOME": "/home/user",
@@ -88,7 +108,7 @@ public actor Bash {
             "OPTIND": "1",
         ].merging(options.env, uniquingKeysWith: { _, new in new })
         self.parser = ShellParser(limits: options.executionLimits)
-        self.interpreter = ShellInterpreter(fileSystem: fileSystem, registry: registry, limits: options.executionLimits)
+        self.interpreter = ShellInterpreter(fileSystem: fileSystem, registry: registry, limits: options.executionLimits, allowedURLPrefixes: options.allowedURLPrefixes)
     }
 
     public func exec(_ script: String, options: ExecOptions = .init()) async -> ExecResult {
@@ -113,5 +133,57 @@ public actor Bash {
 
     public func listDirectory(_ path: String = "/") throws -> [VirtualDirectoryEntry] {
         try fileSystem.listDirectory(path, includeHidden: true)
+    }
+
+    // MARK: - defineCommand API
+
+    /// Registers a custom command at runtime.
+    ///
+    /// This is the Swift equivalent of upstream's `defineCommand()`. It lets host
+    /// apps extend the shell with domain-specific commands that bash scripts can
+    /// call like any other command.
+    ///
+    /// ```swift
+    /// let bash = Bash()
+    /// await bash.defineCommand("greet") { args, ctx in
+    ///     let name = args.dropFirst().first ?? "world"
+    ///     return ExecResult.success("Hello, \(name)!\n")
+    /// }
+    /// let result = await bash.exec("greet Swift")
+    /// // result.stdout == "Hello, Swift!\n"
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - name: The command name (what users type in bash).
+    ///   - handler: A closure that receives `(args, context)` and returns an `ExecResult`.
+    public func defineCommand(_ name: String, handler: @escaping CommandHandler) {
+        let command = AnyBashCommand(name: name, execute: handler)
+        registry.register(command)
+        fileSystem.seedCommandStub(named: name)
+    }
+
+    /// Registers multiple custom commands at once.
+    ///
+    /// - Parameter commands: An array of `AnyBashCommand` values to register.
+    public func defineCommands(_ commands: [AnyBashCommand]) {
+        for command in commands {
+            registry.register(command)
+            fileSystem.seedCommandStub(named: command.name)
+        }
+    }
+
+    /// Returns the names of all registered commands (builtins + custom).
+    public var commandNames: [String] {
+        registry.names
+    }
+
+    // MARK: - Filesystem Access
+
+    /// Direct access to the underlying virtual filesystem.
+    ///
+    /// Host apps can use this to pre-populate files, read outputs, or inspect
+    /// the filesystem state after script execution.
+    public var fs: VirtualFileSystem {
+        fileSystem
     }
 }

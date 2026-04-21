@@ -6,11 +6,13 @@ public final class ShellInterpreter: @unchecked Sendable {
     let fileSystem: VirtualFileSystem
     let registry: CommandRegistry
     let limits: ExecutionLimits
+    let allowedURLPrefixes: [String]
 
-    public init(fileSystem: VirtualFileSystem, registry: CommandRegistry, limits: ExecutionLimits) {
+    public init(fileSystem: VirtualFileSystem, registry: CommandRegistry, limits: ExecutionLimits, allowedURLPrefixes: [String] = []) {
         self.fileSystem = fileSystem
         self.registry = registry
         self.limits = limits
+        self.allowedURLPrefixes = allowedURLPrefixes
     }
 
     // MARK: - Public
@@ -45,6 +47,13 @@ public final class ShellInterpreter: @unchecked Sendable {
     }
 
     private func executeListEntry(_ entry: ListEntry, session: inout ShellSession, stdin: String) async throws -> ExecResult {
+        // set -v (verbose): echo each command to stderr before execution
+        if session.options.verbose {
+            let source = ASTSerializer.serialize(Script([entry]))
+            var result = try await executeAndOr(entry.andOr, session: &session, stdin: stdin)
+            result.stderr = source + "\n" + result.stderr
+            return result
+        }
         let result = try await executeAndOr(entry.andOr, session: &session, stdin: stdin)
         // Background execution is a no-op in our sandbox (no real concurrency)
         return result
@@ -201,6 +210,10 @@ public final class ShellInterpreter: @unchecked Sendable {
                     session.setVariable(assignment.name, finalValue)
                 }
                 environment[assignment.name] = session.getVariable(assignment.name)
+                // set -a (allexport): ensure variable is also in the global environment
+                if session.options.allexport {
+                    session.environment[assignment.name] = session.getVariable(assignment.name) ?? ""
+                }
             } else {
                 // Command-scoped assignments
                 environment[assignment.name] = value
@@ -268,7 +281,7 @@ public final class ShellInterpreter: @unchecked Sendable {
                 var subSession = capturedSession
                 return await self.execute(script: (try? ShellParser(limits: self.limits).parse(script)) ?? Script(), session: &subSession, stdin: "")
             }
-            let context = CommandContext(fileSystem: fileSystem, cwd: session.cwd, environment: environment, stdin: effectiveStdin, executeSubshell: subshellExec)
+            let context = CommandContext(fileSystem: fileSystem, cwd: session.cwd, environment: environment, stdin: effectiveStdin, executeSubshell: subshellExec, allowedURLPrefixes: allowedURLPrefixes)
             result = await command.execute(arguments, context)
         } else {
             result = ExecResult.failure("\(commandName): command not found", exitCode: 127)

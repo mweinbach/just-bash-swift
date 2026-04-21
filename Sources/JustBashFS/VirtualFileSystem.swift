@@ -505,3 +505,72 @@ public final class VirtualFileSystem: @unchecked Sendable {
         return (parent, name)
     }
 }
+
+// MARK: - BashFilesystem Protocol Conformance
+
+extension VirtualFileSystem: BashFilesystem {
+    public func readFile(path: String, relativeTo: String) throws -> Data {
+        let content = try readFile(path, relativeTo: relativeTo)
+        return Data(content.utf8)
+    }
+    
+    public func writeFile(path: String, content: Data, relativeTo: String) throws {
+        guard let str = String(data: content, encoding: .utf8) else {
+            throw VirtualFileSystemError.notFound(path)
+        }
+        try writeFile(str, to: path, relativeTo: relativeTo)
+    }
+    
+    public func deleteFile(path: String, relativeTo: String, recursive: Bool, force: Bool) throws {
+        let fullPath = VirtualPath.normalize(path, relativeTo: relativeTo)
+        if recursive {
+            // For recursive delete, use walk to find all paths and delete them
+            let paths = try walk(path: fullPath, relativeTo: "/")
+            // Delete in reverse order (children first)
+            for p in paths.sorted(by: { $0.count > $1.count }) {
+                let parentPath = VirtualPath.dirname(p)
+                let name = VirtualPath.basename(p)
+                if let parent = try? node(at: parentPath), parent.kind == .directory {
+                    parent.children.removeValue(forKey: name)
+                }
+            }
+        }
+        // Delete the main path
+        let parentPath = VirtualPath.dirname(fullPath)
+        let name = VirtualPath.basename(fullPath)
+        if let parent = try? node(at: parentPath), parent.kind == .directory {
+            parent.children.removeValue(forKey: name)
+        }
+    }
+    
+    public func fileExists(path: String, relativeTo: String) -> Bool {
+        return exists(path, relativeTo: relativeTo)
+    }
+    
+    public func isDirectory(path: String, relativeTo: String) -> Bool {
+        return isDirectory(path, relativeTo: relativeTo)
+    }
+    
+    public func listDirectory(path: String, relativeTo: String) throws -> [String] {
+        let entries = try listDirectory(path, relativeTo: relativeTo)
+        return entries.map { $0.name }
+    }
+    
+    public func createDirectory(path: String, relativeTo: String, recursive: Bool) throws {
+        try createDirectory(path, relativeTo: relativeTo, recursive: recursive)
+    }
+    
+    public func fileInfo(path: String, relativeTo: String) throws -> FileInfo {
+        let info = try fileInfo(path, relativeTo: relativeTo)
+        let kind: FileNodeKind = info.kind == .directory ? .directory : (info.kind == .symlink ? .symlink : .file)
+        return FileInfo(path: info.path, kind: kind, size: info.size)
+    }
+    
+    public func walk(path: String, relativeTo: String) throws -> [String] {
+        return try walk(path, relativeTo: relativeTo)
+    }
+    
+    public func normalizePath(_ path: String, relativeTo: String) -> String {
+        return VirtualPath.normalize(path, relativeTo: relativeTo)
+    }
+}

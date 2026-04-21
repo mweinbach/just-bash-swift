@@ -10,12 +10,20 @@ let package = Package(
     ],
     products: [
         .library(name: "JustBash", targets: ["JustBash"]),
+        .library(name: "JustBashJavaScript", targets: ["JustBashJavaScript"]),
+        .executable(name: "TokenizerBenchmark", targets: ["TokenizerBenchmark"]),
     ],
     targets: [
         .target(
             name: "JustBashFS",
             path: "Sources/JustBashFS",
-            sources: ["VirtualFileSystem.swift"]
+            sources: [
+                "VirtualFileSystem.swift",
+                "FilesystemProtocol.swift",
+                "OverlayFileSystem.swift",
+                "ReadWriteFileSystem.swift",
+                "MountableFileSystem.swift",
+            ]
         ),
         .target(
             name: "JustBashCommands",
@@ -33,9 +41,21 @@ let package = Package(
             path: "Sources/JustBash",
             sources: ["Bash.swift"]
         ),
+        .target(
+            name: "JustBashJavaScript",
+            dependencies: ["JustBashCommands", "JustBashFS", "JustBashCore"],
+            path: "Sources/JustBashJavaScript",
+            resources: [.process("Resources")],
+            linkerSettings: [.linkedFramework("JavaScriptCore")]
+        ),
+        .testTarget(
+            name: "JustBashJavaScriptTests",
+            dependencies: ["JustBashJavaScript", "JustBash", "JustBashFS"],
+            path: "Tests/JustBashJavaScriptTests"
+        ),
         .testTarget(
             name: "JustBashFSTests",
-            dependencies: ["JustBashFS"],
+            dependencies: ["JustBashFS", "JustBash"],
             path: "Tests/JustBashFSTests"
         ),
         .testTarget(
@@ -52,6 +72,11 @@ let package = Package(
             name: "JustBashParityTests",
             dependencies: ["JustBash"],
             path: "Tests/JustBashParityTests"
+        ),
+        .executableTarget(
+            name: "TokenizerBenchmark",
+            dependencies: ["JustBashCore"],
+            path: "Benchmarks/TokenizerBenchmark"
         ),
     ]
 )

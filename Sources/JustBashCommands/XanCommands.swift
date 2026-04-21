@@ -120,7 +120,8 @@ private func getCSVInput(args: [String], ctx: CommandContext) throws -> String {
     }
     
     let path = files.last!
-    return try ctx.fileSystem.readFile(path, relativeTo: ctx.cwd)
+    let data = try ctx.fileSystem.readFile(path: path, relativeTo: ctx.cwd)
+    return String(decoding: data, as: UTF8.self)
 }
 
 // MARK: - Subcommand: view

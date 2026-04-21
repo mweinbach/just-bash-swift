@@ -22,7 +22,8 @@ func wc() -> AnyBashCommand {
                 entries.append((content: ctx.stdin, label: ""))
             } else {
                 for path in paths {
-                    let content = try ctx.fileSystem.readFile(path, relativeTo: ctx.cwd)
+                    let data = try ctx.fileSystem.readFile(path: path, relativeTo: ctx.cwd)
+                    let content = String(decoding: data, as: UTF8.self)
                     entries.append((content: content, label: " \(path)"))
                 }
             }
@@ -86,7 +87,12 @@ func tac() -> AnyBashCommand {
         let content: String
         do {
             if args.isEmpty { content = ctx.stdin }
-            else { content = try args.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try args.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("tac: \(error.localizedDescription)")
         }
@@ -118,7 +124,12 @@ private func runLineSlicer(command: String, args: [String], ctx: CommandContext,
     let content: String
     do {
         if paths.isEmpty { content = ctx.stdin }
-        else { content = try paths.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+        else { 
+            content = try paths.map { 
+                let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                return String(decoding: data, as: UTF8.self)
+            }.joined() 
+        }
     } catch {
         return ExecResult.failure("\(command): \(error.localizedDescription)")
     }
@@ -135,7 +146,12 @@ func rev() -> AnyBashCommand {
         let content: String
         do {
             if args.isEmpty { content = ctx.stdin }
-            else { content = try args.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try args.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("rev: \(error.localizedDescription)")
         }
@@ -149,7 +165,10 @@ func nl() -> AnyBashCommand {
         let content: String
         do {
             if args.isEmpty || args.allSatisfy({ $0.hasPrefix("-") }) { content = ctx.stdin }
-            else { content = try ctx.fileSystem.readFile(args.last!, relativeTo: ctx.cwd) }
+            else { 
+                let data = try ctx.fileSystem.readFile(path: args.last!, relativeTo: ctx.cwd)
+                content = String(decoding: data, as: UTF8.self)
+            }
         } catch {
             return ExecResult.failure("nl: \(error.localizedDescription)")
         }
@@ -177,7 +196,12 @@ func fold() -> AnyBashCommand {
         let content: String
         do {
             if files.isEmpty { content = ctx.stdin }
-            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("fold: \(error.localizedDescription)")
         }
@@ -201,7 +225,12 @@ func expand() -> AnyBashCommand {
         do {
             let files = args.filter { !$0.hasPrefix("-") }
             if files.isEmpty { content = ctx.stdin }
-            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("expand: \(error.localizedDescription)")
         }
@@ -215,7 +244,12 @@ func unexpand() -> AnyBashCommand {
         do {
             let files = args.filter { !$0.hasPrefix("-") }
             if files.isEmpty { content = ctx.stdin }
-            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("unexpand: \(error.localizedDescription)")
         }
@@ -236,7 +270,12 @@ func column() -> AnyBashCommand {
         let content: String
         do {
             if files.isEmpty { content = ctx.stdin }
-            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("column: \(error.localizedDescription)")
         }
@@ -261,7 +300,12 @@ func od() -> AnyBashCommand {
         let content: String
         do {
             if files.isEmpty { content = ctx.stdin }
-            else { content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined() }
+            else { 
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined() 
+            }
         } catch {
             return ExecResult.failure("od: \(error.localizedDescription)")
         }

@@ -20,21 +20,22 @@ func ls() -> AnyBashCommand {
             var lines: [String] = []
             for (index, target) in targets.enumerated() {
                 let path = VirtualPath.normalize(target, relativeTo: ctx.cwd)
-                let info = try ctx.fileSystem.fileInfo(path)
+                let info = try ctx.fileSystem.fileInfo(path: path, relativeTo: ctx.cwd)
                 if info.kind == .directory {
-                    let entries = try ctx.fileSystem.listDirectory(path, includeHidden: includeHidden)
+                    let entries = try ctx.fileSystem.listDirectory(path, relativeTo: ctx.cwd, includeHidden: includeHidden)
                     if targets.count > 1 {
                         if index > 0 { lines.append("") }
                         lines.append("\(path):")
                     }
-                    for entry in entries {
+                    for entryName in entries {
+                        let entryPath = path == "/" ? "/\(entryName)" : "\(path)/\(entryName)"
                         if longFormat {
-                            let eInfo = try? ctx.fileSystem.fileInfo(entry.path)
-                            let kind = entry.isDirectory ? "d" : "-"
+                            let eInfo = try? ctx.fileSystem.fileInfo(path: entryPath, relativeTo: ctx.cwd)
+                            let kind = (eInfo?.kind == .directory) ? "d" : "-"
                             let size = eInfo?.size ?? 0
-                            lines.append("\(kind)rwxr-xr-x 1 user user \(size) Jan  1 00:00 \(entry.name)")
+                            lines.append("\(kind)rwxr-xr-x 1 user user \(size) Jan  1 00:00 \(entryName)")
                         } else {
-                            lines.append(entry.name)
+                            lines.append(entryName)
                         }
                     }
                 } else {
@@ -58,7 +59,7 @@ func mkdir() -> AnyBashCommand {
         guard !paths.isEmpty else { return ExecResult.failure("mkdir: missing operand") }
         do {
             for path in paths {
-                try ctx.fileSystem.createDirectory(path, relativeTo: ctx.cwd, recursive: recursive)
+                try ctx.fileSystem.createDirectory(path: path, relativeTo: ctx.cwd, recursive: recursive)
             }
             return ExecResult.success()
         } catch {
@@ -247,18 +248,19 @@ func tree() -> AnyBashCommand {
         var lines: [String] = [VirtualPath.basename(path)]
 
         func walk(_ current: String, prefix: String) {
-            guard let entries = try? ctx.fileSystem.listDirectory(current, includeHidden: false) else { return }
-            for (index, entry) in entries.enumerated() {
+            guard let entries = try? ctx.fileSystem.listDirectory(current, relativeTo: ctx.cwd, includeHidden: false) else { return }
+            for (index, entryName) in entries.enumerated() {
                 let isLast = index == entries.count - 1
                 let branch = isLast ? "`-- " : "|-- "
-                lines.append(prefix + branch + entry.name)
-                if entry.isDirectory {
-                    walk(entry.path, prefix: prefix + (isLast ? "    " : "|   "))
+                lines.append(prefix + branch + entryName)
+                let entryPath = current == "/" ? "/\(entryName)" : "\(current)/\(entryName)"
+                if ctx.fileSystem.isDirectory(path: entryPath, relativeTo: ctx.cwd) {
+                    walk(entryPath, prefix: prefix + (isLast ? "    " : "|   "))
                 }
             }
         }
 
-        if ctx.fileSystem.isDirectory(path) {
+        if ctx.fileSystem.isDirectory(path: path, relativeTo: ctx.cwd) {
             walk(path, prefix: "")
         }
 
@@ -289,7 +291,8 @@ func split() -> AnyBashCommand {
                 if inputPath == "-" {
                     content = ctx.stdin
                 } else {
-                    content = try ctx.fileSystem.readFile(inputPath, relativeTo: ctx.cwd)
+                    let data = try ctx.fileSystem.readFile(path: inputPath, relativeTo: ctx.cwd)
+                    content = String(decoding: data, as: UTF8.self)
                 }
             } else {
                 content = ctx.stdin
@@ -338,9 +341,9 @@ func mktemp() -> AnyBashCommand {
         let path = "/tmp/\(name)"
         do {
             if directory {
-                try ctx.fileSystem.createDirectory(path, recursive: true)
+                try ctx.fileSystem.createDirectory(path: path, relativeTo: ctx.cwd, recursive: true)
             } else {
-                try ctx.fileSystem.writeFile("", to: path)
+                try ctx.fileSystem.writeFile("", to: path, relativeTo: ctx.cwd)
             }
             return ExecResult.success(path + "\n")
         } catch {

@@ -26,6 +26,17 @@ func curl() -> AnyBashCommand {
         }
 
         guard let urlString = urls.first else { return ExecResult.failure("curl: no URL specified") }
+
+        // Enforce URL allow-list for network access.
+        // data: URLs and file: URLs are always allowed (local resources).
+        // Remote URLs require at least one prefix in allowedURLPrefixes to match.
+        if !urlString.hasPrefix("data:") && !urlString.hasPrefix("file:") {
+            let allowed = ctx.allowedURLPrefixes
+            if allowed.isEmpty || !allowed.contains(where: { urlString.hasPrefix($0) }) {
+                return ExecResult.failure("curl: access denied — URL not in allow-list: \(urlString)")
+            }
+        }
+
         let (headers, body): (String, Data)
         do {
             (headers, body) = try await fetchURLPayload(urlString)
@@ -38,7 +49,7 @@ func curl() -> AnyBashCommand {
             stdout = headers
         } else if let outputPath {
             do {
-                try ctx.fileSystem.writeFile(stringFromVirtualData(body, preferUTF8: false), to: outputPath, relativeTo: ctx.cwd)
+                try ctx.fileSystem.writeFile(path: outputPath, content: body, relativeTo: ctx.cwd)
                 stdout = ""
             } catch {
                 return ExecResult.failure("curl: \(error.localizedDescription)")

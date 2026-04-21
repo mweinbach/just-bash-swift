@@ -1,0 +1,88 @@
+{
+  "name": "Special Variables Tests",
+  "description": "Test cases for bash special variables",
+  "tests": [
+    {
+      "name": "PPID - Parent Process ID",
+      "script": "echo $PPID",
+      "expected_stdout": "1\n",
+      "expected_exit_code": 0,
+      "description": "PPID returns virtual parent process ID (1 for sandbox)"
+    },
+    {
+      "name": "UID - User ID",
+      "script": "echo $UID",
+      "expected_stdout": "1000\n",
+      "expected_exit_code": 0,
+      "description": "UID returns virtual user ID (1000 for regular user)"
+    },
+    {
+      "name": "EUID - Effective User ID",
+      "script": "echo $EUID",
+      "expected_stdout": "1000\n",
+      "expected_exit_code": 0,
+      "description": "EUID returns virtual effective user ID (same as UID)"
+    },
+    {
+      "name": "GROUPS - Supplementary Group IDs",
+      "script": "echo $GROUPS",
+      "expected_stdout": "1000\n",
+      "expected_exit_code": 0,
+      "description": "GROUPS returns space-separated list of group IDs"
+    },
+    {
+      "name": "BASHPID - Current Bash PID",
+      "script": "echo $BASHPID",
+      "expected_stdout": "1\n",
+      "expected_exit_code": 0,
+      "description": "BASHPID returns current bash process ID (same as $$ for now)"
+    },
+    {
+      "name": "BASH_SUBSHELL - Subshell Nesting Level",
+      "script": "echo $BASH_SUBSHELL",
+      "expected_stdout": "0\n",
+      "expected_exit_code": 0,
+      "description": "BASH_SUBSHELL returns subshell nesting level (0 for main shell)"
+    },
+    {
+      "name": "SHLVL - Shell Nesting Level",
+      "script": "echo $SHLVL",
+      "expected_stdout": "1\n",
+      "expected_exit_code": 0,
+      "description": "SHLVL returns shell nesting level"
+    },
+    {
+      "name": "OSTYPE - Operating System Type",
+      "script": "echo $OSTYPE",
+      "expected_exit_code": 0,
+      "description": "OSTYPE returns the operating system type (darwin, linux-gnu, etc.)"
+    },
+    {
+      "name": "MACHTYPE - Machine Type",
+      "script": "echo $MACHTYPE",
+      "expected_exit_code": 0,
+      "description": "MACHTYPE returns the machine hardware type"
+    },
+    {
+      "name": "UID in conditional check",
+      "script": "if [ \"$UID\" -eq 1000 ]; then echo 'regular user'; fi",
+      "expected_stdout": "regular user\n",
+      "expected_exit_code": 0,
+      "description": "UID can be used in conditional expressions"
+    },
+    {
+      "name": "GROUPS in loop",
+      "script": "for g in $GROUPS; do echo \"group: $g\"; done",
+      "expected_stdout": "group: 1000\n",
+      "expected_exit_code": 0,
+      "description": "GROUPS can be iterated as space-separated list"
+    },
+    {
+      "name": "Special variables with $$",
+      "script": "echo $$ $BASHPID $PPID",
+      "expected_stdout": "1 1 1\n",
+      "expected_exit_code": 0,
+      "description": "$$, $BASHPID, and $PPID all return process IDs"
+    }
+  ]
+}

@@ -50,6 +50,9 @@ extension ShellInterpreter {
         case "readonly": return builtinReadonly
         case "shopt": return builtinShopt
         case "wait": return { _, _, _, _ in ExecResult.success() }
+        case "compgen": return builtinCompgen
+        case "complete": return builtinComplete
+        case "compopt": return { _, _, _, _ in ExecResult.success() } // no-op in non-interactive
         default: return nil
         }
     }
@@ -604,7 +607,7 @@ extension ShellInterpreter {
                 lines.append("declare -- \(key)=\"\(session.environment[key] ?? "")\"")
             }
             for key in session.arrayEnvironment.keys.sorted() {
-                let values = session.arrayEnvironment[key] ?? []
+                let values = session.getArray(key) ?? []
                 let elements = values.enumerated().map { "[\($0.offset)]=\"\($0.element)\"" }.joined(separator: " ")
                 lines.append("declare -a \(key)=(\(elements))")
             }
@@ -732,6 +735,8 @@ extension ShellInterpreter {
                     case "e": session.options.errexit = true
                     case "u": session.options.nounset = true
                     case "x": session.options.xtrace = true
+                    case "v": session.options.verbose = true
+                    case "a": session.options.allexport = true
                     case "f": session.options.noglob = true
                     case "C": session.options.noclobber = true
                     case "o":
@@ -746,6 +751,8 @@ extension ShellInterpreter {
                     case "e": session.options.errexit = false
                     case "u": session.options.nounset = false
                     case "x": session.options.xtrace = false
+                    case "v": session.options.verbose = false
+                    case "a": session.options.allexport = false
                     case "f": session.options.noglob = false
                     case "C": session.options.noclobber = false
                     default: break
@@ -759,12 +766,14 @@ extension ShellInterpreter {
             if args[i] == "-o" && i + 1 >= args.count {
                 // `set -o` with no option name: list all options
                 let opts: [(String, Bool)] = [
+                    ("allexport", session.options.allexport),
                     ("errexit", session.options.errexit),
-                    ("nounset", session.options.nounset),
-                    ("xtrace", session.options.xtrace),
-                    ("pipefail", session.options.pipefail),
-                    ("noglob", session.options.noglob),
                     ("noclobber", session.options.noclobber),
+                    ("noglob", session.options.noglob),
+                    ("nounset", session.options.nounset),
+                    ("pipefail", session.options.pipefail),
+                    ("verbose", session.options.verbose),
+                    ("xtrace", session.options.xtrace),
                 ]
                 let lines = opts.map { name, on in
                     let pad = String(repeating: " ", count: max(1, 16 - name.count))
@@ -774,18 +783,27 @@ extension ShellInterpreter {
             }
             if args[i] == "-o" && i + 1 < args.count {
                 switch args[i + 1] {
-                case "pipefail": session.options.pipefail = true
+                case "allexport": session.options.allexport = true
                 case "errexit": session.options.errexit = true
-                case "nounset": session.options.nounset = true
-                case "xtrace": session.options.xtrace = true
-                case "noglob": session.options.noglob = true
                 case "noclobber": session.options.noclobber = true
+                case "noglob": session.options.noglob = true
+                case "nounset": session.options.nounset = true
+                case "pipefail": session.options.pipefail = true
+                case "verbose": session.options.verbose = true
+                case "xtrace": session.options.xtrace = true
                 default: break
                 }
                 i += 2
             } else if args[i] == "+o" && i + 1 < args.count {
                 switch args[i + 1] {
+                case "allexport": session.options.allexport = false
+                case "errexit": session.options.errexit = false
+                case "noclobber": session.options.noclobber = false
+                case "noglob": session.options.noglob = false
+                case "nounset": session.options.nounset = false
                 case "pipefail": session.options.pipefail = false
+                case "verbose": session.options.verbose = false
+                case "xtrace": session.options.xtrace = false
                 default: break
                 }
                 i += 2
@@ -1310,5 +1328,117 @@ extension ShellInterpreter {
 
     private func formatDirectoryStack(_ session: ShellSession) -> String {
         ([session.cwd] + session.directoryStack).joined(separator: " ")
+    }
+
+    // MARK: - Completion builtins
+
+    private func builtinCompgen(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        var actions: Set<Character> = []
+        var wordList: [String] = []
+        var prefix = ""
+        var index = 0
+
+        while index < args.count {
+            let arg = args[index]
+            if arg == "-W" {
+                index += 1
+                if index < args.count {
+                    wordList = args[index].split(separator: " ").map(String.init)
+                }
+            } else if arg == "-P" {
+                index += 1
+                if index < args.count { prefix = args[index] }
+            } else if arg.hasPrefix("-") && arg.count > 1 {
+                for ch in arg.dropFirst() {
+                    actions.insert(ch)
+                }
+            } else {
+                // The word being completed
+                prefix = arg
+            }
+            index += 1
+        }
+
+        // Resolve the last positional arg as the completion prefix if set after flags
+        let completionPrefix = args.last.flatMap { $0.hasPrefix("-") ? nil : $0 } ?? ""
+
+        var candidates: [String] = []
+
+        // -W wordlist
+        if !wordList.isEmpty {
+            candidates.append(contentsOf: wordList)
+        }
+
+        // -f: filenames
+        if actions.contains("f") {
+            let dir = VirtualPath.dirname(completionPrefix.isEmpty ? "/" : completionPrefix)
+            if let entries = try? fileSystem.listDirectory(dir, relativeTo: session.cwd, includeHidden: true) as? [String] {
+                candidates.append(contentsOf: entries)
+            } else if let entries = try? fileSystem.listDirectory(session.cwd, includeHidden: true) as? [String] {
+                candidates.append(contentsOf: entries)
+            }
+        }
+
+        // -d: directories
+        if actions.contains("d") {
+            if let entries = try? fileSystem.walk(session.cwd, relativeTo: "/") as? [String] {
+                for entry in entries {
+                    if fileSystem.isDirectory(entry) {
+                        candidates.append(VirtualPath.basename(entry))
+                    }
+                }
+            }
+        }
+
+        // -c: commands (builtins + registered commands)
+        if actions.contains("c") {
+            let builtinNames = ["cd", "pwd", "echo", "printf", "env", "printenv", "which", "type",
+                                "true", "false", "export", "unset", "local", "declare", "typeset",
+                                "read", "set", "shift", "return", "exit", "break", "continue",
+                                "test", "eval", "source", "trap", "alias", "unalias", "command",
+                                "let", "getopts", "mapfile", "readarray", "pushd", "popd", "dirs",
+                                "builtin", "hash", "exec", "readonly", "shopt", "compgen", "complete"]
+            candidates.append(contentsOf: builtinNames)
+            candidates.append(contentsOf: registry.names)
+        }
+
+        // -b: builtins only
+        if actions.contains("b") {
+            let builtinNames = ["cd", "pwd", "echo", "printf", "env", "printenv", "which",
+                                "true", "false", "export", "unset", "local", "declare",
+                                "read", "set", "shift", "return", "exit", "break", "continue",
+                                "test", "eval", "source", "trap", "alias", "unalias", "command",
+                                "let", "getopts", "mapfile", "readarray", "pushd", "popd", "dirs",
+                                "builtin", "hash", "exec", "readonly", "shopt", "compgen", "complete"]
+            candidates.append(contentsOf: builtinNames)
+        }
+
+        // -v: variables
+        if actions.contains("v") {
+            candidates.append(contentsOf: session.environment.keys)
+        }
+
+        // -A function: functions
+        if actions.contains("A") {
+            candidates.append(contentsOf: session.functions.keys)
+        }
+
+        // Filter by prefix
+        let filtered: [String]
+        if !completionPrefix.isEmpty {
+            filtered = candidates.filter { $0.hasPrefix(completionPrefix) }
+        } else {
+            filtered = candidates
+        }
+
+        let unique = Array(Set(filtered)).sorted()
+        if unique.isEmpty { return ExecResult.success() }
+        return ExecResult.success(unique.joined(separator: "\n") + "\n")
+    }
+
+    private func builtinComplete(_ args: [String], _ session: inout ShellSession, _ env: [String: String], _ stdin: String) async throws -> ExecResult {
+        // In a non-interactive sandbox, `complete` stores completion specs but they
+        // won't fire. We accept the command silently for script compatibility.
+        return ExecResult.success()
     }
 }

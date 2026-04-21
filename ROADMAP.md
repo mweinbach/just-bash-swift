@@ -14,11 +14,35 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 
 - Pure Swift package with four targets: `JustBashFS`, `JustBashCommands`, `JustBashCore`, `JustBash`
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
-- One filesystem backend today: in-memory `VirtualFileSystem`
+- Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 215 passing tests
+- Current verification baseline: `swift test` with 280 passing tests
 
 ## Recently Completed
+
+### Milestone: Data Model And Shell Completeness (COMPLETED)
+
+- Richer associative-array semantics: parameter expansion operations (`${assoc[key]:-default}`, `${assoc[key]:=default}`, `${assoc[key]:?error}`, `${assoc[key]:+alt}`, `${#assoc[key]}`) all supported
+- Full associative-array iteration: `${!assoc[@]}`, `${!assoc[*]}`, `${assoc[@]}`, `${assoc[*]}` supported
+- Sparse-array support: non-contiguous indices work correctly, `${#arr[@]}` counts set elements, `${!arr[@]}` returns indices
+- Higher-fidelity quoted `${arr[@]}` behavior: `"${arr[@]}"` expands to separate words, `"${arr[*]}"` joins with IFS
+- Missing special variables added: `$PPID`, `$UID`, `$EUID`, `$GROUPS`, `$OSTYPE`, `$MACHTYPE`, `$BASHPID`, `$BASH_SUBSHELL`
+- Fixed `$_` special variable to return actual last argument
+- Array element operations: `${arr[idx]:-default}`, `${arr[idx]:=default}`, `${arr[idx]:?error}`, `${arr[idx]:+alt}`, `${#arr[idx]}`, `${arr[idx]/old/new}`, `${arr[idx]//old/new}`, `${arr[idx]^^}`, `${arr[idx],,}` all work
+- 40+ new tests for array functionality, 12+ fixture cases for special variables
+
+### Milestone: Filesystem Abstraction For Embedding (COMPLETED)
+
+- `BashFilesystem` protocol defined with 10 core methods (read, write, delete, exists, isDirectory, listDirectory, createDirectory, fileInfo, walk, normalizePath)
+- Supporting types: `FileInfo`, `FileNodeKind`, `FilesystemError` all documented and Sendable
+- `VirtualFileSystem` now conforms to `BashFilesystem` protocol with full backward compatibility
+- Custom filesystem injection through `BashOptions.filesystem` - pass any BashFilesystem implementation
+- Legacy API preserved through protocol extensions: string-based read/write, exists(), removeItem(), copyItem(), moveItem(), createSymlink(), readlink(), glob()
+- Binary data support fixed: VFS now stores `Data` instead of `String`, enabling SQLite and tar.gz to work correctly
+- 16 new tests for custom filesystem functionality including mock implementations (LoggingFilesystem, ReadOnlyFilesystem, InMemoryFilesystem)
+- Documentation updated with Filesystem Abstraction section showing use cases and example code
+
+### Previous Work
 
 - `ShellInterpreter` refactored: builtins (830 lines) and arithmetic evaluator (256 lines) extracted into extension files, reducing the main Interpreter.swift from 2,285 to 1,211 lines
 - `JustBashCommands` refactored from a single 5,481-line `Commands.swift` into 20 focused files (one per command or command group) with no behavior changes
@@ -69,72 +93,32 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - basic `curl` and `html-to-markdown` commands now exist in the Swift port with local-only verification coverage
 - a larger native `jq` slice now exists in the Swift port: identity, recursive descent, key access, nested access, quoted and bracketed string-key access, keyword-named field access, array indexing/iteration, slices, simple pipes, comma output, compact/raw modes, array constructors, shorthand object construction, `map`, `select`, `has`, `contains`, `any`, `all`, simple conditionals, variable binding, object construction, path helpers like `getpath`, `setpath`, `path()`, `paths`, `leaf_paths`, generators like `range` and `limit`, type filters (`numbers`, `strings`, `booleans`, `nulls`, `objects`, `arrays`, `iterables`, `scalars`, `values`), string helpers like `split`, `join`, `test`, `startswith`, `endswith`, `ltrimstr`, `rtrimstr`, `ascii_downcase`, `ascii_upcase`, `sub`, `gsub`, `index`, `indices`, `explode`, and `implode`, comparison and logical operators including `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not`, and `//`, type conversion via `tostring`, `tonumber`, `tojson`, and `fromjson`, error handling via `try` and `try-catch`, deletion via `del()`, recursion via `recurse`/`recurse(f)`, and builtin functions like `length`, `keys`, `add`, `type`, `first`, `last`, `reverse`, `sort`, `unique`, `min`, `max`, `flatten`, `transpose`, `pow`, `atan2`, `floor`, `ceil`, `round`, `sqrt`, `abs`, `empty`, and `env`
 - a first `yq` slice now exists in the Swift port: YAML, JSON, CSV, INI, TOML, and XML output modes, stdin input, null-input object construction, extension-based input auto-detection for JSON/CSV/TSV/INI/TOML, document slurp mode, join-output and exit-status modes, custom JSON indentation, navigation operators like `parent`, `parents`, and `root` on simple path pipelines, format-string operators like `@base64`, `@base64d`, `@uri`, `@csv`, `@tsv`, `@json`, `@html`, `@sh`, and `@text`, custom CSV delimiters, dotted-table TOML parsing, and shared jq-backed advanced filters in JSON mode
-- fixture categories now include: redirections (14), substitution (23), globbing (7), alias (6), parse_errors (6), shell_builtins (22), advanced_features (21) — 99 total fixture-driven test cases
+- fixture categories now include: redirections (14), substitution (23), globbing (7), alias (6), parse_errors (6), shell_builtins (22), advanced_features (21), associative_array (12), sparse_array (10), quoted_array (20), special_variables (12) — 147 total fixture-driven test cases
 - alias expansion decision: documented as intentionally limited to command-position only (see README.md)
 - `xan` CSV processing command implemented with RFC 4180 compliant parser, TSV support, column selection by index/name, expression filtering, sorting, frequency tables, and statistics — 16 tests added
 
-## Now: COMPLETED — Parity Harness And Remaining Correctness Work
+## Now: ACTIVE — Embedded Language Runtimes
 
-~~This was the active milestone. It is now complete.~~
+Phase A landed: `JustBashJavaScript` is an opt-in product that registers a
+`js-exec` command backed by the system JavaScriptCore framework. Node-compat
+shims for `fs`, `path`, `process`, `console`, `Buffer`, `child_process`, and
+`fetch` are routed through the existing `BashFilesystem` /
+`CommandContext.executeSubshell` / `CommandContext.allowedURLPrefixes` plumbing.
+Hosts attach the runtime through `BashOptions.embeddedRuntimes`. Initial
+verification: 22-case suite green plus the existing 387 tests still passing.
 
-### Completed Work
-
-**1. Expanded The Parity Harness**
-- ✅ Grew `Tests/JustBashParityTests/` with 2 new fixture categories
-- ✅ Added `shell_builtins.json` with 22 edge-case tests (readonly, shopt, exec, directory-stack)
-- ✅ Added `advanced_features.json` with 21 regression tests (process substitution, nameref, transformations, prefix expansion)
-- Total: 99 fixture cases across 7 JSON files plus 3 MVP cases
-
-**2. Finished The Remaining High-Confidence Runtime Fixes**
-- ✅ **Alias expansion**: Decision made to document intentional limitations (command-position only, no self-referential, no trailing-blank)
-- ✅ **Shell builtin parity**: Edge-case fixtures added for readonly, shopt, exec, pushd/popd/dirs
-- ✅ **Parity fixtures**: Expanded coverage for newly completed runtime behavior
-
-**3. Kept The Docs Honest**
-- ✅ Updated `README.md` with:
-  - `$HOSTNAME`, `$SECONDS`, `$LINENO` added to special variables
-  - New "Alias Expansion" section documenting intentional limitations
-  - Test count updated to 215
-
-## Next: Remaining High-Value Command Gaps (COMPLETED)
-
-~~The next command wave is the part of upstream parity that still materially changes capability.~~
-
-- ✅ `xan` — Phase 1 MVP implemented: view, count, headers, select, head, tail, filter, sort, freq, stats
-
-**Implementation highlights:**
-- RFC 4180 compliant CSV parser with proper quote handling
-- TSV support via `-t` flag
-- Column selection by index (1-based) or header name
-- Expression-based filtering (`age > 30`, `name == 'John'`)
-- Numeric and string sorting with auto-detection
-- Frequency tables and descriptive statistics
-- 16 new tests covering core functionality
-
-## Later: Data Model And Shell Completeness
-
-- richer associative-array semantics remain one of the largest shell-core gaps still open in the Swift runtime
-- sparse-array/bash edge cases
-- higher-fidelity quoted `${arr[@]}` behavior
-- highest-value missing special variables used by real scripts
-- deeper alias/bash-parity edge cases once fixture coverage expands
-
-## Later: Filesystem Abstraction For Embedding
-
-- define a filesystem protocol
-- make `VirtualFileSystem` conform to it
-- allow custom filesystem injection through the public API
-
-This stays later because it is an embedding concern, not a blocker for the current iOS sandbox goal.
+Phase B planned: `JustBashPython` will follow the same shape backed by
+BeeWare's `Python.xcframework`. The `EmbeddedRuntime` protocol added in Phase A
+is the shared extension point.
 
 ## Explicitly Deferred
 
 These are not current priorities and should not be pulled into unrelated milestones:
 
-- embedded JS/Python runtimes
-- overlay or mountable filesystem backends
+- QuickJS-based JS runtime (use JavaScriptCore via `JustBashJavaScript`)
+- Pyodide-based Python runtime (use BeeWare via `JustBashPython` once Phase B lands)
 - example iOS host app or demo app
-- upstream-style sandbox compatibility layers
+- upstream-style `Sandbox` API compatibility layer
 
 ## Definition Of Done For A Milestone
 

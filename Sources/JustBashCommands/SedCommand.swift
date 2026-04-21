@@ -28,7 +28,10 @@ func sed() -> AnyBashCommand {
             if files.isEmpty {
                 content = ctx.stdin
             } else {
-                content = try files.map { try ctx.fileSystem.readFile($0, relativeTo: ctx.cwd) }.joined()
+                content = try files.map { 
+                    let data = try ctx.fileSystem.readFile(path: $0, relativeTo: ctx.cwd)
+                    return String(decoding: data, as: UTF8.self)
+                }.joined()
             }
         } catch {
             return ExecResult.failure("sed: \(error.localizedDescription)")

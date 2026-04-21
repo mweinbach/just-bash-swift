@@ -1,0 +1,123 @@
+{
+  "description": "Associative array expansion patterns test cases",
+  "tests": [
+    {
+      "name": "key_exists_check_with_alternate_plus",
+      "script": "declare -A assoc; assoc[key]=value; echo ${assoc[key]+isset}",
+      "expected_stdout": "isset\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "key_exists_check_with_alternate_plus_unset",
+      "script": "declare -A assoc; echo \"${assoc[key]+isset}\"",
+      "expected_stdout": "\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "default_value_for_unset_key",
+      "script": "declare -A assoc; echo ${assoc[key]:-default}",
+      "expected_stdout": "default\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "default_value_for_set_key",
+      "script": "declare -A assoc; assoc[key]=value; echo ${assoc[key]:-default}",
+      "expected_stdout": "value\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "assign_default_for_unset_key",
+      "script": "declare -A assoc; echo ${assoc[key]:=default}; echo ${assoc[key]}",
+      "expected_stdout": "default\ndefault\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "error_if_unset_key",
+      "script": "declare -A assoc; echo ${assoc[missing]:?key not found}",
+      "expected_exit_code": 1
+    },
+    {
+      "name": "alternate_if_set_plus",
+      "script": "declare -A assoc; assoc[key]=value; echo ${assoc[key]:+alternate}",
+      "expected_stdout": "alternate\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "alternate_if_set_plus_unset",
+      "script": "declare -A assoc; echo \"${assoc[key]:+alternate}\"",
+      "expected_stdout": "\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "length_of_value_at_key",
+      "script": "declare -A assoc; assoc[key]=hello; echo ${#assoc[key]}",
+      "expected_stdout": "5\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "length_of_unset_key",
+      "script": "declare -A assoc; echo ${#assoc[key]}",
+      "expected_stdout": "0\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "all_keys_at",
+      "script": "declare -A assoc; assoc[a]=1; assoc[b]=2; keys=${!assoc[@]}; echo $keys",
+      "expected_stdout_contains": "a",
+      "expected_stdout_contains": "b",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "all_keys_star",
+      "script": "declare -A assoc; assoc[a]=1; assoc[b]=2; echo ${!assoc[*]}",
+      "expected_stdout_contains": "a",
+      "expected_stdout_contains": "b",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "all_values_at",
+      "script": "declare -A assoc; assoc[a]=1; assoc[b]=2; values=${assoc[@]}; echo $values",
+      "expected_stdout_contains": "1",
+      "expected_stdout_contains": "2",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "all_values_star",
+      "script": "declare -A assoc; assoc[a]=1; assoc[b]=2; echo ${assoc[*]}",
+      "expected_stdout_contains": "1",
+      "expected_stdout_contains": "2",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "pattern_removal_on_element",
+      "script": "declare -A assoc; assoc[path]=/home/user/file.txt; echo ${assoc[path]##*/}",
+      "expected_stdout": "file.txt\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "substring_on_element",
+      "script": "declare -A assoc; assoc[txt]='hello world'; echo ${assoc[txt]:0:5}",
+      "expected_stdout": "hello\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "case_modification_on_element",
+      "script": "declare -A assoc; assoc[text]=hello; echo ${assoc[text]^^}",
+      "expected_stdout": "HELLO\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "replace_on_element",
+      "script": "declare -A assoc; assoc[txt]='hello world'; echo ${assoc[txt]/world/universe}",
+      "expected_stdout": "hello universe\n",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "dynamic_key_expansion",
+      "script": "declare -A assoc; mykey=key; assoc[key]=hello; echo ${assoc[$mykey]}",
+      "expected_stdout": "\n",
+      "note": "Dynamic key expansion is a known gap - indices are treated as literals",
+      "expected_exit_code": 0
+    }
+  ]
+}

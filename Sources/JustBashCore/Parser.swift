@@ -167,6 +167,9 @@ private struct Tokenizer {
 
     init(input: String) {
         self.chars = Array(input)
+        // Pre-allocate tokens array with estimated capacity (roughly 1 token per 4 chars)
+        let estimatedCapacity = max(16, chars.count / 4)
+        self.tokens.reserveCapacity(estimatedCapacity)
     }
 
     mutating func tokenize() throws -> [Token] {

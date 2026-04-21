@@ -41,7 +41,7 @@ func find() -> AnyBashCommand {
             }
         }
         do {
-            let paths = try ctx.fileSystem.walk(start, relativeTo: ctx.cwd)
+            let paths = try ctx.fileSystem.walk(path: start, relativeTo: ctx.cwd)
             let basePath = VirtualPath.normalize(start, relativeTo: ctx.cwd)
             let filtered = paths.filter { path in
                 let relative = path.hasPrefix(basePath) ? String(path.dropFirst(basePath.count)) : path
@@ -52,8 +52,8 @@ func find() -> AnyBashCommand {
                 }
                 if let type = typeFilter {
                     switch type {
-                    case "f": if ctx.fileSystem.isDirectory(path) { return false }
-                    case "d": if !ctx.fileSystem.isDirectory(path) { return false }
+                    case "f": if ctx.fileSystem.isDirectory(path: path, relativeTo: ctx.cwd) { return false }
+                    case "d": if !ctx.fileSystem.isDirectory(path: path, relativeTo: ctx.cwd) { return false }
                     default: break
                     }
                 }
@@ -113,7 +113,7 @@ func du() -> AnyBashCommand {
         var lines: [String] = []
         for target in targets {
             do {
-                let walked = try ctx.fileSystem.walk(target, relativeTo: ctx.cwd)
+                let walked = try ctx.fileSystem.walk(path: target, relativeTo: ctx.cwd)
                 var total = 0
                 for path in walked {
                     if let info = try? ctx.fileSystem.fileInfo(path), info.kind == .file { total += info.size }

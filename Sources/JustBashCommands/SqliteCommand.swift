@@ -33,10 +33,10 @@ func sqlite3() -> AnyBashCommand {
         let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("just-bash-swift-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        if !useMemory, ctx.fileSystem.exists(databaseArg, relativeTo: ctx.cwd) {
+        if !useMemory, ctx.fileSystem.fileExists(path: databaseArg, relativeTo: ctx.cwd) {
             do {
-                let stored = try ctx.fileSystem.readFile(databaseArg, relativeTo: ctx.cwd)
-                try dataFromVirtualString(stored, treatAsBinary: true).write(to: tempURL)
+                let stored = try ctx.fileSystem.readFile(path: databaseArg, relativeTo: ctx.cwd)
+                try stored.write(to: tempURL)
             } catch {
                 return ExecResult.failure("sqlite3: \(error.localizedDescription)")
             }
@@ -53,7 +53,7 @@ func sqlite3() -> AnyBashCommand {
             if !useMemory {
                 do {
                     let data = (try? Data(contentsOf: tempURL)) ?? Data()
-                    try ctx.fileSystem.writeFile(stringFromVirtualData(data, preferUTF8: false), to: databaseArg, relativeTo: ctx.cwd)
+                    try ctx.fileSystem.writeFile(path: databaseArg, content: data, relativeTo: ctx.cwd)
                 } catch {
                     return ExecResult.failure("sqlite3: \(error.localizedDescription)")
                 }
@@ -65,7 +65,7 @@ func sqlite3() -> AnyBashCommand {
             let result = try runSQLiteStatements(db: db, sql: sqlText, jsonMode: jsonMode)
             if !useMemory {
                 let data = (try? Data(contentsOf: tempURL)) ?? Data()
-                try ctx.fileSystem.writeFile(stringFromVirtualData(data, preferUTF8: false), to: databaseArg, relativeTo: ctx.cwd)
+                try ctx.fileSystem.writeFile(path: databaseArg, content: data, relativeTo: ctx.cwd)
             }
             return result
         } catch {

@@ -1,0 +1,75 @@
+{
+  "description": "Sparse array test cases for JustBash",
+  "tests": [
+    {
+      "name": "Basic sparse array creation",
+      "script": "arr[0]=a; arr[5]=b; arr[100]=c; echo \"${#arr[@]}\"",
+      "expected_stdout": "3\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Sparse array values expansion",
+      "script": "arr[0]=a; arr[5]=b; arr[100]=c; echo \"${arr[@]}\"",
+      "expected_stdout": "a b c\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Sparse array keys expansion",
+      "script": "arr[0]=a; arr[5]=b; arr[100]=c; echo \"${!arr[@]}\"",
+      "expected_stdout": "0 5 100\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Unset middle element creates gap",
+      "script": "arr[0]=a; arr[1]=b; arr[2]=c; unset arr[1]; echo \"${#arr[@]}\"; echo \"${arr[@]}\"; echo \"${!arr[@]}\"",
+      "expected_stdout": "2\na c\n0 2\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Sparse array with non-zero start",
+      "script": "arr[10]=first; arr[20]=second; echo \"${#arr[@]}\"; echo \"${arr[@]}\"",
+      "expected_stdout": "2\nfirst second\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Access unset element returns empty",
+      "script": "arr[0]=a; arr[5]=b; echo \"${arr[2]}\"",
+      "expected_stdout": "\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Array star expansion preserves sparse",
+      "script": "arr[0]=a; arr[5]=b; arr[100]=c; echo \"${arr[*]}\"",
+      "expected_stdout": "a b c\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Quoted array all expansion",
+      "script": "arr[0]=a; arr[5]=b; arr[100]=c; for x in \"${arr[@]}\"; do echo \"$x\"; done",
+      "expected_stdout": "a\nb\nc\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Large sparse array",
+      "script": "arr[0]=start; arr[999]=end; echo \"${#arr[@]}\"",
+      "expected_stdout": "2\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "Array with gaps after unset",
+      "script": "arr=(a b c d e); unset arr[1] arr[3]; echo \"${#arr[@]}\"; echo \"${!arr[@]}\"",
+      "expected_stdout": "3\n0 2 4\n",
+      "expected_stderr": "",
+      "expected_exit_code": 0
+    }
+  ]
+}
