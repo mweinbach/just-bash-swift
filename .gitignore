@@ -4,3 +4,4 @@ DerivedData/
 .DS_Store
 .omx/
 /.build-codex
+Vendor/BeeWare/
