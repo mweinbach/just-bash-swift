@@ -20,3 +20,13 @@ xcodegen generate
 ```
 
 Then open `JustBashPhone.xcodeproj` in Xcode and run the `JustBashPhone` scheme on an iPhone or iOS Simulator.
+
+## Physical iPhone Note
+
+The simulator build is verified from the command line. A direct build to the
+connected iPhone currently stops at signing if no team is configured yet:
+
+`Signing for "JustBashPhone" requires a development team.`
+
+Set your team once in Xcode under Signing & Capabilities for the
+`JustBashPhone` target, then rerun the device build.
