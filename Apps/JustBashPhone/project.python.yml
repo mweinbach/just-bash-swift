@@ -79,7 +79,13 @@ targets:
           cp "${SLICE_SRC}/lib/libpython3.14.dylib" "${DEST_ROOT}/lib/libpython3.14.dylib"
           cp -R "${PYTHON_ROOT}/lib/python3.14" "${DEST_ROOT}/lib/python3.14"
           cp -R "${STDLIB_SRC}/." "${DEST_ROOT}/lib/python3.14"
-          mkdir -p "${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/app"
+          APP_SRC="${SRCROOT}/PythonApp"
+          APP_DEST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/app"
+          rm -rf "${APP_DEST}"
+          mkdir -p "${APP_DEST}"
+          if [[ -d "${APP_SRC}" ]]; then
+            cp -R "${APP_SRC}/." "${APP_DEST}"
+          fi
 schemes:
   JustBashPhone:
     build:

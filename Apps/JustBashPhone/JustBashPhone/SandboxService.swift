@@ -82,7 +82,20 @@ actor SandboxService {
             )
             let message = "python smoke failed: \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))\n"
             try? message.write(toFile: smokePath, atomically: true, encoding: .utf8)
+            return
         }
+
+        let shellSmoke = await run("""
+        py-exec -c 'from pathlib import Path; Path("python-shell-smoke.txt").write_text("py-exec smoke ok\\n")'
+        cat /workspace/python-shell-smoke.txt
+        """)
+        let shellSmokePath = Self.workspaceDirectoryPath() + "/python-shell-smoke-result.txt"
+        let shellSmokeOutput = """
+        exitCode=\(shellSmoke.exitCode)
+        stdout=\(shellSmoke.stdout)
+        stderr=\(shellSmoke.stderr)
+        """
+        try? shellSmokeOutput.write(toFile: shellSmokePath, atomically: true, encoding: .utf8)
     }
 
     func writeFile(_ path: String, contents: String) async throws {
@@ -113,6 +126,7 @@ actor SandboxService {
 
         return Bash(options: .init(
             files: seedFiles,
+            customCommands: Self.pythonCommands(),
             filesystem: mountable,
             embeddedRuntimes: [
                 JavaScriptRuntime(options: .init(
@@ -120,6 +134,101 @@ actor SandboxService {
                 ))
             ]
         ))
+    }
+
+    private static func pythonCommands() -> [AnyBashCommand] {
+        let handler: CommandHandler = { args, ctx in
+            var inlineCode: String?
+            var scriptPath: String?
+            var scriptArgs: [String] = []
+            var readFromStdin = false
+            var index = 0
+
+            while index < args.count {
+                let arg = args[index]
+                switch arg {
+                case "--help":
+                    return ExecResult.success("""
+                    py-exec - run embedded Python inside the Just Bash host
+
+                      py-exec -c 'code'         execute inline Python
+                      py-exec script.py         execute a virtual filesystem script file
+                      py-exec - < script.py     read Python code from stdin
+                      python -c 'code'          alias for py-exec
+                      python script.py          alias for py-exec
+
+                    Python starts with its current directory set to the persistent
+                    workspace. Files written by Python to the current directory are
+                    visible to bash under /workspace.
+
+                    """)
+                case "-V", "--version":
+                    let result = PythonSupport.run(
+                        code: "import sys; print(sys.version)",
+                        workspacePath: Self.workspaceDirectoryPath(),
+                        scriptName: "<justbash-python-version>"
+                    )
+                    if result.exitCode == 0 {
+                        return ExecResult(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode)
+                    }
+                    return ExecResult.failure(result.stderr, exitCode: result.exitCode)
+                case "-c":
+                    index += 1
+                    if index < args.count {
+                        inlineCode = args[index]
+                    } else {
+                        return ExecResult.failure("py-exec: -c requires an argument", exitCode: 2)
+                    }
+                case "-":
+                    readFromStdin = true
+                default:
+                    if arg.hasPrefix("-") {
+                        return ExecResult.failure("py-exec: unknown option \(arg)", exitCode: 2)
+                    }
+                    if inlineCode == nil && scriptPath == nil && !readFromStdin {
+                        scriptPath = arg
+                    } else {
+                        scriptArgs.append(arg)
+                    }
+                }
+                index += 1
+            }
+
+            let source: String
+            let displayName: String
+            if let inlineCode {
+                source = inlineCode
+                displayName = "<justbash-python>"
+            } else if let scriptPath {
+                do {
+                    let data = try ctx.fileSystem.readFile(path: scriptPath, relativeTo: ctx.cwd)
+                    source = String(decoding: data, as: UTF8.self)
+                    displayName = scriptPath
+                } catch {
+                    return ExecResult.failure("py-exec: cannot read \(scriptPath): \(error.localizedDescription)", exitCode: 2)
+                }
+            } else if readFromStdin || !ctx.stdin.isEmpty {
+                source = ctx.stdin
+                displayName = "<stdin>"
+            } else {
+                return ExecResult.failure("py-exec: no script source provided (use -c, a file path, or stdin)", exitCode: 2)
+            }
+
+            let result = PythonSupport.run(
+                code: source,
+                workspacePath: Self.workspaceDirectoryPath(),
+                arguments: scriptArgs,
+                scriptName: displayName,
+                scriptPath: scriptPath
+            )
+            return ExecResult(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode)
+        }
+
+        return [
+            AnyBashCommand(name: "py-exec", execute: handler),
+            AnyBashCommand(name: "python", execute: handler),
+            AnyBashCommand(name: "python3", execute: handler),
+        ]
     }
 
     private static func workspaceDirectoryPath() -> String {

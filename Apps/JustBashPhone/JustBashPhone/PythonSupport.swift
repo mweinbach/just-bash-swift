@@ -16,9 +16,29 @@ enum PythonSupport {
         "BeeWare Python support is linked."
     }
 
-    static func run(code: String, workspacePath: String) -> PythonExecResult {
+    static func run(
+        code: String,
+        workspacePath: String,
+        arguments: [String] = [],
+        scriptName: String = "<justbash-python>",
+        scriptPath: String? = nil
+    ) -> PythonExecResult {
         let pythonHome = pythonHomePath()
         let traceDir = workspacePath
+
+        try? FileManager.default.createDirectory(atPath: workspacePath, withIntermediateDirectories: true)
+        let previousDirectory = FileManager.default.currentDirectoryPath
+        let previousWorkspace = getenv("JUSTBASH_WORKSPACE").map { String(cString: $0) }
+        _ = FileManager.default.changeCurrentDirectoryPath(workspacePath)
+        setenv("JUSTBASH_WORKSPACE", workspacePath, 1)
+        defer {
+            _ = FileManager.default.changeCurrentDirectoryPath(previousDirectory)
+            if let previousWorkspace {
+                setenv("JUSTBASH_WORKSPACE", previousWorkspace, 1)
+            } else {
+                unsetenv("JUSTBASH_WORKSPACE")
+            }
+        }
 
         writeTrace("entered", to: traceDir)
         setenv("LANG", "\(Locale.current.identifier).UTF-8", 1)
@@ -74,9 +94,7 @@ enum PythonSupport {
         writeConfigSnapshot(config, to: traceDir)
         writeTrace("after-config-read", to: traceDir)
 
-        let argv: [UnsafeMutablePointer<CChar>?] = [
-            strdup("JustBashPhone")
-        ]
+        let argv = ([scriptPath ?? scriptName] + arguments).map { strdup($0) }
         defer {
             for arg in argv {
                 free(arg)
@@ -121,6 +139,12 @@ enum PythonSupport {
         let outputPaths = OutputFilePaths(baseDirectory: outputDirectory)
         try? FileManager.default.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
 
+        let scriptGlobals = if let scriptPath {
+            "{\"__name__\": \"__main__\", \"__file__\": \(pythonStringLiteral(scriptPath))}"
+        } else {
+            "{\"__name__\": \"__main__\"}"
+        }
+
         let wrappedCode = """
         import contextlib
         import io
@@ -132,7 +156,7 @@ enum PythonSupport {
         _status = 0
         with contextlib.redirect_stdout(_stdout_buffer), contextlib.redirect_stderr(_stderr_buffer):
             try:
-                exec(compile(\(pythonStringLiteral(code)), "<justbash-python>", "exec"), {"__name__": "__main__"})
+                exec(compile(\(pythonStringLiteral(code)), \(pythonStringLiteral(scriptName)), "exec"), \(scriptGlobals))
             except SystemExit as exc:
                 value = exc.code
                 _status = value if isinstance(value, int) else 1
@@ -290,7 +314,13 @@ enum PythonSupport {
         "BeeWare Python support is not linked yet."
     }
 
-    static func run(code: String, workspacePath: String) -> PythonExecResult {
+    static func run(
+        code: String,
+        workspacePath: String,
+        arguments: [String] = [],
+        scriptName: String = "<justbash-python>",
+        scriptPath: String? = nil
+    ) -> PythonExecResult {
         PythonExecResult(stdout: "", stderr: PythonExecutionError.notLinked.localizedDescription + "\n", exitCode: 1)
     }
 }

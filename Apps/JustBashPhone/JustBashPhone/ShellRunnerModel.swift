@@ -100,7 +100,7 @@ final class ShellRunnerModel {
             description: "Create a persistent workspace file from Python.",
             code: """
             from pathlib import Path
-            target = Path("/workspace/python-note.txt")
+            target = Path.cwd() / "python-note.txt"
             target.write_text("Python wrote this on-device.\\n")
             print(target.read_text(), end="")
             """

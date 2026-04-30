@@ -4,6 +4,8 @@ import JustBashCore
 import JustBashFS
 
 public typealias AnyBashCommand = JustBashCommands.AnyBashCommand
+public typealias CommandContext = JustBashCommands.CommandContext
+public typealias CommandHandler = JustBashCommands.CommandHandler
 public typealias ExecResult = JustBashCommands.ExecResult
 public typealias ExecutionLimits = JustBashCore.ExecutionLimits
 public typealias VirtualProcessInfo = JustBashFS.VirtualProcessInfo

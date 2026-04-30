@@ -77,17 +77,25 @@ This repo now includes a minimal SwiftUI iPhone/iPad host app in
 [Apps/JustBashPhone](/Users/mweinbach/Projects/just-bash-swift/Apps/JustBashPhone/README.md).
 It links the local package, seeds the virtual filesystem with sample files, and
 lets you run shell scripts on-device with stdout, stderr, exit code, and a
-small sandbox file browser. It also exposes a first App Intents surface for
-Shortcuts: run an arbitrary shell script and reset the sandbox. The host app
-targets iOS 26+ so it can use the current App Intents API surface directly.
+small sandbox file browser. The Python-linked variant embeds BeeWare CPython,
+adds `py-exec`/`python`/`python3` commands to the host's virtual bash, and can
+run Python code against the same persistent `/workspace` mount. It also exposes
+App Shortcuts for running shell scripts, running Python code, reading/writing
+workspace files, and resetting the sandbox. The host app targets iOS 26+ so it
+can use the current App Intents API surface directly.
 
 To generate and run it:
 
 ```bash
 cd Apps/JustBashPhone
-xcodegen generate
+./generate_project.sh --with-python
 open JustBashPhone.xcodeproj
 ```
+
+See [Embedded Python](docs/EMBEDDED_PYTHON.md) for what the BeeWare build
+includes by default, how to vendor extra pure-Python modules into
+`Apps/JustBashPhone/PythonApp`, and the filesystem caveat for Python running
+beside the JustBash virtual filesystem.
 
 Verified build lane:
 
