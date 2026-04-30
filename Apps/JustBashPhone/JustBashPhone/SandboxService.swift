@@ -45,6 +45,45 @@ actor SandboxService {
         PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
     }
 
+    func runPythonSmokeIfRequested() async {
+        guard ProcessInfo.processInfo.environment["JUSTBASH_SMOKE_PYTHON"] == "1" else {
+            return
+        }
+
+        let smokePath = Self.workspaceDirectoryPath() + "/python-smoke.txt"
+        let startedPath = Self.workspaceDirectoryPath() + "/python-smoke.started"
+        let beforeRunPath = Self.workspaceDirectoryPath() + "/python-smoke.before-run"
+        let afterRunPath = Self.workspaceDirectoryPath() + "/python-smoke.after-run"
+        try? FileManager.default.createDirectory(
+            atPath: Self.workspaceDirectoryPath(),
+            withIntermediateDirectories: true
+        )
+        try? "started\n".write(toFile: startedPath, atomically: true, encoding: .utf8)
+
+        let escapedPath = smokePath.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        let code = """
+        import sys
+        from pathlib import Path
+        Path('\(escapedPath)').write_text('python smoke ok\\n' + sys.version)
+        """
+
+        try? "before run\n".write(toFile: beforeRunPath, atomically: true, encoding: .utf8)
+        let result = PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
+        try? "after run\n".write(toFile: afterRunPath, atomically: true, encoding: .utf8)
+        switch result {
+        case .success:
+            break
+        case .failure(let error):
+            try? FileManager.default.createDirectory(
+                atPath: Self.workspaceDirectoryPath(),
+                withIntermediateDirectories: true
+            )
+            let message = "python smoke failed: \(error.localizedDescription)\n"
+            try? message.write(toFile: smokePath, atomically: true, encoding: .utf8)
+        }
+    }
+
     func writeFile(_ path: String, contents: String) async throws {
         let fs = await bash.fs
         let normalized = fs.normalizePath(path, relativeTo: "/workspace")

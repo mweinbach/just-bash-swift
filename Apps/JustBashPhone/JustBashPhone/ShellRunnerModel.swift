@@ -93,6 +93,7 @@ final class ShellRunnerModel {
     }
 
     func loadInitialState() async {
+        await SandboxService.shared.runPythonSmokeIfRequested()
         pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
         await refreshFileSections()
     }
