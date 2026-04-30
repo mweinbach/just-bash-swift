@@ -46,21 +46,31 @@ targets:
         script: |
           set -euo pipefail
           PYTHON_ROOT="${SRCROOT}/../../Vendor/BeeWare/Python.xcframework"
-          DEST_ROOT="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/PythonSupport"
+          DEST_ROOT="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/python"
 
           if [[ "${PLATFORM_NAME}" == "iphoneos" ]]; then
-            LIB_SRC="${PYTHON_ROOT}/ios-arm64/lib-arm64/python3.14"
+            SLICE_SRC="${PYTHON_ROOT}/ios-arm64"
+            STDLIB_SRC="${SLICE_SRC}/lib-arm64/python3.14"
           else
             if [[ "${CURRENT_ARCH}" == "x86_64" ]]; then
-              LIB_SRC="${PYTHON_ROOT}/ios-arm64_x86_64-simulator/lib-x86_64/python3.14"
+              SLICE_SRC="${PYTHON_ROOT}/ios-arm64_x86_64-simulator"
+              STDLIB_SRC="${SLICE_SRC}/lib-x86_64/python3.14"
             else
-              LIB_SRC="${PYTHON_ROOT}/ios-arm64_x86_64-simulator/lib-arm64/python3.14"
+              SLICE_SRC="${PYTHON_ROOT}/ios-arm64_x86_64-simulator"
+              STDLIB_SRC="${SLICE_SRC}/lib-arm64/python3.14"
             fi
           fi
 
           rm -rf "${DEST_ROOT}"
+          mkdir -p "${DEST_ROOT}"
+          cp -R "${SLICE_SRC}/bin" "${DEST_ROOT}/bin"
+          cp -R "${SLICE_SRC}/include" "${DEST_ROOT}/include"
+          cp -R "${SLICE_SRC}/platform-config" "${DEST_ROOT}/platform-config"
           mkdir -p "${DEST_ROOT}/lib"
-          cp -R "${LIB_SRC}" "${DEST_ROOT}/lib/python3.14"
+          cp "${SLICE_SRC}/lib/libpython3.14.dylib" "${DEST_ROOT}/lib/libpython3.14.dylib"
+          cp -R "${PYTHON_ROOT}/lib/python3.14" "${DEST_ROOT}/lib/python3.14"
+          cp -R "${STDLIB_SRC}/." "${DEST_ROOT}/lib/python3.14"
+          mkdir -p "${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/app"
 schemes:
   JustBashPhone:
     build:
