@@ -29,6 +29,15 @@ cd Apps/JustBashPhone
 
 Then open `JustBashPhone.xcodeproj` in Xcode and run the `JustBashPhone` scheme on an iPhone or iOS Simulator.
 
+To preconfigure a team or bundle ID while generating the project:
+
+```bash
+cd Apps/JustBashPhone
+JUSTBASH_PHONE_DEVELOPMENT_TEAM=YOURTEAMID \
+JUSTBASH_PHONE_BUNDLE_ID=com.example.JustBashPhone \
+./generate_project.sh --with-python
+```
+
 To generate a Python-linked variant after installing BeeWare support:
 
 ```bash

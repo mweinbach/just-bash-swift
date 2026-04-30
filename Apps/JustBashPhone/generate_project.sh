@@ -18,4 +18,27 @@ if [[ "${1:-}" == "--with-python" ]]; then
   SPEC_FILE="project.python.yml"
 fi
 
+TEMP_SPEC=""
+cleanup() {
+  if [[ -n "${TEMP_SPEC}" && -f "${TEMP_SPEC}" ]]; then
+    rm -f "${TEMP_SPEC}"
+  fi
+}
+trap cleanup EXIT
+
+if [[ -n "${JUSTBASH_PHONE_DEVELOPMENT_TEAM:-}" || -n "${JUSTBASH_PHONE_BUNDLE_ID:-}" ]]; then
+  TEMP_SPEC="${SCRIPT_DIR}/.project.override.yml"
+  cp "${SPEC_FILE}" "${TEMP_SPEC}"
+
+  if [[ -n "${JUSTBASH_PHONE_BUNDLE_ID:-}" ]]; then
+    perl -0pi -e 's/PRODUCT_BUNDLE_IDENTIFIER: .*/PRODUCT_BUNDLE_IDENTIFIER: '"${JUSTBASH_PHONE_BUNDLE_ID}"'/' "${TEMP_SPEC}"
+  fi
+
+  if [[ -n "${JUSTBASH_PHONE_DEVELOPMENT_TEAM:-}" ]]; then
+    perl -0pi -e 's/CODE_SIGN_STYLE: Automatic\n/CODE_SIGN_STYLE: Automatic\n        DEVELOPMENT_TEAM: '"${JUSTBASH_PHONE_DEVELOPMENT_TEAM}"'\n/' "${TEMP_SPEC}"
+  fi
+
+  SPEC_FILE="${TEMP_SPEC}"
+fi
+
 xcodegen generate -s "${SPEC_FILE}"
