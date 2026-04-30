@@ -321,16 +321,23 @@ func uuencode() -> AnyBashCommand {
         // uuencode mode
         let data: Data
         do {
-            if let path = filePaths.first {
+            if !ctx.stdin.isEmpty || filePaths.isEmpty {
+                data = Data(ctx.stdin.utf8)
+            } else if let path = filePaths.first {
                 data = try ctx.fileSystem.readFile(path: path, relativeTo: ctx.cwd)
             } else {
-                data = Data(ctx.stdin.utf8)
+                data = Data()
             }
         } catch {
             return ExecResult.failure("uuencode: \(error.localizedDescription)")
         }
         
-        let remoteName = filePaths.count > 1 ? filePaths[1] : "file"
+        let remoteName: String
+        if !ctx.stdin.isEmpty {
+            remoteName = filePaths.first ?? "file"
+        } else {
+            remoteName = filePaths.count > 1 ? filePaths[1] : (filePaths.first ?? "file")
+        }
         var output = "begin 644 \(remoteName)\n"
         
         var index = 0
@@ -447,7 +454,8 @@ private func formatBinaryDump(_ data: Data, uppercase: Bool) -> String {
         
         var line = String(format: "%08x: ", offset)
         for byte in chunk {
-            let binary = String(byte, radix: 2).padding(toLength: 8, withPad: "0", startingAt: 0)
+            let rawBinary = String(byte, radix: 2)
+            let binary = String(repeating: "0", count: max(0, 8 - rawBinary.count)) + rawBinary
             line += uppercase ? binary.uppercased() : binary
             line += " "
         }
@@ -492,8 +500,8 @@ private func formatXXD(_ data: Data, groupSize: Int, uppercase: Bool) -> String 
         // Pad to align ASCII
         let hexLength = line.count - 10 // Subtract offset prefix
         let targetLength = bytesPerLine * 2 + (bytesPerLine / max(groupSize, 1)) + 2
-        while hexLength < targetLength {
-            line += " "
+        if hexLength < targetLength {
+            line += String(repeating: " ", count: targetLength - hexLength)
         }
         
         // ASCII representation

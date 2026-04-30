@@ -56,6 +56,14 @@ import JustBashCommands
 @available(macOS 15.0, iOS 18.0, *)
 final class PerformanceTests: XCTestCase {
 
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["JUSTBASH_RUN_PERF_TESTS"] == "1",
+            "Performance benchmarks are opt-in. Set JUSTBASH_RUN_PERF_TESTS=1 to run them."
+        )
+    }
+
     // MARK: - Async Measurement Helper
 
     /// Helper to measure async operations using Swift Concurrency

@@ -3,12 +3,12 @@ import JustBashCommands
 import JustBashFS
 
 public final class ShellInterpreter: @unchecked Sendable {
-    let fileSystem: VirtualFileSystem
+    let fileSystem: any BashFilesystem
     let registry: CommandRegistry
     let limits: ExecutionLimits
     let allowedURLPrefixes: [String]
 
-    public init(fileSystem: VirtualFileSystem, registry: CommandRegistry, limits: ExecutionLimits, allowedURLPrefixes: [String] = []) {
+    public init(fileSystem: any BashFilesystem, registry: CommandRegistry, limits: ExecutionLimits, allowedURLPrefixes: [String] = []) {
         self.fileSystem = fileSystem
         self.registry = registry
         self.limits = limits

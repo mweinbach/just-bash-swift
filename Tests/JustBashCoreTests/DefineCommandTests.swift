@@ -1,8 +1,81 @@
 import XCTest
 @testable import JustBash
 @testable import JustBashCommands
+@testable import JustBashFS
 
 final class DefineCommandTests: XCTestCase {
+
+    private final class LockedBox<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: Value
+
+        init(_ value: Value) {
+            self.storage = value
+        }
+
+        func withLock<R>(_ body: (inout Value) -> R) -> R {
+            lock.lock()
+            defer { lock.unlock() }
+            return body(&storage)
+        }
+
+        var value: Value {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+    }
+
+    private struct LoggingFilesystem: BashFilesystem {
+        let wrapped: VirtualFileSystem
+        let onRead: @Sendable (String) -> Void
+
+        func readFile(path: String, relativeTo: String) throws -> Data {
+            let normalized = wrapped.normalizePath(path, relativeTo: relativeTo)
+            onRead(normalized)
+            return try wrapped.readFile(path: path, relativeTo: relativeTo)
+        }
+
+        func writeFile(path: String, content: Data, relativeTo: String) throws {
+            try wrapped.writeFile(path: path, content: content, relativeTo: relativeTo)
+        }
+
+        func deleteFile(path: String, relativeTo: String, recursive: Bool, force: Bool) throws {
+            try wrapped.deleteFile(path: path, relativeTo: relativeTo, recursive: recursive, force: force)
+        }
+
+        func fileExists(path: String, relativeTo: String) -> Bool {
+            wrapped.fileExists(path: path, relativeTo: relativeTo)
+        }
+
+        func isDirectory(path: String, relativeTo: String) -> Bool {
+            wrapped.isDirectory(path: path, relativeTo: relativeTo)
+        }
+
+        func listDirectory(path: String, relativeTo: String) throws -> [String] {
+            try wrapped.listDirectory(path: path, relativeTo: relativeTo)
+        }
+
+        func createDirectory(path: String, relativeTo: String, recursive: Bool) throws {
+            try wrapped.createDirectory(path: path, relativeTo: relativeTo, recursive: recursive)
+        }
+
+        func fileInfo(path: String, relativeTo: String) throws -> FileInfo {
+            try wrapped.fileInfo(path: path, relativeTo: relativeTo)
+        }
+
+        func walk(path: String, relativeTo: String) throws -> [String] {
+            try wrapped.walk(path: path, relativeTo: relativeTo)
+        }
+
+        func normalizePath(_ path: String, relativeTo: String) -> String {
+            wrapped.normalizePath(path, relativeTo: relativeTo)
+        }
+
+        func glob(_ pattern: String, relativeTo: String, dotglob: Bool, extglob: Bool) -> [String] {
+            wrapped.glob(pattern, relativeTo: relativeTo, dotglob: dotglob, extglob: extglob)
+        }
+    }
 
     func testDefineCommandRunsInScript() async {
         let bash = Bash()
@@ -80,5 +153,19 @@ final class DefineCommandTests: XCTestCase {
         XCTAssertTrue(fs.exists("/tmp/test.txt"))
         let text = try? fs.readFile("/tmp/test.txt")
         XCTAssertEqual(text, "content")
+    }
+
+    func testCustomFilesystemInjectionIsUsed() async {
+        let base = VirtualFileSystem(initialFiles: ["/input.txt": "hello"])
+        let readPaths = LockedBox<[String]>([])
+        let loggingFS = LoggingFilesystem(wrapped: base) { path in
+            readPaths.withLock { $0.append(path) }
+        }
+
+        let bash = Bash(options: BashOptions(filesystem: loggingFS))
+        let result = await bash.exec("cat /input.txt")
+
+        XCTAssertEqual(result.stdout, "hello")
+        XCTAssertEqual(readPaths.value, ["/input.txt"])
     }
 }

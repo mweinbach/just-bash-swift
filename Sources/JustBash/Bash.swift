@@ -15,6 +15,9 @@ public struct BashOptions: Sendable {
     public var executionLimits: ExecutionLimits
     public var customCommands: [AnyBashCommand]
     public var processInfo: VirtualProcessInfo
+    /// Optional custom filesystem backend. When omitted, `Bash` creates an
+    /// in-memory `VirtualFileSystem` seeded from `files` and `processInfo`.
+    public var filesystem: (any BashFilesystem)?
     /// URL prefixes that network commands (curl) are allowed to access.
     /// An empty array means no network access (default, matching upstream).
     /// Examples: `["https://"]` for all HTTPS, `["https://api.example.com/"]` for specific hosts.
@@ -31,6 +34,7 @@ public struct BashOptions: Sendable {
         executionLimits: ExecutionLimits = .init(),
         customCommands: [AnyBashCommand] = [],
         processInfo: VirtualProcessInfo = .init(),
+        filesystem: (any BashFilesystem)? = nil,
         allowedURLPrefixes: [String] = [],
         embeddedRuntimes: [any EmbeddedRuntime] = []
     ) {
@@ -40,6 +44,7 @@ public struct BashOptions: Sendable {
         self.executionLimits = executionLimits
         self.customCommands = customCommands
         self.processInfo = processInfo
+        self.filesystem = filesystem
         self.allowedURLPrefixes = allowedURLPrefixes
         self.embeddedRuntimes = embeddedRuntimes
     }
@@ -60,7 +65,7 @@ public struct ExecOptions: Sendable {
 }
 
 public actor Bash {
-    private let fileSystem: VirtualFileSystem
+    private let fileSystem: any BashFilesystem
     private let registry: CommandRegistry
     private let baseEnv: [String: String]
     private let baseCwd: String
@@ -68,7 +73,21 @@ public actor Bash {
     private let interpreter: ShellInterpreter
 
     public init(options: BashOptions = .init()) {
-        self.fileSystem = VirtualFileSystem(initialFiles: options.files, processInfo: options.processInfo)
+        let fileSystem = options.filesystem ?? VirtualFileSystem(
+            initialFiles: options.files,
+            processInfo: options.processInfo
+        )
+        if options.filesystem != nil {
+            for (path, content) in options.files {
+                let normalized = fileSystem.normalizePath(path, relativeTo: "/")
+                let parent = VirtualPath.dirname(normalized)
+                if parent != "/" {
+                    try? fileSystem.createDirectory(path: parent, relativeTo: "/", recursive: true)
+                }
+                try? fileSystem.writeFile(content, to: normalized, relativeTo: "/")
+            }
+        }
+        self.fileSystem = fileSystem
         let registry = CommandRegistry.builtins()
         for command in options.customCommands {
             registry.register(command)
@@ -132,7 +151,22 @@ public actor Bash {
     }
 
     public func listDirectory(_ path: String = "/") throws -> [VirtualDirectoryEntry] {
-        try fileSystem.listDirectory(path, includeHidden: true)
+        let normalized = fileSystem.normalizePath(path, relativeTo: baseCwd)
+        let names = try fileSystem.listDirectory(path, relativeTo: baseCwd, includeHidden: true)
+        return names.map { name in
+            let childPath = normalized == "/" ? "/\(name)" : "\(normalized)/\(name)"
+            let info = try? fileSystem.fileInfo(path: childPath, relativeTo: "/")
+            let kind: VirtualNodeKind
+            switch info?.kind {
+            case .directory:
+                kind = .directory
+            case .symlink:
+                kind = .symlink
+            default:
+                kind = .file
+            }
+            return VirtualDirectoryEntry(name: name, path: childPath, kind: kind)
+        }
     }
 
     // MARK: - defineCommand API
@@ -183,7 +217,7 @@ public actor Bash {
     ///
     /// Host apps can use this to pre-populate files, read outputs, or inspect
     /// the filesystem state after script execution.
-    public var fs: VirtualFileSystem {
+    public var fs: any BashFilesystem {
         fileSystem
     }
 }

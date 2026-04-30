@@ -247,11 +247,24 @@ func df() -> AnyBashCommand {
             }
             
             if showType {
-                lines.append(String(format: "%-14s %-8s %10s %8s %9s %3d%% %s",
-                    device as NSString, type as NSString, sizeStr as NSString, usedStr as NSString, availStr as NSString, percent, mount as NSString))
+                lines.append([
+                    pad(device, to: 14),
+                    pad(type, to: 8),
+                    pad(sizeStr, to: 10, leftAligned: false),
+                    pad(usedStr, to: 8, leftAligned: false),
+                    pad(availStr, to: 9, leftAligned: false),
+                    pad("\(percent)%", to: 4, leftAligned: false),
+                    mount,
+                ].joined(separator: " "))
             } else {
-                lines.append(String(format: "%-14s %10s %8s %9s %3d%% %s",
-                    device as NSString, sizeStr as NSString, usedStr as NSString, availStr as NSString, percent, mount as NSString))
+                lines.append([
+                    pad(device, to: 14),
+                    pad(sizeStr, to: 10, leftAligned: false),
+                    pad(usedStr, to: 8, leftAligned: false),
+                    pad(availStr, to: 9, leftAligned: false),
+                    pad("\(percent)%", to: 4, leftAligned: false),
+                    mount,
+                ].joined(separator: " "))
             }
         }
         
@@ -299,20 +312,35 @@ func free() -> AnyBashCommand {
             humanReadable ? formatBytes(bytes * 1024) : String(bytes)
         }
         
-        lines.append(String(format: "%7s %11s %11s %11s %11s %11s %11s",
-            "Mem:" as NSString, format(total) as NSString, format(used) as NSString, format(free) as NSString, format(shared) as NSString, format(buffCache) as NSString, format(available) as NSString))
+        lines.append([
+            pad("Mem:", to: 7, leftAligned: false),
+            pad(format(total), to: 11, leftAligned: false),
+            pad(format(used), to: 11, leftAligned: false),
+            pad(format(free), to: 11, leftAligned: false),
+            pad(format(shared), to: 11, leftAligned: false),
+            pad(format(buffCache), to: 11, leftAligned: false),
+            pad(format(available), to: 11, leftAligned: false),
+        ].joined(separator: " "))
         
         // Swap (simulated)
         let swapTotal = 4194304  // ~4GB
         let swapUsed = 0
         let swapFree = swapTotal
         
-        lines.append(String(format: "%7s %11s %11s %11s",
-            "Swap:" as NSString, format(swapTotal) as NSString, format(swapUsed) as NSString, format(swapFree) as NSString))
+        lines.append([
+            pad("Swap:", to: 7, leftAligned: false),
+            pad(format(swapTotal), to: 11, leftAligned: false),
+            pad(format(swapUsed), to: 11, leftAligned: false),
+            pad(format(swapFree), to: 11, leftAligned: false),
+        ].joined(separator: " "))
         
         if showTotal {
-            lines.append(String(format: "%7s %11s %11s %11s",
-                "Total:" as NSString, format(total + swapTotal) as NSString, format(used + swapUsed) as NSString, format(free + swapFree) as NSString))
+            lines.append([
+                pad("Total:", to: 7, leftAligned: false),
+                pad(format(total + swapTotal), to: 11, leftAligned: false),
+                pad(format(used + swapUsed), to: 11, leftAligned: false),
+                pad(format(free + swapFree), to: 11, leftAligned: false),
+            ].joined(separator: " "))
         }
         
         return ExecResult.success(lines.joined(separator: "\n") + "\n")
@@ -403,15 +431,30 @@ func ps() -> AnyBashCommand {
             lines.append("USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND")
             for (pid, user, cpu, mem, vsz, rss, stat, tty, time, cmd) in processes {
                 if selectUser == nil || user == selectUser {
-                    lines.append(String(format: "%-10s %4d %4s %4s %5s %5s %-8s %4s 00:00 %4s %s",
-                        user, pid, cpu, mem, String(vsz), String(rss), tty, stat, time, cmd as NSString))
+                    lines.append([
+                        pad(user, to: 10),
+                        pad(String(pid), to: 4, leftAligned: false),
+                        pad(cpu, to: 4, leftAligned: false),
+                        pad(mem, to: 4, leftAligned: false),
+                        pad(vsz, to: 5, leftAligned: false),
+                        pad(rss, to: 5, leftAligned: false),
+                        pad(tty, to: 8),
+                        pad(stat, to: 4, leftAligned: false),
+                        "00:00",
+                        pad(time, to: 8, leftAligned: false),
+                        cmd,
+                    ].joined(separator: " "))
                 }
             }
         } else {
             lines.append("  PID TTY          TIME CMD")
             for (pid, _, _, _, _, _, _, tty, time, cmd) in processes {
-                lines.append(String(format: "%5d %-8s %4s %s",
-                    pid, tty, time, cmd as NSString))
+                lines.append([
+                    pad(String(pid), to: 5, leftAligned: false),
+                    pad(tty, to: 8),
+                    pad(time, to: 8, leftAligned: false),
+                    cmd,
+                ].joined(separator: " "))
             }
         }
         
@@ -610,8 +653,14 @@ private func formatBytes(_ bytes: Int) -> String {
     }
     
     if unitIndex == 0 {
-        return String(format: "%d%@", Int(size), units[unitIndex] as NSString)
+        return "\(Int(size))\(units[unitIndex])"
     } else {
-        return String(format: "%.1f%@", size, units[unitIndex] as NSString)
+        return String(format: "%.1f", size) + units[unitIndex]
     }
+}
+
+private func pad(_ value: String, to width: Int, leftAligned: Bool = true) -> String {
+    guard value.count < width else { return value }
+    let padding = String(repeating: " ", count: width - value.count)
+    return leftAligned ? value + padding : padding + value
 }

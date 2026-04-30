@@ -116,11 +116,11 @@ public enum VirtualFileSystemError: Error, LocalizedError, Equatable {
 public final class VirtualFileSystem: @unchecked Sendable {
     private final class Node {
         let kind: VirtualNodeKind
-        var content: String
+        var content: Data
         var children: [String: Node]
         var symlinkTarget: String?
 
-        init(kind: VirtualNodeKind, content: String = "", children: [String: Node] = [:], symlinkTarget: String? = nil) {
+        init(kind: VirtualNodeKind, content: Data = Data(), children: [String: Node] = [:], symlinkTarget: String? = nil) {
             self.kind = kind
             self.content = content
             self.children = children
@@ -163,7 +163,7 @@ public final class VirtualFileSystem: @unchecked Sendable {
         let node = try node(at: normalized)
         let size: Int
         switch node.kind {
-        case .file: size = node.content.utf8.count
+        case .file: size = node.content.count
         case .directory: size = node.children.count
         case .symlink: size = node.symlinkTarget?.utf8.count ?? 0
         }
@@ -211,7 +211,7 @@ public final class VirtualFileSystem: @unchecked Sendable {
         let node = try node(at: normalized)
         switch node.kind {
         case .file:
-            return node.content
+            return String(decoding: node.content, as: UTF8.self)
         case .directory:
             throw VirtualFileSystemError.isDirectory(normalized)
         case .symlink:
@@ -223,6 +223,10 @@ public final class VirtualFileSystem: @unchecked Sendable {
     }
 
     public func writeFile(_ content: String, to path: String, relativeTo cwd: String = "/", append: Bool = false) throws {
+        try writeFile(Data(content.utf8), to: path, relativeTo: cwd, append: append)
+    }
+
+    public func writeFile(_ content: Data, to path: String, relativeTo cwd: String = "/", append: Bool = false) throws {
         let normalized = VirtualPath.normalize(path, relativeTo: cwd)
         let (parent, name) = try parentNodeAndName(for: normalized)
         if let existing = parent.children[name] {
@@ -510,15 +514,23 @@ public final class VirtualFileSystem: @unchecked Sendable {
 
 extension VirtualFileSystem: BashFilesystem {
     public func readFile(path: String, relativeTo: String) throws -> Data {
-        let content = try readFile(path, relativeTo: relativeTo)
-        return Data(content.utf8)
+        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
+        let node = try node(at: normalized)
+        switch node.kind {
+        case .file:
+            return node.content
+        case .directory:
+            throw VirtualFileSystemError.isDirectory(normalized)
+        case .symlink:
+            if let target = node.symlinkTarget {
+                return try readFile(path: target, relativeTo: "/")
+            }
+            throw VirtualFileSystemError.notFound(normalized)
+        }
     }
     
     public func writeFile(path: String, content: Data, relativeTo: String) throws {
-        guard let str = String(data: content, encoding: .utf8) else {
-            throw VirtualFileSystemError.notFound(path)
-        }
-        try writeFile(str, to: path, relativeTo: relativeTo)
+        try writeFile(content, to: path, relativeTo: relativeTo)
     }
     
     public func deleteFile(path: String, relativeTo: String, recursive: Bool, force: Bool) throws {

@@ -64,8 +64,11 @@ func zip() -> AnyBashCommand {
                     if recursive {
                         let files = try ctx.fileSystem.walk(path: normalized, relativeTo: ctx.cwd)
                         for file in files {
+                            guard !ctx.fileSystem.isDirectory(path: file, relativeTo: ctx.cwd) else {
+                                continue
+                            }
                             let data = try ctx.fileSystem.readFile(path: file, relativeTo: ctx.cwd)
-                            let entryName = file.hasPrefix("/") ? String(file.dropFirst()) : file
+                            let entryName = zipEntryName(for: path, normalizedPath: file, cwd: ctx.cwd)
                             entries.append((entryName, data))
                         }
                     } else {
@@ -73,7 +76,7 @@ func zip() -> AnyBashCommand {
                     }
                 } else {
                     let data = try ctx.fileSystem.readFile(path: normalized, relativeTo: ctx.cwd)
-                    let entryName = normalized.hasPrefix("/") ? String(normalized.dropFirst()) : normalized
+                    let entryName = zipEntryName(for: path, normalizedPath: normalized, cwd: ctx.cwd)
                     entries.append((entryName, data))
                 }
             }
@@ -305,6 +308,22 @@ private func calculateCRC32(_ data: Data) -> UInt32 {
         let crcResult = crc32(0, baseAddress, uInt(data.count))
         return UInt32(crcResult & 0xFFFFFFFF)
     }
+}
+
+private func zipEntryName(for inputPath: String, normalizedPath: String, cwd: String) -> String {
+    if inputPath.hasPrefix("/") {
+        return normalizedPath.hasPrefix("/") ? String(normalizedPath.dropFirst()) : normalizedPath
+    }
+
+    let normalizedCwd = VirtualPath.normalize(cwd, relativeTo: "/")
+    let cwdPrefix = normalizedCwd == "/" ? "/" : normalizedCwd + "/"
+    if normalizedPath.hasPrefix(cwdPrefix) {
+        return String(normalizedPath.dropFirst(cwdPrefix.count))
+    }
+    if normalizedPath == normalizedCwd {
+        return VirtualPath.basename(normalizedPath)
+    }
+    return normalizedPath.hasPrefix("/") ? String(normalizedPath.dropFirst()) : normalizedPath
 }
 
 private func createZipArchive(entries: [(name: String, data: Data)], compressionLevel: Int) throws -> Data {

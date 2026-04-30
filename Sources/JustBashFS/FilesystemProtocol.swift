@@ -330,6 +330,14 @@ public protocol BashFilesystem: Sendable {
 // MARK: - Default Parameters Extension
 
 extension BashFilesystem {
+    /// Gives filesystem implementations a chance to surface registered shell
+    /// commands in PATH-like locations (for example `/bin/<name>`). The default
+    /// implementation is a no-op so custom backends can opt in only if they need
+    /// command-path discoverability.
+    public func seedCommandStub(named name: String) {
+        _ = name
+    }
+
     /// Reads the contents of a file at the specified path.
     ///
     /// - Parameter path: The path to the file to read

@@ -37,7 +37,7 @@ final class BinaryDataCommandTests: XCTestCase {
         let result = await bash.exec("echo -n 'ABC' | xxd")
         XCTAssertEqual(result.exitCode, 0)
         // xxd format: offset + hex groups + ASCII
-        XCTAssertTrue(result.stdout.contains("414243"))
+        XCTAssertTrue(result.stdout.contains("4142 43"), result.stdout)
         XCTAssertTrue(result.stdout.contains("ABC"))
     }
     
@@ -62,7 +62,7 @@ final class BinaryDataCommandTests: XCTestCase {
         let result = await bash.exec("echo -n 'ABC' | xxd -u")
         XCTAssertEqual(result.exitCode, 0)
         // Uppercase hex: 414243
-        XCTAssertTrue(result.stdout.contains("414243"))
+        XCTAssertTrue(result.stdout.contains("4142 43"), result.stdout)
     }
     
     func testXXDHelp() async {

@@ -498,7 +498,7 @@ func ifdata() -> AnyBashCommand {
 func chronic() -> AnyBashCommand {
     AnyBashCommand(name: "chronic") { args, ctx in
         var verbose = false
-        var command: String?
+        var commandStartIndex: Int?
         
         var index = 0
         while index < args.count {
@@ -514,16 +514,17 @@ func chronic() -> AnyBashCommand {
                   --help           show help
                 """)
             default:
-                if !arg.hasPrefix("-") && command == nil {
-                    command = arg
+                if commandStartIndex == nil {
+                    commandStartIndex = index
                 }
             }
             index += 1
         }
         
-        guard let cmd = command, let execute = ctx.executeSubshell else {
+        guard let start = commandStartIndex, let execute = ctx.executeSubshell else {
             return ExecResult.failure("chronic: missing command")
         }
+        let cmd = args[start...].joined(separator: " ")
         
         let result = await execute(cmd)
         

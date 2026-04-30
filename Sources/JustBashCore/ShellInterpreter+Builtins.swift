@@ -392,9 +392,20 @@ extension ShellInterpreter {
         var pathFlag = false
         var names: [String] = []
         for arg in args {
-            if arg == "-t" { typeFlag = true }
-            else if arg == "-p" || arg == "-P" { pathFlag = true }
-            else { names.append(arg) }
+            if arg == "--help" {
+                return ExecResult.success("""
+                which [options] command [...]
+                  -t          print command type only
+                  -p, -P      print external command path only
+                  --help      show help
+                """)
+            } else if arg == "-t" {
+                typeFlag = true
+            } else if arg == "-p" || arg == "-P" {
+                pathFlag = true
+            } else {
+                names.append(arg)
+            }
         }
         var lines: [String] = []
         var allFound = true
