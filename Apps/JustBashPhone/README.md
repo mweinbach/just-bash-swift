@@ -68,10 +68,18 @@ SIMCTL_CHILD_JUSTBASH_SMOKE_PYTHON=1 \
 
 ## Physical iPhone Note
 
-The simulator build is verified from the command line. A direct build to the
-connected iPhone currently stops at signing if no team is configured yet:
+The iPhone host is now verified on a real device as well:
 
-`Signing for "JustBashPhone" requires a development team.`
+```bash
+xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj \
+  -scheme JustBashPhone \
+  -destination 'generic/platform=iOS' \
+  DEVELOPMENT_TEAM=YOURTEAMID \
+  build
 
-Set your team once in Xcode under Signing & Capabilities for the
-`JustBashPhone` target, then rerun the device build.
+APP=$(ls -d ~/Library/Developer/Xcode/DerivedData/JustBashPhone-*/Build/Products/Debug-iphoneos/JustBashPhone.app | tail -1)
+xcrun devicectl device install app --device <physical-device-udid> "$APP"
+xcrun devicectl device process launch --device <physical-device-udid> com.mweinbach.JustBashPhone
+```
+
+Verified locally against `Max’s iPhone 17 Pro Max` on iOS `26.5`.
