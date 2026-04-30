@@ -16,9 +16,17 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 280 passing tests
+- Current verification baseline: `swift test` with 373 executed tests passing; 34 performance benchmarks are opt-in and skipped by default
 
 ## Recently Completed
+
+### Milestone: Minimal iPhone Host App (COMPLETED)
+
+- `Apps/JustBashPhone` now provides a SwiftUI iPhone/iPad wrapper around the local package
+- Host app links both `JustBash` and `JustBashJavaScript`, so on-device runs can exercise shell commands and the embedded JS runtime
+- UI includes sample scripts, a script editor, run/reset controls, stdout/stderr/exit-code output, and a small virtual-filesystem browser
+- Project is reproducible via `xcodegen generate`
+- Verification added: `xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj -scheme JustBashPhone -destination 'generic/platform=iOS Simulator' build`
 
 ### Milestone: Data Model And Shell Completeness (COMPLETED)
 
@@ -105,7 +113,7 @@ shims for `fs`, `path`, `process`, `console`, `Buffer`, `child_process`, and
 `fetch` are routed through the existing `BashFilesystem` /
 `CommandContext.executeSubshell` / `CommandContext.allowedURLPrefixes` plumbing.
 Hosts attach the runtime through `BashOptions.embeddedRuntimes`. Initial
-verification: 22-case suite green plus the existing 387 tests still passing.
+verification: JS runtime tests green plus the package verification lane passing.
 
 Phase B planned: `JustBashPython` will follow the same shape backed by
 BeeWare's `Python.xcframework`. The `EmbeddedRuntime` protocol added in Phase A
@@ -117,7 +125,6 @@ These are not current priorities and should not be pulled into unrelated milesto
 
 - QuickJS-based JS runtime (use JavaScriptCore via `JustBashJavaScript`)
 - Pyodide-based Python runtime (use BeeWare via `JustBashPython` once Phase B lands)
-- example iOS host app or demo app
 - upstream-style `Sandbox` API compatibility layer
 
 ## Definition Of Done For A Milestone

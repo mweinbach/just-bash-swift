@@ -71,6 +71,31 @@ Four modules, zero dependencies beyond Foundation:
 The package ships additional opt-in products you can depend on alongside the
 core `JustBash` library. They are not loaded unless you reference them.
 
+## iPhone Host App
+
+This repo now includes a minimal SwiftUI iPhone/iPad host app in
+[Apps/JustBashPhone](/Users/mweinbach/Projects/just-bash-swift/Apps/JustBashPhone/README.md).
+It links the local package, seeds the virtual filesystem with sample files, and
+lets you run shell scripts on-device with stdout, stderr, exit code, and a
+small sandbox file browser.
+
+To generate and run it:
+
+```bash
+cd Apps/JustBashPhone
+xcodegen generate
+open JustBashPhone.xcodeproj
+```
+
+Verified build lane:
+
+```bash
+xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj \
+  -scheme JustBashPhone \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
+
 ### `JustBashJavaScript`
 
 Adds a `js-exec` command backed by Apple's system JavaScriptCore framework.
