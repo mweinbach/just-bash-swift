@@ -67,6 +67,12 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Python") {
+                    Text(model.pythonStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 ForEach(model.fileSections) { section in
                     Section(section.title) {
                         ForEach(section.entries, id: \.path) { entry in

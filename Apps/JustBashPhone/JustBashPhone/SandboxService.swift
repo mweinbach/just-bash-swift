@@ -37,6 +37,14 @@ actor SandboxService {
         try await bash.readFile(path)
     }
 
+    func pythonAvailabilitySummary() -> String {
+        PythonSupport.availabilitySummary()
+    }
+
+    func runPython(_ code: String) async -> Result<String, Error> {
+        PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
+    }
+
     func writeFile(_ path: String, contents: String) async throws {
         let fs = await bash.fs
         let normalized = fs.normalizePath(path, relativeTo: "/workspace")

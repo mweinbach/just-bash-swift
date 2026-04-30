@@ -14,6 +14,7 @@
 		676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */; };
 		D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEA50DAB5C427E8E8104E0F /* ContentView.swift */; };
 		E399A185A4B2EDACCEEA3433 /* SandboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */; };
+		E704FAD8ACBE49BFBB22AEEF /* PythonSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBCFAC304105EADAF54E3D1 /* PythonSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,6 +24,7 @@
 		6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxService.swift; sourceTree = "<group>"; };
 		771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRunnerModel.swift; sourceTree = "<group>"; };
 		99C55565B5EA380798F7E54F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
+		ADBCFAC304105EADAF54E3D1 /* PythonSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonSupport.swift; sourceTree = "<group>"; };
 		C0E2247ED400AADF344D154A /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
 		D6E0E3912DFB9D5A5FFFB7E0 /* JustBashPhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JustBashPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -70,6 +72,7 @@
 				C0E2247ED400AADF344D154A /* AppIntents.swift */,
 				1CEA50DAB5C427E8E8104E0F /* ContentView.swift */,
 				5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */,
+				ADBCFAC304105EADAF54E3D1 /* PythonSupport.swift */,
 				6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */,
 				771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */,
 				45EF21AD558B90D395C3927E /* Preview Content */,
@@ -153,6 +156,7 @@
 				4494E2093EA40495A1374EB5 /* AppIntents.swift in Sources */,
 				D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */,
 				676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */,
+				E704FAD8ACBE49BFBB22AEEF /* PythonSupport.swift in Sources */,
 				E399A185A4B2EDACCEEA3433 /* SandboxService.swift in Sources */,
 				4874ACF1AFAB85D78122CFDD /* ShellRunnerModel.swift in Sources */,
 			);

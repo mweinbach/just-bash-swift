@@ -82,6 +82,7 @@ final class ShellRunnerModel {
     var stderr = ""
     var exitCode: Int?
     var isRunning = false
+    var pythonStatus = ""
     var fileSections: [FileSection] = []
     var filePreview: FilePreview?
 
@@ -92,6 +93,7 @@ final class ShellRunnerModel {
     }
 
     func loadInitialState() async {
+        pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
         await refreshFileSections()
     }
 

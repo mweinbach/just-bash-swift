@@ -11,6 +11,7 @@ Deployment target: iOS 26+.
 - seeds a virtual filesystem with sample files under `/data`
 - mounts `/workspace` to the app's sandboxed Documents directory for persistent files
 - shows stdout, stderr, exit code, and a small sandbox file browser
+- shows whether BeeWare Python support is linked into the current build
 - exposes App Shortcuts for:
   - `Run Shell Script`
   - `Reset Sandbox`
