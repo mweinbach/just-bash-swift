@@ -34,6 +34,9 @@ cd Apps/JustBashPhone
 ./generate_project.sh --with-python
 ```
 
+That variant links `Python.xcframework` and stages a bundle-local
+`PythonSupport/lib/python3.14` tree into the app at build time.
+
 Verified lane after installing BeeWare support:
 
 ```bash

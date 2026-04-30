@@ -86,6 +86,15 @@ SDK-specific. Pointing both the device and simulator include directories at the
 same target causes duplicate `module Python` definitions during clang
 dependency scanning.
 
+The Python-enabled host build now also stages a bundle-local Python home under:
+
+```text
+JustBashPhone.app/PythonSupport/lib/python3.14
+```
+
+That staged tree includes the standard library plus `lib-dynload` extension
+modules from the selected BeeWare slice.
+
 ## Remaining Integration Work
 
 - add a `JustBashPython` package target/product

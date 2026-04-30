@@ -126,6 +126,7 @@
 				C39231CB7CE6955B86D1713C /* Sources */,
 				6727BF5F16093BD20C31202F /* Frameworks */,
 				3D447BFCF1E495B493D1F6DC /* Embed Frameworks */,
+				DB888BB48651D7CE488C34A7 /* Stage BeeWare Python Home */,
 			);
 			buildRules = (
 			);
@@ -175,6 +176,27 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DB888BB48651D7CE488C34A7 /* Stage BeeWare Python Home */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stage BeeWare Python Home";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nPYTHON_ROOT=\"${SRCROOT}/../../Vendor/BeeWare/Python.xcframework\"\nDEST_ROOT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/PythonSupport\"\n\nif [[ \"${PLATFORM_NAME}\" == \"iphoneos\" ]]; then\n  LIB_SRC=\"${PYTHON_ROOT}/ios-arm64/lib-arm64/python3.14\"\nelse\n  if [[ \"${CURRENT_ARCH}\" == \"x86_64\" ]]; then\n    LIB_SRC=\"${PYTHON_ROOT}/ios-arm64_x86_64-simulator/lib-x86_64/python3.14\"\n  else\n    LIB_SRC=\"${PYTHON_ROOT}/ios-arm64_x86_64-simulator/lib-arm64/python3.14\"\n  fi\nfi\n\nrm -rf \"${DEST_ROOT}\"\nmkdir -p \"${DEST_ROOT}/lib\"\ncp -R \"${LIB_SRC}\" \"${DEST_ROOT}/lib/python3.14\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C39231CB7CE6955B86D1713C /* Sources */ = {

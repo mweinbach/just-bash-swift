@@ -11,8 +11,7 @@ enum PythonSupport {
     }
 
     static func run(code: String, workspacePath: String) -> Result<String, Error> {
-        let home = workspacePath
-        let pythonHome = home + "/python-home"
+        let pythonHome = pythonHomePath()
         let pythonPath = [
             pythonHome + "/lib/python3.14",
             pythonHome + "/lib/python3.14/lib-dynload",
@@ -35,6 +34,11 @@ enum PythonSupport {
         } else {
             return .failure(PythonExecutionError.executionFailed(status))
         }
+    }
+
+    private static func pythonHomePath() -> String {
+        let resources = Bundle.main.resourceURL?.path ?? NSTemporaryDirectory()
+        return resources + "/PythonSupport"
     }
 }
 
