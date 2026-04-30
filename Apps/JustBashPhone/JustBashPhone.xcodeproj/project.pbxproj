@@ -12,13 +12,30 @@
 		4494E2093EA40495A1374EB5 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E2247ED400AADF344D154A /* AppIntents.swift */; };
 		4874ACF1AFAB85D78122CFDD /* ShellRunnerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */; };
 		676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */; };
+		6A937DC4F7F07751F0179FB0 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE1EA3F41397E339A3A5A5C /* Python.xcframework */; };
+		8CC1537C2EE9FBA686EF29BE /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE1EA3F41397E339A3A5A5C /* Python.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEA50DAB5C427E8E8104E0F /* ContentView.swift */; };
 		E399A185A4B2EDACCEEA3433 /* SandboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */; };
 		E704FAD8ACBE49BFBB22AEEF /* PythonSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBCFAC304105EADAF54E3D1 /* PythonSupport.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		3D447BFCF1E495B493D1F6DC /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				8CC1537C2EE9FBA686EF29BE /* Python.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		1A3F384452B74216E6D9F867 /* just-bash-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "just-bash-swift"; path = ../..; sourceTree = SOURCE_ROOT; };
+		1CE1EA3F41397E339A3A5A5C /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Python.xcframework; path = ../../Vendor/BeeWare/Python.xcframework; sourceTree = "<group>"; };
 		1CEA50DAB5C427E8E8104E0F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JustBashPhoneApp.swift; sourceTree = "<group>"; };
 		6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxService.swift; sourceTree = "<group>"; };
@@ -36,6 +53,7 @@
 			files = (
 				440FAB9DDD3ADA7DD7F5F45F /* JustBash in Frameworks */,
 				1D9C3B87C43D9AC8D2BF8854 /* JustBashJavaScript in Frameworks */,
+				6A937DC4F7F07751F0179FB0 /* Python.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,8 +103,17 @@
 			children = (
 				59209AB8D6623993BCE0D625 /* JustBashPhone */,
 				522D65969EC59B2E23A529F5 /* Packages */,
+				89343496F0F6036446D884F6 /* Frameworks */,
 				31FAC2630847222DAE9D9CA7 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		89343496F0F6036446D884F6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1CE1EA3F41397E339A3A5A5C /* Python.xcframework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -98,6 +125,7 @@
 			buildPhases = (
 				C39231CB7CE6955B86D1713C /* Sources */,
 				6727BF5F16093BD20C31202F /* Frameworks */,
+				3D447BFCF1E495B493D1F6DC /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -172,6 +200,10 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_ASSET_PATHS = "\"JustBashPhone/Preview Content\"";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"../../Vendor/BeeWare\"",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Just Bash";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = NO;
@@ -187,6 +219,12 @@
 				PRODUCT_NAME = JustBashPhone;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = (
+					"$(SRCROOT)/../../Vendor/BeeWare/Python.xcframework/ios-arm64/include/python3.14",
+				);
+				"SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]" = (
+					"$(SRCROOT)/../../Vendor/BeeWare/Python.xcframework/ios-arm64_x86_64-simulator/include/python3.14",
+				);
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -262,6 +300,10 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_ASSET_PATHS = "\"JustBashPhone/Preview Content\"";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"../../Vendor/BeeWare\"",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Just Bash";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = NO;
@@ -277,6 +319,12 @@
 				PRODUCT_NAME = JustBashPhone;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = (
+					"$(SRCROOT)/../../Vendor/BeeWare/Python.xcframework/ios-arm64/include/python3.14",
+				);
+				"SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]" = (
+					"$(SRCROOT)/../../Vendor/BeeWare/Python.xcframework/ios-arm64_x86_64-simulator/include/python3.14",
+				);
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

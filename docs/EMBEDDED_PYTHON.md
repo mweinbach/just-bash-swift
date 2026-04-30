@@ -67,6 +67,25 @@ func test() {
 }
 ```
 
+## Verified Host-App Integration
+
+The optional iPhone host project can now be generated with Python support and
+built successfully for iOS Simulator once BeeWare support is installed:
+
+```bash
+Apps/JustBashPhone/generate_project.sh --with-python
+xcodebuild \
+  -project Apps/JustBashPhone/JustBashPhone.xcodeproj \
+  -scheme JustBashPhone \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
+
+One important integration detail: the Python include/module-map path must be
+SDK-specific. Pointing both the device and simulator include directories at the
+same target causes duplicate `module Python` definitions during clang
+dependency scanning.
+
 ## Remaining Integration Work
 
 - add a `JustBashPython` package target/product

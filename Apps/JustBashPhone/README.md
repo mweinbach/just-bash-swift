@@ -22,10 +22,26 @@ Deployment target: iOS 26+.
 
 ```bash
 cd Apps/JustBashPhone
-xcodegen generate
+./generate_project.sh
 ```
 
 Then open `JustBashPhone.xcodeproj` in Xcode and run the `JustBashPhone` scheme on an iPhone or iOS Simulator.
+
+To generate a Python-linked variant after installing BeeWare support:
+
+```bash
+cd Apps/JustBashPhone
+./generate_project.sh --with-python
+```
+
+Verified lane after installing BeeWare support:
+
+```bash
+xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj \
+  -scheme JustBashPhone \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
 
 ## Physical iPhone Note
 
