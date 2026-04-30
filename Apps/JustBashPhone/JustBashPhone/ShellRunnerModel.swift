@@ -1,8 +1,6 @@
 import Foundation
 import Observation
-import JustBash
 import JustBashFS
-import JustBashJavaScript
 
 @MainActor
 @Observable
@@ -65,20 +63,6 @@ final class ShellRunnerModel {
         ),
     ]
 
-    private let seedFiles: [String: String] = [
-        "/data/input.txt": """
-        Codex can run locally inside a virtual shell on iPhone.
-        This file lives in the in-memory sandbox.
-        """,
-        "/data/log.txt": """
-        INFO Boot complete
-        ERROR Missing token cache
-        INFO Retrying request
-        ERROR Request failed
-        """,
-    ]
-
-    private(set) var bash: Bash
     var selectedSampleID: SampleScript.ID
     var script: String
     var stdout = ""
@@ -92,7 +76,6 @@ final class ShellRunnerModel {
         let sample = Self.samples[0]
         self.selectedSampleID = sample.id
         self.script = sample.script
-        self.bash = Self.makeBash(seedFiles: seedFiles)
     }
 
     func loadInitialState() async {
@@ -112,7 +95,7 @@ final class ShellRunnerModel {
         isRunning = true
 
         Task {
-            let result = await bash.exec(currentScript)
+            let result = await SandboxService.shared.run(currentScript)
             await MainActor.run {
                 stdout = result.stdout
                 stderr = result.stderr
@@ -125,13 +108,12 @@ final class ShellRunnerModel {
 
     func resetSandbox() {
         guard !isRunning else { return }
-        bash = Self.makeBash(seedFiles: seedFiles)
         stdout = ""
         stderr = ""
         exitCode = nil
         filePreview = nil
-
         Task {
+            await SandboxService.shared.reset()
             await refreshFileSections()
         }
     }
@@ -140,7 +122,7 @@ final class ShellRunnerModel {
         guard !entry.isDirectory else { return }
 
         Task {
-            let contents = (try? await bash.readFile(entry.path)) ?? "<binary or unreadable>"
+            let contents = (try? await SandboxService.shared.readFile(entry.path)) ?? "<binary or unreadable>"
             await MainActor.run {
                 filePreview = FilePreview(path: entry.path, contents: contents)
             }
@@ -157,7 +139,7 @@ final class ShellRunnerModel {
 
         var sections: [FileSection] = []
         for directory in directories {
-            if let entries = try? await bash.listDirectory(directory.path), !entries.isEmpty {
+            if let entries = try? await SandboxService.shared.listDirectory(directory.path), !entries.isEmpty {
                 sections.append(FileSection(id: directory.path, title: directory.title, entries: entries))
             }
         }
@@ -165,16 +147,5 @@ final class ShellRunnerModel {
         await MainActor.run {
             fileSections = sections
         }
-    }
-
-    private static func makeBash(seedFiles: [String: String]) -> Bash {
-        Bash(options: .init(
-            files: seedFiles,
-            embeddedRuntimes: [
-                JavaScriptRuntime(options: .init(
-                    bootstrap: "globalThis.APP_NAME = 'JustBashPhone';"
-                ))
-            ]
-        ))
     }
 }

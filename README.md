@@ -77,7 +77,9 @@ This repo now includes a minimal SwiftUI iPhone/iPad host app in
 [Apps/JustBashPhone](/Users/mweinbach/Projects/just-bash-swift/Apps/JustBashPhone/README.md).
 It links the local package, seeds the virtual filesystem with sample files, and
 lets you run shell scripts on-device with stdout, stderr, exit code, and a
-small sandbox file browser.
+small sandbox file browser. It also exposes a first App Intents surface for
+Shortcuts: run an arbitrary shell script and reset the sandbox. The host app
+targets iOS 26+ so it can use the current App Intents API surface directly.
 
 To generate and run it:
 

@@ -25,6 +25,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - `Apps/JustBashPhone` now provides a SwiftUI iPhone/iPad wrapper around the local package
 - Host app links both `JustBash` and `JustBashJavaScript`, so on-device runs can exercise shell commands and the embedded JS runtime
 - UI includes sample scripts, a script editor, run/reset controls, stdout/stderr/exit-code output, and a small virtual-filesystem browser
+- Host app now targets iOS 26+ and exposes first-pass App Shortcuts for `Run Shell Script` and `Reset Sandbox`
 - Project is reproducible via `xcodegen generate`
 - Verification added: `xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj -scheme JustBashPhone -destination 'generic/platform=iOS Simulator' build`
 

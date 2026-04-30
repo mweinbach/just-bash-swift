@@ -9,16 +9,21 @@
 /* Begin PBXBuildFile section */
 		1D9C3B87C43D9AC8D2BF8854 /* JustBashJavaScript in Frameworks */ = {isa = PBXBuildFile; productRef = FF2C39BA67C53CF099049622 /* JustBashJavaScript */; };
 		440FAB9DDD3ADA7DD7F5F45F /* JustBash in Frameworks */ = {isa = PBXBuildFile; productRef = E0DA7933005A38BC5A92F220 /* JustBash */; };
+		4494E2093EA40495A1374EB5 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E2247ED400AADF344D154A /* AppIntents.swift */; };
 		4874ACF1AFAB85D78122CFDD /* ShellRunnerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */; };
 		676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */; };
 		D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEA50DAB5C427E8E8104E0F /* ContentView.swift */; };
+		E399A185A4B2EDACCEEA3433 /* SandboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1A3F384452B74216E6D9F867 /* just-bash-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "just-bash-swift"; path = ../..; sourceTree = SOURCE_ROOT; };
 		1CEA50DAB5C427E8E8104E0F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JustBashPhoneApp.swift; sourceTree = "<group>"; };
+		6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxService.swift; sourceTree = "<group>"; };
 		771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRunnerModel.swift; sourceTree = "<group>"; };
+		99C55565B5EA380798F7E54F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
+		C0E2247ED400AADF344D154A /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
 		D6E0E3912DFB9D5A5FFFB7E0 /* JustBashPhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JustBashPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -43,6 +48,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		45EF21AD558B90D395C3927E /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				99C55565B5EA380798F7E54F /* .gitkeep */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
 		522D65969EC59B2E23A529F5 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -54,9 +67,12 @@
 		59209AB8D6623993BCE0D625 /* JustBashPhone */ = {
 			isa = PBXGroup;
 			children = (
+				C0E2247ED400AADF344D154A /* AppIntents.swift */,
 				1CEA50DAB5C427E8E8104E0F /* ContentView.swift */,
 				5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */,
+				6CC43DA1599C3F8B1C45C1F9 /* SandboxService.swift */,
 				771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */,
+				45EF21AD558B90D395C3927E /* Preview Content */,
 			);
 			path = JustBashPhone;
 			sourceTree = "<group>";
@@ -134,8 +150,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4494E2093EA40495A1374EB5 /* AppIntents.swift in Sources */,
 				D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */,
 				676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */,
+				E399A185A4B2EDACCEEA3433 /* SandboxService.swift in Sources */,
 				4874ACF1AFAB85D78122CFDD /* ShellRunnerModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -156,7 +174,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -221,7 +239,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -246,7 +264,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -305,7 +323,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -2,7 +2,7 @@ name: JustBashPhone
 options:
   bundleIdPrefix: com.mweinbach
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "26.0"
 configs:
   Debug: debug
   Release: release
@@ -33,7 +33,7 @@ targets:
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
         SUPPORTED_PLATFORMS: iphoneos iphonesimulator
         TARGETED_DEVICE_FAMILY: "1,2"
-        IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        IPHONEOS_DEPLOYMENT_TARGET: 26.0
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_ASSET_PATHS: "\"JustBashPhone/Preview Content\""
 schemes:
