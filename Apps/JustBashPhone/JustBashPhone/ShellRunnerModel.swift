@@ -54,6 +54,19 @@ final class ShellRunnerModel {
             """
         ),
         .init(
+            id: "workspace",
+            title: "Persistent Workspace",
+            description: "Write a file into /workspace so it survives app relaunches.",
+            script: """
+            date > /workspace/last-run.txt
+            echo "Workspace files:"
+            ls -la /workspace
+            echo
+            echo "last-run.txt:"
+            cat /workspace/last-run.txt
+            """
+        ),
+        .init(
             id: "js-exec",
             title: "JS Runtime",
             description: "Exercise the embedded JavaScript runtime on-device.",
@@ -133,6 +146,7 @@ final class ShellRunnerModel {
         let directories: [(path: String, title: String)] = [
             ("/", "Root"),
             ("/data", "Data"),
+            ("/workspace", "Workspace"),
             ("/tmp", "Temp"),
             ("/home/user", "Home"),
         ]

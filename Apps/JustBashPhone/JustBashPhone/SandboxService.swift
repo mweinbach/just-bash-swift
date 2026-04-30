@@ -17,6 +17,10 @@ actor SandboxService {
         INFO Retrying request
         ERROR Request failed
         """,
+        "/workspace/README.txt": """
+        This directory is mounted to the app's sandboxed Documents folder.
+        Files written here persist across launches of Just Bash on iPhone/iPad.
+        """,
     ]
 
     private var bash = SandboxService.makeBash()
@@ -38,13 +42,30 @@ actor SandboxService {
     }
 
     private static func makeBash() -> Bash {
-        Bash(options: .init(
+        let workspaceBase = workspaceDirectoryPath()
+        try? FileManager.default.createDirectory(
+            atPath: workspaceBase,
+            withIntermediateDirectories: true
+        )
+
+        let root = VirtualFileSystem()
+        let mountable = MountableFileSystem(root: root)
+        mountable.mount(ReadWriteFileSystem(base: workspaceBase), at: "/workspace")
+
+        return Bash(options: .init(
             files: seedFiles,
+            filesystem: mountable,
             embeddedRuntimes: [
                 JavaScriptRuntime(options: .init(
                     bootstrap: "globalThis.APP_NAME = 'JustBashPhone';"
                 ))
             ]
         ))
+    }
+
+    private static func workspaceDirectoryPath() -> String {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base.appendingPathComponent("JustBashWorkspace", isDirectory: true).path
     }
 }
