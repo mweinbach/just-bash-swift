@@ -37,6 +37,17 @@ actor SandboxService {
         try await bash.readFile(path)
     }
 
+    func writeFile(_ path: String, contents: String) async throws {
+        let fs = await bash.fs
+        let normalized = fs.normalizePath(path, relativeTo: "/workspace")
+        let parent = String(normalized.split(separator: "/").dropLast().joined(separator: "/"))
+        let parentPath = parent.isEmpty ? "/" : "/" + parent
+        if parentPath != "/" {
+            try fs.createDirectory(path: parentPath, relativeTo: "/", recursive: true)
+        }
+        try fs.writeFile(contents, to: normalized, relativeTo: "/")
+    }
+
     func listDirectory(_ path: String) async throws -> [VirtualDirectoryEntry] {
         try await bash.listDirectory(path)
     }

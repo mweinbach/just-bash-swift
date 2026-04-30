@@ -9,8 +9,13 @@ Deployment target: iOS 26+.
 - links the local `JustBash` and `JustBashJavaScript` package products
 - runs bash scripts entirely in-process on iOS
 - seeds a virtual filesystem with sample files under `/data`
+- mounts `/workspace` to the app's sandboxed Documents directory for persistent files
 - shows stdout, stderr, exit code, and a small sandbox file browser
-- exposes App Shortcuts for `Run Shell Script` and `Reset Sandbox`
+- exposes App Shortcuts for:
+  - `Run Shell Script`
+  - `Reset Sandbox`
+  - `Read Workspace File`
+  - `Write Workspace File`
 
 ## Generate The Project
 

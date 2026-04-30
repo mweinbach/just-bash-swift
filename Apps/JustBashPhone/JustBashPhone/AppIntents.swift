@@ -52,6 +52,70 @@ struct ResetSandboxIntent: AppIntent {
     }
 }
 
+struct ReadWorkspaceFileIntent: AppIntent {
+    static var title: LocalizedStringResource { "Read Workspace File" }
+    static var description: IntentDescription {
+        IntentDescription("Read a text file from the persistent Just Bash workspace.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    @Parameter(
+        title: "Path",
+        requestValueDialog: IntentDialog("Which workspace file should I read?")
+    )
+    var path: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Read workspace file")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let normalizedPath = normalizeWorkspacePath(path)
+        do {
+            let contents = try await SandboxService.shared.readFile(normalizedPath)
+            return .result(
+                value: contents,
+                dialog: IntentDialog("Read \(normalizedPath).")
+            )
+        } catch {
+            return .result(
+                value: "",
+                dialog: IntentDialog("Couldn't read \(normalizedPath).")
+            )
+        }
+    }
+}
+
+struct WriteWorkspaceFileIntent: AppIntent {
+    static var title: LocalizedStringResource { "Write Workspace File" }
+    static var description: IntentDescription {
+        IntentDescription("Create or replace a text file in the persistent Just Bash workspace.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    @Parameter(
+        title: "Path",
+        requestValueDialog: IntentDialog("Where should I write the workspace file?")
+    )
+    var path: String
+
+    @Parameter(
+        title: "Contents",
+        requestValueDialog: IntentDialog("What should the file contain?")
+    )
+    var contents: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Write workspace file")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let normalizedPath = normalizeWorkspacePath(path)
+        try await SandboxService.shared.writeFile(normalizedPath, contents: contents)
+        return .result(dialog: "Wrote \(normalizedPath).")
+    }
+}
+
 struct JustBashShortcuts: AppShortcutsProvider {
     static let shortcutTileColor: ShortcutTileColor = .blue
 
@@ -75,5 +139,31 @@ struct JustBashShortcuts: AppShortcutsProvider {
             shortTitle: "Reset Sandbox",
             systemImageName: "arrow.counterclockwise"
         )
+        AppShortcut(
+            intent: ReadWorkspaceFileIntent(),
+            phrases: [
+                "Read a Just Bash workspace file in \(.applicationName)",
+                "Show a workspace file from \(.applicationName)"
+            ],
+            shortTitle: "Read File",
+            systemImageName: "doc.text.magnifyingglass"
+        )
+        AppShortcut(
+            intent: WriteWorkspaceFileIntent(),
+            phrases: [
+                "Write a Just Bash workspace file in \(.applicationName)",
+                "Save text into the shell workspace with \(.applicationName)"
+            ],
+            shortTitle: "Write File",
+            systemImageName: "square.and.pencil"
+        )
     }
+}
+
+private func normalizeWorkspacePath(_ rawPath: String) -> String {
+    if rawPath.hasPrefix("/workspace/") || rawPath == "/workspace" {
+        return rawPath
+    }
+    let trimmed = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return trimmed.isEmpty ? "/workspace" : "/workspace/\(trimmed)"
 }
