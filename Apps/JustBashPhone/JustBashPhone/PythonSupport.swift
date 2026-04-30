@@ -1,5 +1,11 @@
 import Foundation
 
+struct PythonExecResult {
+    let stdout: String
+    let stderr: String
+    let exitCode: Int
+}
+
 #if canImport(Python)
 import Python
 
@@ -10,7 +16,7 @@ enum PythonSupport {
         "BeeWare Python support is linked."
     }
 
-    static func run(code: String, workspacePath: String) -> Result<String, Error> {
+    static func run(code: String, workspacePath: String) -> PythonExecResult {
         let pythonHome = pythonHomePath()
         let traceDir = workspacePath
 
@@ -33,13 +39,15 @@ enum PythonSupport {
         var status = Py_PreInitialize(&preconfig)
         guard !statusHasException(status) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.statusFailure("preinitialize", statusMessage(status)))
+            return failureResult(
+                error: PythonExecutionError.statusFailure("preinitialize", statusMessage(status))
+            )
         }
         writeTrace("after-preinitialize", to: traceDir)
 
         guard let homeWide = Py_DecodeLocale(pythonHome, nil) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.decodeLocale("pythonHome"))
+            return failureResult(error: PythonExecutionError.decodeLocale("pythonHome"))
         }
         defer { PyMem_RawFree(homeWide) }
 
@@ -50,14 +58,18 @@ enum PythonSupport {
         }
         guard !statusHasException(status) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.statusFailure("set-home", statusMessage(status)))
+            return failureResult(
+                error: PythonExecutionError.statusFailure("set-home", statusMessage(status))
+            )
         }
         writeTrace("after-set-home", to: traceDir)
 
         status = PyConfig_Read(&config)
         guard !statusHasException(status) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.statusFailure("read-config", statusMessage(status)))
+            return failureResult(
+                error: PythonExecutionError.statusFailure("read-config", statusMessage(status))
+            )
         }
         writeConfigSnapshot(config, to: traceDir)
         writeTrace("after-config-read", to: traceDir)
@@ -76,14 +88,18 @@ enum PythonSupport {
         }
         guard !statusHasException(status) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.statusFailure("set-argv", statusMessage(status)))
+            return failureResult(
+                error: PythonExecutionError.statusFailure("set-argv", statusMessage(status))
+            )
         }
         writeTrace("after-argv", to: traceDir)
 
         status = Py_InitializeFromConfig(&config)
         guard !statusHasException(status) else {
             PyConfig_Clear(&config)
-            return .failure(PythonExecutionError.statusFailure("initialize", statusMessage(status)))
+            return failureResult(
+                error: PythonExecutionError.statusFailure("initialize", statusMessage(status))
+            )
         }
         writeTrace("after-initialize", to: traceDir)
         defer {
@@ -98,15 +114,46 @@ enum PythonSupport {
         let bootstrapStatus = PyRun_SimpleString(bootstrap)
         writeTrace("after-bootstrap-\(bootstrapStatus)", to: traceDir)
         guard bootstrapStatus == 0 else {
-            return .failure(PythonExecutionError.executionFailed(bootstrapStatus))
+            return failureResult(error: PythonExecutionError.executionFailed(bootstrapStatus))
         }
 
-        let runStatus = PyRun_SimpleString(code)
+        let outputDirectory = workspacePath + "/.python-run"
+        let outputPaths = OutputFilePaths(baseDirectory: outputDirectory)
+        try? FileManager.default.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
+
+        let wrappedCode = """
+        import contextlib
+        import io
+        import traceback
+        from pathlib import Path
+
+        _stdout_buffer = io.StringIO()
+        _stderr_buffer = io.StringIO()
+        _status = 0
+        with contextlib.redirect_stdout(_stdout_buffer), contextlib.redirect_stderr(_stderr_buffer):
+            try:
+                exec(compile(\(pythonStringLiteral(code)), "<justbash-python>", "exec"), {"__name__": "__main__"})
+            except SystemExit as exc:
+                value = exc.code
+                _status = value if isinstance(value, int) else 1
+                if value not in (None, 0):
+                    print(f"SystemExit: {value}", file=_stderr_buffer)
+            except Exception:
+                _status = 1
+                traceback.print_exc(file=_stderr_buffer)
+
+        Path(\(pythonStringLiteral(outputPaths.stdout))).write_text(_stdout_buffer.getvalue())
+        Path(\(pythonStringLiteral(outputPaths.stderr))).write_text(_stderr_buffer.getvalue())
+        Path(\(pythonStringLiteral(outputPaths.exitCode))).write_text(str(_status))
+        """
+
+        let runStatus = PyRun_SimpleString(wrappedCode)
         writeTrace("after-code-\(runStatus)", to: traceDir)
-        if runStatus == 0 {
-            return .success("python finished successfully")
+        guard runStatus == 0 else {
+            return failureResult(error: PythonExecutionError.executionFailed(runStatus))
         }
-        return .failure(PythonExecutionError.executionFailed(runStatus))
+
+        return outputPaths.readResult()
     }
 
     private static func pythonHomePath() -> String {
@@ -123,6 +170,9 @@ enum PythonSupport {
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
         return "\"\(escaped)\""
     }
 
@@ -190,6 +240,30 @@ enum PythonSupport {
             String(decoding: UnsafeBufferPointer(start: utf32Pointer, count: count), as: UTF32.self)
         }
     }
+
+    private static func failureResult(error: Error) -> PythonExecResult {
+        PythonExecResult(stdout: "", stderr: error.localizedDescription + "\n", exitCode: 1)
+    }
+}
+
+private struct OutputFilePaths {
+    let stdout: String
+    let stderr: String
+    let exitCode: String
+
+    init(baseDirectory: String) {
+        stdout = baseDirectory + "/stdout.txt"
+        stderr = baseDirectory + "/stderr.txt"
+        exitCode = baseDirectory + "/exit-code.txt"
+    }
+
+    func readResult() -> PythonExecResult {
+        let stdoutText = (try? String(contentsOfFile: stdout, encoding: .utf8)) ?? ""
+        let stderrText = (try? String(contentsOfFile: stderr, encoding: .utf8)) ?? ""
+        let exitCodeText = (try? String(contentsOfFile: exitCode, encoding: .utf8)) ?? "1"
+        let parsedExitCode = Int(exitCodeText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1
+        return PythonExecResult(stdout: stdoutText, stderr: stderrText, exitCode: parsedExitCode)
+    }
 }
 
 enum PythonExecutionError: LocalizedError {
@@ -216,8 +290,8 @@ enum PythonSupport {
         "BeeWare Python support is not linked yet."
     }
 
-    static func run(code: String, workspacePath: String) -> Result<String, Error> {
-        .failure(PythonExecutionError.notLinked)
+    static func run(code: String, workspacePath: String) -> PythonExecResult {
+        PythonExecResult(stdout: "", stderr: PythonExecutionError.notLinked.localizedDescription + "\n", exitCode: 1)
     }
 }
 

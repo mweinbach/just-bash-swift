@@ -12,9 +12,11 @@ Deployment target: iOS 26+.
 - mounts `/workspace` to the app's sandboxed Documents directory for persistent files
 - shows stdout, stderr, exit code, and a small sandbox file browser
 - shows whether BeeWare Python support is linked into the current build
+- runs Python code on-device with captured stdout/stderr when the BeeWare-linked build is used
 - exposes App Shortcuts for:
   - `Run Shell Script`
   - `Reset Sandbox`
+  - `Run Python Code`
   - `Read Workspace File`
   - `Write Workspace File`
 
@@ -35,7 +37,7 @@ cd Apps/JustBashPhone
 ```
 
 That variant links `Python.xcframework` and stages a bundle-local
-`PythonSupport/lib/python3.14` tree into the app at build time.
+`python/lib/python3.14` tree into the app at build time.
 
 Verified lane after installing BeeWare support:
 
@@ -44,6 +46,15 @@ xcodebuild -project Apps/JustBashPhone/JustBashPhone.xcodeproj \
   -scheme JustBashPhone \
   -destination 'generic/platform=iOS Simulator' \
   build
+```
+
+Embedded Python smoke lane:
+
+```bash
+APP=$(ls -d ~/Library/Developer/Xcode/DerivedData/JustBashPhone-*/Build/Products/Debug-iphonesimulator/JustBashPhone.app | tail -1)
+xcrun simctl install <booted-simulator-udid> "$APP"
+SIMCTL_CHILD_JUSTBASH_SMOKE_PYTHON=1 \
+  xcrun simctl launch <booted-simulator-udid> com.mweinbach.JustBashPhone
 ```
 
 ## Physical iPhone Note

@@ -52,6 +52,44 @@ struct ResetSandboxIntent: AppIntent {
     }
 }
 
+struct RunPythonCodeIntent: AppIntent {
+    static var title: LocalizedStringResource { "Run Python Code" }
+    static var description: IntentDescription {
+        IntentDescription("Run Python code inside the BeeWare-backed on-device runtime.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    @Parameter(
+        title: "Code",
+        requestValueDialog: IntentDialog("What Python code should I run?")
+    )
+    var code: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Run Python code")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let result = await SandboxService.shared.runPython(code)
+        let summary = summarize(result)
+        let dialog = result.exitCode == 0
+            ? IntentDialog("Finished running the Python code.")
+            : IntentDialog("The Python code failed with exit code \(result.exitCode).")
+        return .result(value: summary, dialog: dialog)
+    }
+
+    private func summarize(_ result: PythonExecResult) -> String {
+        var parts: [String] = ["exitCode=\(result.exitCode)"]
+        if !result.stdout.isEmpty {
+            parts.append("stdout:\n\(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        if !result.stderr.isEmpty {
+            parts.append("stderr:\n\(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
 struct ReadWorkspaceFileIntent: AppIntent {
     static var title: LocalizedStringResource { "Read Workspace File" }
     static var description: IntentDescription {
@@ -138,6 +176,15 @@ struct JustBashShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Reset Sandbox",
             systemImageName: "arrow.counterclockwise"
+        )
+        AppShortcut(
+            intent: RunPythonCodeIntent(),
+            phrases: [
+                "Run Python code in \(.applicationName)",
+                "Execute Python with \(.applicationName)"
+            ],
+            shortTitle: "Run Python",
+            systemImageName: "curlybraces.square"
         )
         AppShortcut(
             intent: ReadWorkspaceFileIntent(),

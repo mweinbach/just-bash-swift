@@ -41,7 +41,11 @@ actor SandboxService {
         PythonSupport.availabilitySummary()
     }
 
-    func runPython(_ code: String) async -> Result<String, Error> {
+    func isPythonAvailable() -> Bool {
+        PythonSupport.isAvailable
+    }
+
+    func runPython(_ code: String) async -> PythonExecResult {
         PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
     }
 
@@ -71,15 +75,12 @@ actor SandboxService {
         try? "before run\n".write(toFile: beforeRunPath, atomically: true, encoding: .utf8)
         let result = PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
         try? "after run\n".write(toFile: afterRunPath, atomically: true, encoding: .utf8)
-        switch result {
-        case .success:
-            break
-        case .failure(let error):
+        if result.exitCode != 0 {
             try? FileManager.default.createDirectory(
                 atPath: Self.workspaceDirectoryPath(),
                 withIntermediateDirectories: true
             )
-            let message = "python smoke failed: \(error.localizedDescription)\n"
+            let message = "python smoke failed: \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))\n"
             try? message.write(toFile: smokePath, atomically: true, encoding: .utf8)
         }
     }

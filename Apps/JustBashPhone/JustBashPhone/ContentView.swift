@@ -71,6 +71,58 @@ struct ContentView: View {
                     Text(model.pythonStatus)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    if model.pythonAvailable {
+                        Picker("Python Sample", selection: $model.selectedPythonSampleID) {
+                            ForEach(ShellRunnerModel.pythonSamples) { sample in
+                                Text(sample.title).tag(sample.id)
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+
+                        if let sample = ShellRunnerModel.pythonSamples.first(where: { $0.id == model.selectedPythonSampleID }) {
+                            Text(sample.description)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        TextEditor(text: $model.pythonCode)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 180)
+
+                        HStack {
+                            Button("Load Python Sample") {
+                                model.applySelectedPythonSample()
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                model.runPython()
+                            } label: {
+                                Label(model.isRunningPython ? "Running…" : "Run Python", systemImage: "play.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.isRunningPython)
+                        }
+
+                        if let exitCode = model.pythonExitCode {
+                            Text("Python exit code: \(exitCode)")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(exitCode == 0 ? .green : .red)
+                        }
+
+                        if model.pythonStdout.isEmpty && model.pythonStderr.isEmpty {
+                            Text("Run Python to see stdout and stderr.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            if !model.pythonStdout.isEmpty {
+                                outputBlock(title: "python stdout", text: model.pythonStdout)
+                            }
+                            if !model.pythonStderr.isEmpty {
+                                outputBlock(title: "python stderr", text: model.pythonStderr, tint: .red)
+                            }
+                        }
+                    }
                 }
 
                 ForEach(model.fileSections) { section in

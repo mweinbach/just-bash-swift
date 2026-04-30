@@ -12,6 +12,13 @@ final class ShellRunnerModel {
         let script: String
     }
 
+    struct SamplePython: Identifiable, Hashable {
+        let id: String
+        let title: String
+        let description: String
+        let code: String
+    }
+
     struct FileSection: Identifiable {
         let id: String
         let title: String
@@ -76,25 +83,71 @@ final class ShellRunnerModel {
         ),
     ]
 
+    static let pythonSamples: [SamplePython] = [
+        .init(
+            id: "hello",
+            title: "Hello Python",
+            description: "Verify the embedded interpreter and print its version.",
+            code: """
+            import sys
+            print("Hello from Python")
+            print(sys.version)
+            """
+        ),
+        .init(
+            id: "workspace",
+            title: "Write Workspace File",
+            description: "Create a persistent workspace file from Python.",
+            code: """
+            from pathlib import Path
+            target = Path("/workspace/python-note.txt")
+            target.write_text("Python wrote this on-device.\\n")
+            print(target.read_text(), end="")
+            """
+        ),
+        .init(
+            id: "list",
+            title: "List Workspace",
+            description: "Inspect the persistent workspace directory from Python.",
+            code: """
+            from pathlib import Path
+            for path in sorted(Path("/workspace").iterdir()):
+                kind = "dir" if path.is_dir() else "file"
+                print(f"{kind}: {path.name}")
+            """
+        ),
+    ]
+
     var selectedSampleID: SampleScript.ID
     var script: String
+    var selectedPythonSampleID: SamplePython.ID
+    var pythonCode: String
     var stdout = ""
     var stderr = ""
     var exitCode: Int?
     var isRunning = false
+    var isRunningPython = false
     var pythonStatus = ""
+    var pythonAvailable = false
+    var pythonStdout = ""
+    var pythonStderr = ""
+    var pythonExitCode: Int?
     var fileSections: [FileSection] = []
     var filePreview: FilePreview?
 
     init() {
         let sample = Self.samples[0]
+        let pythonSample = Self.pythonSamples[0]
         self.selectedSampleID = sample.id
         self.script = sample.script
+        self.selectedPythonSampleID = pythonSample.id
+        self.pythonCode = pythonSample.code
     }
 
     func loadInitialState() async {
         await SandboxService.shared.runPythonSmokeIfRequested()
         pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
+        pythonAvailable = await SandboxService.shared.isPythonAvailable()
         await refreshFileSections()
     }
 
@@ -103,6 +156,13 @@ final class ShellRunnerModel {
             return
         }
         script = sample.script
+    }
+
+    func applySelectedPythonSample() {
+        guard let sample = Self.pythonSamples.first(where: { $0.id == selectedPythonSampleID }) else {
+            return
+        }
+        pythonCode = sample.code
     }
 
     func runScript() {
@@ -127,9 +187,29 @@ final class ShellRunnerModel {
         stdout = ""
         stderr = ""
         exitCode = nil
+        pythonStdout = ""
+        pythonStderr = ""
+        pythonExitCode = nil
         filePreview = nil
         Task {
             await SandboxService.shared.reset()
+            await refreshFileSections()
+        }
+    }
+
+    func runPython() {
+        guard !isRunningPython else { return }
+        let currentCode = pythonCode
+        isRunningPython = true
+
+        Task {
+            let result = await SandboxService.shared.runPython(currentCode)
+            await MainActor.run {
+                pythonStdout = result.stdout
+                pythonStderr = result.stderr
+                pythonExitCode = result.exitCode
+                isRunningPython = false
+            }
             await refreshFileSections()
         }
     }
