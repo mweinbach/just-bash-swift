@@ -250,7 +250,8 @@ python3 scripts/smoke_primary_runtime_skill_helpers.py --json
 ```
 
 This stages `@oai/artifact-tool`, `@oai/artifact-tool/presentation-jsx`,
-`lucide`, and `sharp` from `SandboxService.swift` under a temporary Codex
+`lucide`, and `sharp` from `Sources/JustBash/OAIPrimaryRuntimeSupport.swift`
+under a temporary Codex
 runtime-shaped `HOME`, then runs:
 
 - the cached Presentations `build_artifact_deck.mjs` helper with a generated

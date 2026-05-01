@@ -367,15 +367,23 @@ Office import/export smoke paths, but it is not a literal port of the native
 desktop stack. Native `skia-canvas` and Walnut/.NET-WASM are still replaced by
 bounded iOS facades.
 
-If your app wants the same staged artifact-tool behavior, copy the pattern from:
+If your app wants the same staged artifact-tool behavior, enable the shared
+runtime support on the `BashOptions` you create for the host:
 
-```text
-Apps/JustBashPhone/JustBashPhone/SandboxService.swift
+```swift
+var options = try BashOptions.codingAgentWorkspace(
+    rootURL: workspaceURL,
+    username: "coder",
+    embeddedRuntimes: [JavaScriptRuntime()]
+)
+options.enableOAIPrimaryRuntime(pythonProbe: {
+    // Return an OAIPrimaryRuntimeCommandResult from your embedded Python probe.
+})
 ```
 
 Specifically:
 
-- seed package files under `/node_modules/...` and
+- `OAIPrimaryRuntimeSupport` seeds package files under `/node_modules/...` and
   `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/...`
 - include `JavaScriptRuntime`
 - provide any host commands the helper scripts need, such as `python3`
