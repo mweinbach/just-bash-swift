@@ -135,4 +135,76 @@ final class JsExecBootstrapTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
         XCTAssertEqual(result.stdout, "artifact-tool\nnode:fs\nslide\nFragment\nartifact-tool\n")
     }
+
+    func testModuleModeHandlesMinifiedImportsAndExportLists() async {
+        let bash = Bash(options: .init(
+            files: [
+                "/data/input.txt": "from fs",
+                "/workspace/node_modules/minified/package.json": """
+                {
+                  "name": "minified",
+                  "type": "module",
+                  "exports": {
+                    ".": "./dist/index.mjs"
+                  }
+                }
+                """,
+                "/workspace/node_modules/minified/dist/dep.mjs": """
+                export default "defaulted";
+                export const value = "named";
+                """,
+                "/workspace/node_modules/minified/dist/index.mjs": """
+                const text = "literal import nope from 'x'; export{nope as nope};";import{join as pJoin}from"node:path";import fsPromises from"node:fs/promises";import defaultThing,{value as namedValue}from"./dep.mjs";async function readLoaded(){ return await fsPromises.readFile("/data/input.txt", "utf8"); }export{pJoin as joinPath,namedValue as renamed,defaultThing,readLoaded,text};
+                """,
+                "/workspace/scripts/main.mjs": """
+                import { defaultThing, joinPath, readLoaded, renamed, text } from "minified";
+                console.log(defaultThing);
+                console.log(renamed);
+                console.log(joinPath("/a", "b"));
+                console.log(await readLoaded());
+                console.log(text.includes("literal import nope"));
+                """
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec("cd /workspace && js-exec scripts/main.mjs")
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "defaulted\nnamed\n/a/b\nfrom fs\ntrue\n")
+    }
+
+    func testModuleModeResolvesNestedPackageExportConditions() async {
+        let bash = Bash(options: .init(
+            files: [
+                "/workspace/node_modules/conditional/package.json": """
+                {
+                  "name": "conditional",
+                  "type": "module",
+                  "exports": {
+                    ".": {
+                      "node": {
+                        "import": "./node-entry.mjs",
+                        "require": "./node-entry.cjs"
+                      },
+                      "browser": "./browser-entry.mjs"
+                    }
+                  }
+                }
+                """,
+                "/workspace/node_modules/conditional/node-entry.mjs": #"export const target = "node-import";"#,
+                "/workspace/node_modules/conditional/browser-entry.mjs": #"export const target = "browser";"#,
+                "/workspace/scripts/main.mjs": """
+                import { target } from "conditional";
+                console.log(target);
+                """
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec("cd /workspace && js-exec scripts/main.mjs")
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "node-import\n")
+    }
 }

@@ -126,12 +126,20 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
         var exportName = subpath ? './' + subpath : '.';
         var exportsValue = packageJson && packageJson.exports;
         var value = exportsValue && exportsValue[exportName];
-        if (typeof value === 'string') return value;
-        if (value && typeof value === 'object') {
-          return value.import || value.default || value.node || value.require;
-        }
+        var target = pickPackageExport(value);
+        if (target) return target;
         if (!subpath) return packageJson.module || packageJson.main || './index.js';
         return './' + subpath;
+      }
+      function pickPackageExport(value) {
+        if (typeof value === 'string') return value;
+        if (!value || typeof value !== 'object') return undefined;
+        var conditions = ['import', 'default', 'node', 'require', 'browser'];
+        for (var i = 0; i < conditions.length; i++) {
+          var picked = pickPackageExport(value[conditions[i]]);
+          if (picked) return picked;
+        }
+        return undefined;
       }
       function resolvePackage(name, baseDir) {
         var parts = packageParts(name);
@@ -172,10 +180,136 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
       function namedImportPattern(body) {
         return body.replace(/\\bas\\b/g, ':');
       }
+      function moduleImportStatementToCjs(statement, importIndex) {
+        var trimmed = statement.trim().replace(/;\\s*$/, '');
+        var m = trimmed.match(/^import\\s*([\\s\\S]+?)\\s*from\\s*(["'])([^"']+)\\2$/);
+        if (m) {
+          var clause = m[1].trim();
+          var spec = m[3];
+          if (clause.indexOf('{') === 0) {
+            return 'const { ' + namedImportPattern(clause.slice(1, -1)) + ' } = __jb_require(' + JSON.stringify(spec) + ');';
+          }
+          if (clause.indexOf('* as ') === 0) {
+            return 'const ' + clause.slice(5).trim() + ' = __jb_require(' + JSON.stringify(spec) + ');';
+          }
+          if (clause.indexOf(',') !== -1) {
+            var parts = clause.split(',');
+            var local = '__jb_import_' + importIndex;
+            return [
+              'const ' + local + ' = __jb_require(' + JSON.stringify(spec) + ');',
+              'const ' + parts[0].trim() + ' = __jb_import_default(' + local + ');',
+              'const { ' + namedImportPattern(parts.slice(1).join(',').trim().slice(1, -1)) + ' } = ' + local + ';'
+            ].join('\\n');
+          }
+          return 'const ' + clause + ' = __jb_import_default(__jb_require(' + JSON.stringify(spec) + '));';
+        }
+        m = trimmed.match(/^import\\s*(["'])([^"']+)\\1$/);
+        if (m) return '__jb_require(' + JSON.stringify(m[2]) + ');';
+        return statement;
+      }
+      function moduleExportListToCjs(body) {
+        var out = [];
+        body.split(',').forEach(function(part) {
+          var trimmed = part.trim();
+          if (!trimmed) return;
+          var bits = trimmed.split(/\\s+as\\s+/);
+          var source = bits[0].trim();
+          var target = (bits[1] || bits[0]).trim();
+          out.push('exports[' + JSON.stringify(target) + '] = ' + source + ';');
+        });
+        return out.join('\\n');
+      }
+      function isIdentifierBoundary(ch) {
+        return !ch || !/[A-Za-z0-9_$]/.test(ch);
+      }
+      function findStatementEnd(src, start) {
+        var quote = null;
+        var escaped = false;
+        var comment = null;
+        for (var i = start; i < src.length; i++) {
+          var ch = src.charAt(i);
+          var next = src.charAt(i + 1);
+          if (comment === 'line') {
+            if (ch === '\\n' || ch === '\\r') comment = null;
+            continue;
+          }
+          if (comment === 'block') {
+            if (ch === '*' && next === '/') { comment = null; i++; }
+            continue;
+          }
+          if (quote) {
+            if (escaped) { escaped = false; continue; }
+            if (ch === '\\\\') { escaped = true; continue; }
+            if (ch === quote) quote = null;
+            continue;
+          }
+          if (ch === '/' && next === '/') { comment = 'line'; i++; continue; }
+          if (ch === '/' && next === '*') { comment = 'block'; i++; continue; }
+          if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+          if (ch === ';') return i + 1;
+        }
+        return src.length;
+      }
+      function transformTopLevelModuleSyntax(src) {
+        var out = '';
+        var last = 0;
+        var quote = null;
+        var escaped = false;
+        var comment = null;
+        var importIndex = 0;
+        for (var i = 0; i < src.length; i++) {
+          var ch = src.charAt(i);
+          var next = src.charAt(i + 1);
+          if (comment === 'line') {
+            if (ch === '\\n' || ch === '\\r') comment = null;
+            continue;
+          }
+          if (comment === 'block') {
+            if (ch === '*' && next === '/') { comment = null; i++; }
+            continue;
+          }
+          if (quote) {
+            if (escaped) { escaped = false; continue; }
+            if (ch === '\\\\') { escaped = true; continue; }
+            if (ch === quote) quote = null;
+            continue;
+          }
+          if (ch === '/' && next === '/') { comment = 'line'; i++; continue; }
+          if (ch === '/' && next === '*') { comment = 'block'; i++; continue; }
+          if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+
+          if (src.slice(i, i + 6) === 'import' && isIdentifierBoundary(src.charAt(i - 1)) && isIdentifierBoundary(src.charAt(i + 6))) {
+            var afterImport = i + 6;
+            while (/\\s/.test(src.charAt(afterImport))) afterImport++;
+            if (src.charAt(afterImport) === '(' || src.slice(i, i + 11) === 'import.meta') continue;
+            var importEnd = findStatementEnd(src, i);
+            out += src.slice(last, i) + moduleImportStatementToCjs(src.slice(i, importEnd), importIndex++);
+            last = importEnd;
+            i = importEnd - 1;
+            continue;
+          }
+
+          if (src.slice(i, i + 6) === 'export' && isIdentifierBoundary(src.charAt(i - 1)) && isIdentifierBoundary(src.charAt(i + 6))) {
+            var cursor = i + 6;
+            while (/\\s/.test(src.charAt(cursor))) cursor++;
+            if (src.charAt(cursor) === '{') {
+              var exportEnd = findStatementEnd(src, i);
+              var statement = src.slice(i, exportEnd).trim().replace(/;\\s*$/, '');
+              var m = statement.match(/^export\\s*\\{([\\s\\S]*)\\}$/);
+              if (m) {
+                out += src.slice(last, i) + moduleExportListToCjs(m[1]);
+                last = exportEnd;
+                i = exportEnd - 1;
+              }
+            }
+          }
+        }
+        return out + src.slice(last);
+      }
       function transpileModuleSource(src, filename) {
         var moduleDir = dirname(filename || globalThis.__jb_script_path || '');
         var exportsToAssign = [];
-        var lines = String(src || '')
+        var lines = transformTopLevelModuleSyntax(String(src || ''))
           .replace(/\\bimport\\.meta\\.url\\b/g, JSON.stringify(fileURL(filename)))
           .replace(/\\bimport\\s*\\(/g, '__jb_dynamic_import(' + JSON.stringify(moduleDir) + ', ')
           .split('\\n');
