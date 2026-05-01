@@ -888,6 +888,7 @@ actor SandboxService {
                 "requires soffice/LibreOffice render QA",
                 "uses subprocess-based document rendering",
                 "missing required Python modules: docx, lxml",
+                "Documents helpers require real lxml/python-docx OOXML behavior; a shallow import shim is not sufficient",
             ]
         )
         let spreadsheetBlockers = pythonSkillBlockers(

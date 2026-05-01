@@ -28,6 +28,22 @@ def _missing_modules(statuses: list[dict[str, object]]) -> list[str]:
     return [str(item["name"]) for item in statuses if not item["available"]]
 
 
+def _documents_blockers(missing_modules: list[str]) -> list[str]:
+    blockers = [
+        "render_docx.py requires soffice/LibreOffice through subprocess",
+        "pdf2image typically requires Poppler binaries",
+    ]
+    if missing_modules:
+        blockers.append("missing required Python modules: " + ", ".join(missing_modules))
+    else:
+        blockers.append("all detected document Python modules are importable")
+    if "docx" in missing_modules or "lxml" in missing_modules:
+        blockers.append(
+            "Documents helpers require real lxml/python-docx OOXML behavior; a shallow import shim is not sufficient"
+        )
+    return blockers
+
+
 def build_report(workspace: str | None = None) -> dict[str, object]:
     workspace_path = Path(workspace or Path.cwd()).resolve()
     python = {
@@ -44,6 +60,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
     documents_missing = _missing_modules(documents_module_statuses)
     spreadsheet_missing = _missing_modules(spreadsheet_module_statuses)
     soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
+    poppler_path = shutil.which("pdftoppm") or shutil.which("pdftocairo")
 
     return {
         "platform": "ios",
@@ -55,16 +72,9 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "python_modules": documents_module_statuses,
                 "external_binaries": {
                     "soffice_or_libreoffice": soffice_path,
+                    "poppler_pdf_renderer": poppler_path,
                 },
-                "blockers": [
-                    "render_docx.py requires soffice/LibreOffice through subprocess",
-                    "pdf2image typically requires Poppler binaries",
-                    (
-                        "missing required Python modules: " + ", ".join(documents_missing)
-                        if documents_missing
-                        else "all detected document Python modules are importable"
-                    ),
-                ],
+                "blockers": _documents_blockers(documents_missing),
             },
             "presentations": {
                 "status": "blocked",
