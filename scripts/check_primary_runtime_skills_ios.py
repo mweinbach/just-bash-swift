@@ -255,8 +255,8 @@ def validate_plugin(report: SkillReport, plugin_name: str) -> Path | None:
     return skill_dir
 
 
-def check_documents(cache_root: Path) -> SkillReport:
-    root = resolve_cached_plugin_root(cache_root, "documents", "documents")
+def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
+    root = root or resolve_cached_plugin_root(cache_root, "documents", "documents")
     report = SkillReport("documents", root)
     skill_dir = validate_plugin(report, "documents")
     if skill_dir is None:
@@ -315,8 +315,8 @@ def check_documents(cache_root: Path) -> SkillReport:
     return report
 
 
-def check_presentations(cache_root: Path) -> SkillReport:
-    root = resolve_cached_plugin_root(cache_root, "presentations", "presentations")
+def check_presentations(cache_root: Path, root: Path | None = None) -> SkillReport:
+    root = root or resolve_cached_plugin_root(cache_root, "presentations", "presentations")
     report = SkillReport("presentations", root)
     skill_dir = validate_plugin(report, "presentations")
     if skill_dir is None:
@@ -390,8 +390,8 @@ def check_presentations(cache_root: Path) -> SkillReport:
     return report
 
 
-def check_spreadsheets(cache_root: Path) -> SkillReport:
-    root = resolve_cached_plugin_root(cache_root, "spreadsheets", "spreadsheets")
+def check_spreadsheets(cache_root: Path, root: Path | None = None) -> SkillReport:
+    root = root or resolve_cached_plugin_root(cache_root, "spreadsheets", "spreadsheets")
     report = SkillReport("spreadsheets", root)
     skill_dir = validate_plugin(report, "spreadsheets")
     if skill_dir is None:
@@ -484,14 +484,33 @@ def print_text(reports: list[SkillReport]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
+    parser.add_argument("--documents-root", type=Path, help="documents family or version directory")
+    parser.add_argument("--presentations-root", type=Path, help="presentations family or version directory")
+    parser.add_argument("--spreadsheets-root", type=Path, help="spreadsheets family or version directory")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--strict", action="store_true", help="exit non-zero when any iOS blocker is found")
     args = parser.parse_args()
 
+    documents_root = (
+        resolve_cached_plugin_root(args.documents_root, "documents", "documents")
+        if args.documents_root
+        else None
+    )
+    presentations_root = (
+        resolve_cached_plugin_root(args.presentations_root, "presentations", "presentations")
+        if args.presentations_root
+        else None
+    )
+    spreadsheets_root = (
+        resolve_cached_plugin_root(args.spreadsheets_root, "spreadsheets", "spreadsheets")
+        if args.spreadsheets_root
+        else None
+    )
+
     reports = [
-        check_documents(args.cache_root),
-        check_presentations(args.cache_root),
-        check_spreadsheets(args.cache_root),
+        check_documents(args.cache_root, documents_root),
+        check_presentations(args.cache_root, presentations_root),
+        check_spreadsheets(args.cache_root, spreadsheets_root),
     ]
     check_repo_runtime(reports)
 

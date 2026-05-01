@@ -8,17 +8,47 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checker = repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py")
-        let documentsSkill = URL(fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents/26.430.10722/skills/documents/SKILL.md")
+
+        let payload = try runChecker(checker, repoRoot: repoRoot)
+        assertBlockedSkillReports(in: payload)
+    }
+
+    func testCheckerAcceptsExplicitSkillFamilyRoots() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checker = repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py")
+        let cacheRoot = "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime"
+
+        let payload = try runChecker(
+            checker,
+            repoRoot: repoRoot,
+            extraArguments: [
+                "--documents-root", "\(cacheRoot)/documents",
+                "--presentations-root", "\(cacheRoot)/presentations",
+                "--spreadsheets-root", "\(cacheRoot)/spreadsheets",
+            ]
+        )
+        assertBlockedSkillReports(in: payload)
+    }
+
+    private func runChecker(
+        _ checker: URL,
+        repoRoot: URL,
+        extraArguments: [String] = []
+    ) throws -> [String: Any] {
+        let documentsSkillFamily = URL(fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents")
 
         try XCTSkipUnless(
             FileManager.default.fileExists(atPath: checker.path)
-                && FileManager.default.fileExists(atPath: documentsSkill.path),
+                && FileManager.default.fileExists(atPath: documentsSkillFamily.path),
             "Primary-runtime skill cache is not available on this machine"
         )
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", checker.path, "--json"]
+        process.arguments = ["python3", checker.path, "--json"] + extraArguments
         process.currentDirectoryURL = repoRoot
 
         let stdout = Pipe()
@@ -36,13 +66,19 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         ) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, errorOutput)
 
-        let payload = try JSONSerialization.jsonObject(with: output) as? [String: Any]
-        XCTAssertEqual(payload?["overall"] as? String, "blocked")
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? [String: Any])
+    }
 
-        let reports = try XCTUnwrap(payload?["reports"] as? [[String: Any]])
-        let documents = try XCTUnwrap(report(named: "documents", in: reports))
-        let presentations = try XCTUnwrap(report(named: "presentations", in: reports))
-        let spreadsheets = try XCTUnwrap(report(named: "spreadsheets", in: reports))
+    private func assertBlockedSkillReports(in payload: [String: Any]) {
+        XCTAssertEqual(payload["overall"] as? String, "blocked")
+
+        guard let reports = payload["reports"] as? [[String: Any]],
+              let documents = report(named: "documents", in: reports),
+              let presentations = report(named: "presentations", in: reports),
+              let spreadsheets = report(named: "spreadsheets", in: reports) else {
+            XCTFail("Missing one or more skill reports in payload: \(payload)")
+            return
+        }
 
         XCTAssertEqual(documents["status"] as? String, "blocked")
         XCTAssertContainsFinding(

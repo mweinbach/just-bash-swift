@@ -167,6 +167,15 @@ Minimum path to support:
 Use `scripts/check_primary_runtime_skills_ios.py` before attempting to register
 these skills in an iOS build. The checker verifies the cached skill bundles and
 reports the iOS blockers above from the actual files in the cache and this repo.
+It accepts the primary-runtime cache root by default, or explicit family/version
+paths matching the three skill directories:
+
+```bash
+scripts/check_primary_runtime_skills_ios.py --strict \
+  --documents-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents \
+  --presentations-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations \
+  --spreadsheets-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets
+```
 
 The Python-linked iPhone host also exposes an on-device command:
 
