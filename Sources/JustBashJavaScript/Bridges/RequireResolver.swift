@@ -112,6 +112,9 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
         if (String(path).indexOf('file://') === 0) return path;
         return 'file://' + normalizePath(path);
       }
+      function fileURLToPathname(value) {
+        return String(value || '').replace(/^file:\\/\\//, '').replace(/[?#][\\s\\S]*$/, '');
+      }
       function unique(list) {
         var out = [];
         var seen = {};
@@ -192,7 +195,7 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
       }
       function resolveSource(name, baseDir) {
         if (String(name).indexOf('file://') === 0) {
-          return findReadable(candidateWithExtensions(String(name).replace(/^file:\\/\\//, '')));
+          return findReadable(candidateWithExtensions(fileURLToPathname(name)));
         } else if (name.indexOf('.') === 0) {
           var base = normalizePath((baseDir || globalThis.__jb_script_dir || '') + '/' + name);
           return findReadable(candidateWithExtensions(base));
@@ -429,7 +432,7 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
       }
       function createRequire(base) {
         var baseDir = globalThis.__jb_script_dir || '';
-        if (typeof base === 'string' && base.indexOf('file://') === 0) baseDir = dirname(base.replace(/^file:\\/\\//, ''));
+        if (typeof base === 'string' && base.indexOf('file://') === 0) baseDir = dirname(fileURLToPathname(base));
         else if (typeof base === 'string' && base.length) baseDir = dirname(base);
         return makeRequire(baseDir);
       }

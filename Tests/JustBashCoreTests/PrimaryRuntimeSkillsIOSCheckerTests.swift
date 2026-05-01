@@ -146,6 +146,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertEqual(presentations["status"] as? String, "blocked")
         XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: presentations, containing: "render basic presentation slides to PNG")
+        XCTAssertContainsFinding(in: presentations, containing: "cached helper CLI/runtime conventions")
         XCTAssertContainsFinding(in: presentations, containing: "lucide compatibility package")
         XCTAssertContainsFinding(in: presentations, containing: "child_process.spawnSync")
         XCTAssertContainsFinding(in: presentations, containing: "Python presentation fan-out")

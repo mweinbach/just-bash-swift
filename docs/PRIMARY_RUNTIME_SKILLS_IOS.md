@@ -103,7 +103,9 @@ iOS blockers:
 
 - JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
   `node:*` builtin aliases, ESM compatibility for minified package output, and
-  sandboxed package resolution, but it does not provide native Node packages.
+  sandboxed package resolution. It also handles cached helper script shebangs,
+  dash-prefixed script arguments, Node-style `pathToFileURL(...).href`, and
+  cache-busted dynamic file imports. It does not provide native Node packages.
 - The staged `@oai/artifact-tool` compatibility package covers direct imports,
   `presentation-jsx`, basic Office export smoke checks, and bounded pure-JS
   slide PNG/layout previews, but it intentionally does not provide full
@@ -256,6 +258,19 @@ runtime-shaped `HOME`, then runs:
 Passing this smoke harness proves those bounded staged paths are runnable. It
 does not clear the strict readiness blockers for full Documents render/OOXML
 behavior or high-fidelity artifact-tool native render/import parity.
+
+The Swift JavaScriptCore lane also runs actual cached Presentation helpers
+against the staged iOS compatibility package:
+
+```bash
+swift test --filter PrimaryRuntimePresentationHelperTests
+```
+
+That test stages the iOS `@oai/artifact-tool` and `lucide` shims, loads the
+cached `render_artifact_slide.mjs`, `build_artifact_deck.mjs`, and
+`check_layout_quality.mjs` helpers, then verifies PNG, layout JSON, and PPTX
+artifacts through `js-exec`. It proves the helper CLI/module-loading shape is
+compatible with the iOS JavaScriptCore runtime for that bounded path.
 
 ## Latest Simulator Smoke
 

@@ -27,8 +27,15 @@
     URLSearchParams: globalThis.URLSearchParams,
     parse: function(s) { try { var u = new URL(s); return { href: u.href, protocol: u.protocol, host: u.host, hostname: u.hostname, port: u.port, pathname: u.pathname, search: u.search, hash: u.hash }; } catch (e) { return null; } },
     format: function(o) { return o && o.href ? o.href : ''; },
-    fileURLToPath: function(s) { return s.replace(/^file:\/\//, ''); },
-    pathToFileURL: function(p) { return 'file://' + p; }
+    fileURLToPath: function(s) {
+      var value = s && s.href ? s.href : String(s || '');
+      return value.replace(/^file:\/\//, '').replace(/[?#][\s\S]*$/, '');
+    },
+    pathToFileURL: function(p) {
+      var href = String(p || '');
+      if (href.indexOf('file://') !== 0) href = 'file://' + href;
+      return { href: href, toString: function() { return href; } };
+    }
   };
 
   // assert

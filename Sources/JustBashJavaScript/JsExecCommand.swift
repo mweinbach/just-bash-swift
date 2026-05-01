@@ -25,6 +25,11 @@ func makeJsExecCommand(engine: JSCEngine) -> AnyBashCommand {
 
         while i < args.count {
             let arg = args[i]
+            if inlineCode != nil || scriptPath != nil || readFromStdin {
+                scriptArgs.append(arg)
+                i += 1
+                continue
+            }
             switch arg {
             case "--help":
                 return ExecResult.success("""
@@ -92,11 +97,21 @@ func makeJsExecCommand(engine: JSCEngine) -> AnyBashCommand {
         }
 
         return await engine.runCode(
-            source,
+            stripShebang(from: source),
             ctx: ctx,
             scriptArgs: scriptArgs,
             scriptPath: scriptPath,
             isModule: isModule
         )
     }
+}
+
+private func stripShebang(from source: String) -> String {
+    guard source.hasPrefix("#!") else {
+        return source
+    }
+    guard let newline = source.firstIndex(of: "\n") else {
+        return ""
+    }
+    return String(source[source.index(after: newline)...])
 }

@@ -38,6 +38,26 @@ final class JsExecBasicTests: XCTestCase {
         XCTAssertEqual(result.stdout, "alpha,beta\n")
     }
 
+    func testScriptArgsMayStartWithDashes() async {
+        let bash = Bash(options: .init(
+            files: ["/scripts/args.mjs": "console.log(process.argv.slice(2).join('|'));"],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+        let result = await bash.exec("js-exec /scripts/args.mjs --output report.png --scale 0.5")
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "--output|report.png|--scale|0.5\n")
+    }
+
+    func testScriptFileShebangIsIgnored() async {
+        let bash = Bash(options: .init(
+            files: ["/scripts/shebang.mjs": "#!/usr/bin/env node\nconsole.log('ok');"],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+        let result = await bash.exec("js-exec /scripts/shebang.mjs")
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "ok\n")
+    }
+
     func testStdinAsScriptSource() async {
         let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime()]))
         let result = await bash.exec("echo 'console.log(\"from stdin\")' | js-exec")

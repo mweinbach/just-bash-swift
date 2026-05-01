@@ -42,6 +42,13 @@ final class JsExecBootstrapTests: XCTestCase {
         XCTAssertEqual(result.stdout, "true\nhello node\n/a/b\nfunction\nnode:fs\n")
     }
 
+    func testNodeURLPathToFileURLExposesHref() async {
+        let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime()]))
+        let result = await bash.exec(#"js-exec -m -c 'import { fileURLToPath, pathToFileURL } from "node:url"; const url = pathToFileURL("/workspace/file.mjs"); console.log(url.href); console.log(String(url)); console.log(fileURLToPath(url));'"#)
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "file:///workspace/file.mjs\nfile:///workspace/file.mjs\n/workspace/file.mjs\n")
+    }
+
     func testModuleModeHandlesStaticImportsAndRelativeExports() async {
         let bash = Bash(options: .init(
             files: [
@@ -88,6 +95,24 @@ final class JsExecBootstrapTests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
         XCTAssertEqual(result.stdout, "42\n42\n")
+    }
+
+    func testModuleModeHandlesDynamicFileURLImportsWithCacheBusters() async {
+        let bash = Bash(options: .init(
+            files: [
+                "/scripts/dynamic.mjs": #"export const answer = 42;"#,
+                "/scripts/main.mjs": """
+                const viaURL = await import("file:///scripts/dynamic.mjs?mtime=123#fresh");
+                console.log(viaURL.answer);
+                """
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec("js-exec /scripts/main.mjs")
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "42\n")
     }
 
     func testModuleModeResolvesNodeModulesPackageExports() async {

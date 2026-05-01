@@ -492,6 +492,10 @@ def check_presentations(
         require_resolver = REPO_ROOT / "Sources/JustBashJavaScript/Bridges/RequireResolver.swift"
         resolver_text = read_text(require_resolver)
         engine_text = read_text(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift")
+        js_exec_command = REPO_ROOT / "Sources/JustBashJavaScript/JsExecCommand.swift"
+        module_shims = REPO_ROOT / "Sources/JustBashJavaScript/Resources/Bootstrap/module-shims.js"
+        js_exec_text = read_text(js_exec_command)
+        module_shims_text = read_text(module_shims)
         if "__jb_transpile_esm" in resolver_text and "__jb_dynamic_import" in resolver_text and "transpile.call" in engine_text:
             report.add(
                 "ok",
@@ -521,6 +525,24 @@ def check_presentations(
                 "blocked",
                 "presentation helpers need package.json/node_modules package resolution for artifact-tool subpaths",
                 [str(require_resolver), str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
+            )
+        if (
+            "stripShebang" in js_exec_text
+            and "scriptArgs.append(arg)" in js_exec_text
+            and "fileURLToPathname" in resolver_text
+            and "pathToFileURL: function(p)" in module_shims_text
+            and "href: href" in module_shims_text
+        ):
+            report.add(
+                "ok",
+                "js-exec handles cached helper CLI/runtime conventions: shebangs, dash-prefixed script arguments, Node file URL hrefs, and cache-busted dynamic file imports",
+                [
+                    line_for(js_exec_command, "stripShebang"),
+                    line_for(js_exec_command, "scriptArgs.append(arg)"),
+                    line_for(require_resolver, "fileURLToPathname"),
+                    line_for(module_shims, "pathToFileURL: function(p)"),
+                    str(REPO_ROOT / "Tests/JustBashJavaScriptTests/PrimaryRuntimePresentationHelperTests.swift"),
+                ],
             )
     skill_md = skill_dir / "SKILL.md"
     check_artifact_tool_runtime(
