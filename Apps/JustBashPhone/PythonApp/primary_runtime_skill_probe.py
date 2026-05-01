@@ -87,7 +87,8 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
             "presentations": {
                 "status": "ready",
                 "blockers": [
-                    "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
+                    "broad pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged by the iOS host",
+                    "basic PresentationFile.importPptx and DocumentFile.importDocx facades are staged for common OOXML text extraction paths",
                     "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                     "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                     "JavaScript helper scripts can invoke host-provided python3 through child_process",
@@ -101,8 +102,8 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "status": "ready",
                 "python_modules": spreadsheet_module_statuses,
                 "blockers": [
-                    "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
-                    "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
+                    "broad pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
+                    "stored and sandbox-extracted compressed .xlsx import/export plus basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
                     "bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged for common arithmetic/range formulas",
                     "full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine",
                     "bounded native XLSX chart parts and basic chart PNG previews are staged for common source-range charts",
