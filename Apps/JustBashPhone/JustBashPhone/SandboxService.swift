@@ -1,4 +1,6 @@
 import Foundation
+import CodexCore
+import CodexCoreJustBash
 import JustBash
 import JustBashFS
 import JustBashJavaScript
@@ -40,6 +42,23 @@ actor SandboxService {
 
     func reset() {
         bash = SandboxService.makeBash()
+    }
+
+    func makeCodexRuntime(
+        modelProvider: any ModelProvider,
+        configuration: AgentConfiguration = AgentConfiguration(),
+        threadStore: any ThreadStore = JSONFileThreadStore(),
+        approvalHandler: ApprovalHandler? = nil
+    ) -> CodexRuntime {
+        var config = configuration
+        config.workspaceURL = URL(fileURLWithPath: Self.workspaceDirectoryPath(), isDirectory: true)
+        return CodexRuntime(
+            configuration: config,
+            modelProvider: modelProvider,
+            threadStore: threadStore,
+            tools: justBashCodexTools(bash: bash, defaultCWD: Self.workspaceDocumentsPath),
+            approvalHandler: approvalHandler
+        )
     }
 
     func readFile(_ path: String) async throws -> String {
