@@ -20,6 +20,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             .deletingLastPathComponent()
         let checker = repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py")
         let cacheRoot = "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime"
+        let artifactToolRoot = "/Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool"
 
         let payload = try runChecker(
             checker,
@@ -28,6 +29,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
                 "--documents-root", "\(cacheRoot)/documents",
                 "--presentations-root", "\(cacheRoot)/presentations",
                 "--spreadsheets-root", "\(cacheRoot)/spreadsheets",
+                "--artifact-tool-root", artifactToolRoot,
             ]
         )
         assertBlockedSkillReports(in: payload)

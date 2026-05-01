@@ -174,7 +174,8 @@ paths matching the three skill directories:
 scripts/check_primary_runtime_skills_ios.py --strict \
   --documents-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents \
   --presentations-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations \
-  --spreadsheets-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets
+  --spreadsheets-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets \
+  --artifact-tool-root /Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool
 ```
 
 The Python-linked iPhone host also exposes an on-device command:

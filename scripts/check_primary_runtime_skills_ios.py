@@ -159,16 +159,16 @@ def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
     return evidence
 
 
-def artifact_tool_evidence() -> list[str]:
-    evidence = [str(DEFAULT_ARTIFACT_TOOL / "package.json")]
-    if (DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs").exists():
-        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs"))
-    skia = DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas"
+def artifact_tool_evidence(artifact_tool_root: Path) -> list[str]:
+    evidence = [str(artifact_tool_root / "package.json")]
+    if (artifact_tool_root / "dist" / "artifact_tool.mjs").exists():
+        evidence.append(str(artifact_tool_root / "dist" / "artifact_tool.mjs"))
+    skia = artifact_tool_root / "node_modules" / "skia-canvas"
     if skia.exists():
         evidence.append(str(skia / "package.json"))
         if (skia / "lib" / "skia.node").exists():
             evidence.append(str(skia / "lib" / "skia.node"))
-    walnut_wasm = DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"
+    walnut_wasm = artifact_tool_root / "node_modules" / "@oai" / "walnut" / "wasm"
     if walnut_wasm.exists():
         evidence.append(str(walnut_wasm))
         if (walnut_wasm / "dotnet.js").exists():
@@ -188,7 +188,12 @@ def artifact_tool_compat_evidence() -> list[str]:
     return evidence
 
 
-def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: str) -> None:
+def check_artifact_tool_runtime(
+    report: SkillReport,
+    skill_md: Path,
+    message: str,
+    artifact_tool_root: Path,
+) -> None:
     if "@oai/artifact-tool" not in read_text(skill_md):
         return
 
@@ -198,7 +203,7 @@ def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: st
         report.add(
             "ok",
             "js-exec handles artifact-tool's bundled/minified ESM shape and nested package export conditions",
-            [str(require_resolver), str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs")],
+            [str(require_resolver), str(artifact_tool_root / "dist" / "artifact_tool.mjs")],
         )
 
     sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
@@ -217,18 +222,18 @@ def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: st
     report.add(
         "blocked",
         message,
-        [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
+        [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence(artifact_tool_root)],
     )
 
-    skia_node = DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "lib" / "skia.node"
+    skia_node = artifact_tool_root / "node_modules" / "skia-canvas" / "lib" / "skia.node"
     if skia_node.exists():
         report.add(
             "blocked",
             "artifact-tool bundles skia-canvas with a native Node addon; iOS needs a signed in-process renderer or Swift/CoreGraphics adapter",
-            [str(skia_node), str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "package.json")],
+            [str(skia_node), str(artifact_tool_root / "node_modules" / "skia-canvas" / "package.json")],
         )
 
-    walnut_wasm = DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"
+    walnut_wasm = artifact_tool_root / "node_modules" / "@oai" / "walnut" / "wasm"
     if walnut_wasm.exists():
         report.add(
             "blocked",
@@ -315,7 +320,11 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
     return report
 
 
-def check_presentations(cache_root: Path, root: Path | None = None) -> SkillReport:
+def check_presentations(
+    cache_root: Path,
+    artifact_tool_root: Path,
+    root: Path | None = None,
+) -> SkillReport:
     root = root or resolve_cached_plugin_root(cache_root, "presentations", "presentations")
     report = SkillReport("presentations", root)
     skill_dir = validate_plugin(report, "presentations")
@@ -380,6 +389,7 @@ def check_presentations(cache_root: Path, root: Path | None = None) -> SkillRepo
         report,
         skill_md,
         "@oai/artifact-tool is required; the iOS host has a limited compatibility package, but the full native rendering/import stack is not ported",
+        artifact_tool_root,
     )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
@@ -390,7 +400,11 @@ def check_presentations(cache_root: Path, root: Path | None = None) -> SkillRepo
     return report
 
 
-def check_spreadsheets(cache_root: Path, root: Path | None = None) -> SkillReport:
+def check_spreadsheets(
+    cache_root: Path,
+    artifact_tool_root: Path,
+    root: Path | None = None,
+) -> SkillReport:
     root = root or resolve_cached_plugin_root(cache_root, "spreadsheets", "spreadsheets")
     report = SkillReport("spreadsheets", root)
     skill_dir = validate_plugin(report, "spreadsheets")
@@ -417,6 +431,7 @@ def check_spreadsheets(cache_root: Path, root: Path | None = None) -> SkillRepor
         report,
         skill_md,
         "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render/import behavior is not ported",
+        artifact_tool_root,
     )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
@@ -487,6 +502,12 @@ def main() -> int:
     parser.add_argument("--documents-root", type=Path, help="documents family or version directory")
     parser.add_argument("--presentations-root", type=Path, help="presentations family or version directory")
     parser.add_argument("--spreadsheets-root", type=Path, help="spreadsheets family or version directory")
+    parser.add_argument(
+        "--artifact-tool-root",
+        type=Path,
+        default=DEFAULT_ARTIFACT_TOOL,
+        help="cached @oai/artifact-tool package directory",
+    )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--strict", action="store_true", help="exit non-zero when any iOS blocker is found")
     args = parser.parse_args()
@@ -509,8 +530,8 @@ def main() -> int:
 
     reports = [
         check_documents(args.cache_root, documents_root),
-        check_presentations(args.cache_root, presentations_root),
-        check_spreadsheets(args.cache_root, spreadsheets_root),
+        check_presentations(args.cache_root, args.artifact_tool_root, presentations_root),
+        check_spreadsheets(args.cache_root, args.artifact_tool_root, spreadsheets_root),
     ]
     check_repo_runtime(reports)
 
