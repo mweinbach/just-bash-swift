@@ -89,4 +89,50 @@ final class JsExecBootstrapTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
         XCTAssertEqual(result.stdout, "42\n42\n")
     }
+
+    func testModuleModeResolvesNodeModulesPackageExports() async {
+        let bash = Bash(options: .init(
+            files: [
+                "/workspace/node_modules/@oai/artifact-tool/package.json": """
+                {
+                  "name": "@oai/artifact-tool",
+                  "type": "module",
+                  "exports": {
+                    ".": "./dist/artifact_tool.mjs",
+                    "./presentation-jsx": "./dist/presentation-jsx/index.mjs"
+                  }
+                }
+                """,
+                "/workspace/node_modules/@oai/artifact-tool/dist/artifact_tool.mjs": """
+                import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);
+                export const runtimeName = "artifact-tool";
+                export function resolveFs() {
+                    return require.resolve("node:fs");
+                }
+                """,
+                "/workspace/node_modules/@oai/artifact-tool/dist/presentation-jsx/index.mjs": """
+                export default function jsx(type) {
+                    return { type };
+                }
+                export const Fragment = "Fragment";
+                """,
+                "/workspace/scripts/main.mjs": """
+                import { runtimeName, resolveFs } from "@oai/artifact-tool";
+                import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx";
+                const fresh = await import("@oai/artifact-tool");
+                console.log(runtimeName);
+                console.log(resolveFs());
+                console.log(jsx("slide").type);
+                console.log(Fragment);
+                console.log(fresh.runtimeName);
+                """
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec("cd /workspace && js-exec scripts/main.mjs")
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "artifact-tool\nnode:fs\nslide\nFragment\nartifact-tool\n")
+    }
 }

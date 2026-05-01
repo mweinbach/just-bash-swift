@@ -20,7 +20,8 @@ filesystem, and optional embedded runtimes.
   by JavaScriptCore and exposes `js-exec`, CommonJS-style `require`, selected
   Node-compatible shims including `node:*` builtin aliases, sandbox filesystem
   access, `fetch`, host-provided addon modules, and a small ESM compatibility
-  layer for `.mjs` entrypoints, relative imports, and dynamic `import()`.
+  layer for `.mjs` entrypoints, relative imports, dynamic `import()`, and
+  sandboxed `node_modules` packages with `package.json` exports.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -80,8 +81,8 @@ Required pieces found in the skill:
 iOS blockers:
 
 - JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
-  `node:*` builtin aliases, and ESM compatibility, but it does not
-  provide npm package resolution or native Node packages.
+  `node:*` builtin aliases, ESM compatibility, and sandboxed package
+  resolution, but it does not provide native Node packages.
 - `@oai/artifact-tool` is not currently bundled as an iOS-compatible
   JavaScriptCore addon module or Swift framework in this repository. The local
   Codex runtime cache has the Node package, but that cache is not part of the
@@ -107,7 +108,8 @@ Required pieces found in the skill:
 
 - `@oai/artifact-tool` for workbook creation, inspection, render, and `.xlsx`
   export.
-- A Node-style workspace dependency loader and normal Node module resolution.
+- A Node-style workspace dependency loader, package exports, and normal Node
+  module resolution.
 - Optional Python source-processing libraries such as `pandas`, `numpy`,
   `pypdf`, `python-docx`, and `reportlab`.
 
@@ -116,8 +118,9 @@ iOS blockers:
 - The required artifact-tool package is not exposed as an iOS runtime module.
   The local Codex runtime cache contains the Node package, but it is not bundled
   into the app or adapted to the JavaScriptCore runtime.
-- Node module resolution is not available inside the current JavaScriptCore
-  runtime.
+- Sandboxed `node_modules` package resolution is available inside the current
+  JavaScriptCore runtime, but only for package sources and assets that are
+  actually staged into the app-visible filesystem.
 - The optional Python analysis stack includes packages that are not currently
   bundled for BeeWare iOS (`pandas`, `pypdf`, `python-docx`, `reportlab`; only
   `numpy` is tracked as an optional native iOS probe today).

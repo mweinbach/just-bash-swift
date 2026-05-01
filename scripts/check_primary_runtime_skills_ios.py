@@ -236,11 +236,23 @@ def check_presentations(cache_root: Path) -> SkillReport:
                     str(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift"),
                 ],
             )
+        if "resolvePackage" in resolver_text and "nodeModuleBases" in resolver_text:
+            report.add(
+                "ok",
+                "JavaScriptCore require/import can resolve sandboxed node_modules packages with package.json exports",
+                [str(require_resolver)],
+            )
+        else:
+            report.add(
+                "blocked",
+                "presentation helpers need package.json/node_modules package resolution for artifact-tool subpaths",
+                [str(require_resolver), str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
+            )
     skill_md = skill_dir / "SKILL.md"
     if "@oai/artifact-tool" in read_text(skill_md):
         report.add(
             "blocked",
-            "@oai/artifact-tool is required; the cached Node package exists but is not bundled or adapted as an iOS JavaScriptCore/Swift runtime",
+            "@oai/artifact-tool is required; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
             [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
         )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
@@ -261,10 +273,24 @@ def check_spreadsheets(cache_root: Path) -> SkillReport:
 
     skill_md = skill_dir / "SKILL.md"
     text = read_text(skill_md)
+    require_resolver = REPO_ROOT / "Sources/JustBashJavaScript/Bridges/RequireResolver.swift"
+    resolver_text = read_text(require_resolver)
+    if "resolvePackage" in resolver_text and "nodeModuleBases" in resolver_text:
+        report.add(
+            "ok",
+            "JavaScriptCore require/import can resolve sandboxed node_modules packages with package.json exports",
+            [str(require_resolver)],
+        )
+    else:
+        report.add(
+            "blocked",
+            "spreadsheet authoring needs package.json/node_modules package resolution for artifact-tool subpaths",
+            [str(require_resolver), str(skill_md)],
+        )
     if "@oai/artifact-tool" in text:
         report.add(
             "blocked",
-            "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled or adapted as an iOS JavaScriptCore/Swift runtime",
+            "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
             [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
         )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
