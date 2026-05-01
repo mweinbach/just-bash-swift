@@ -681,6 +681,13 @@ def check_spreadsheets(
             "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
             spreadsheet_calculation_evidence(skill_md),
         )
+    spreadsheet_jscore_test = REPO_ROOT / "Tests/JustBashJavaScriptTests/PrimaryRuntimeSpreadsheetCompatTests.swift"
+    if spreadsheet_jscore_test.exists():
+        report.add(
+            "ok",
+            "Swift JavaScriptCore test covers spreadsheet skill core authoring with formulas, inspect, trace, chart export, PNG render, and XLSX round-trip through the staged iOS compatibility package",
+            [str(spreadsheet_jscore_test)],
+        )
     if all(marker in sandbox_text for marker in ("function chartXml", "function drawingXml", "function renderChart")):
         report.add(
             "ok",

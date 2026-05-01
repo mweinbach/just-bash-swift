@@ -272,6 +272,18 @@ cached `render_artifact_slide.mjs`, `build_artifact_deck.mjs`, and
 artifacts through `js-exec`. It proves the helper CLI/module-loading shape is
 compatible with the iOS JavaScriptCore runtime for that bounded path.
 
+The spreadsheet core-authoring path has a matching Swift JavaScriptCore smoke:
+
+```bash
+swift test --filter PrimaryRuntimeSpreadsheetCompatTests
+```
+
+That test stages the iOS `@oai/artifact-tool` shim, then verifies a workbook
+build with formulas, formula inspection, trace output, a native chart export,
+worksheet PNG render, `.xlsx` export, and `.xlsx` round-trip import. This proves
+the bounded spreadsheet authoring path is executable in JavaScriptCore, while
+the strict checker remains blocked on full artifact-tool render/import parity.
+
 ## Latest Simulator Smoke
 
 On May 1, 2026, the iPhone host was installed on a booted iPhone 17 Pro Max

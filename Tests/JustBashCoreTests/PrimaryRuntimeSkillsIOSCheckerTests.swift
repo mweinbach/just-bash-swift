@@ -162,6 +162,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: spreadsheets, containing: "render basic worksheet ranges to PNG")
         XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: spreadsheets, containing: "computes common arithmetic/range formulas")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "Swift JavaScriptCore test covers spreadsheet skill core authoring")
         XCTAssertContainsFinding(in: spreadsheets, containing: "not the full Excel calculation engine")
         XCTAssertContainsFinding(in: spreadsheets, containing: "exports native XLSX chart parts")
         XCTAssertContainsFinding(in: spreadsheets, containing: "not the full Excel chart engine")
