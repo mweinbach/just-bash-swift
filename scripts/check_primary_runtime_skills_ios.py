@@ -319,7 +319,16 @@ def check_artifact_tool_runtime(
             [line_for(sandbox_service, "Workbook.render")],
         )
 
-    if "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text:
+    if "renderPresentationPng" in sandbox_text and "presentationLayout" in sandbox_text:
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility can render basic presentation slides to PNG and emit layout JSON without native renderer dependencies",
+            [
+                line_for(sandbox_service, "renderPresentationPng"),
+                line_for(sandbox_service, "presentationLayout"),
+            ],
+        )
+    elif "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text:
         report.add(
             "blocked",
             "iOS artifact-tool compatibility explicitly rejects presentation PNG export required by the presentation skill instead of returning fake visual verification",

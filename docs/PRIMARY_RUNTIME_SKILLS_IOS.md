@@ -28,7 +28,8 @@ filesystem, and optional embedded runtimes.
 - The iPhone host stages a limited pure-JS `@oai/artifact-tool` compatibility
   package under both `/node_modules/@oai/artifact-tool` and the Codex primary
   runtime cache-shaped path. It supports direct imports, `presentation-jsx`, and
-  basic `.xlsx`/`.pptx` export smoke checks. Full render/import APIs fail
+  basic `.xlsx`/`.pptx` export smoke checks, plus bounded worksheet and slide
+  PNG previews. Unsupported high-fidelity render/import APIs still fail
   explicitly on iOS so skill verification cannot accidentally treat placeholder
   images or empty imports as success. It is not the full upstream artifact-tool
   renderer/importer.
@@ -102,10 +103,12 @@ iOS blockers:
   `node:*` builtin aliases, ESM compatibility for minified package output, and
   sandboxed package resolution, but it does not provide native Node packages.
 - The staged `@oai/artifact-tool` compatibility package covers direct imports,
-  `presentation-jsx`, and basic Office export smoke checks, but it intentionally
-  does not provide full upstream rendering or Office import behavior.
-- Presentation visual export fails explicitly in the iOS compatibility package
-  until a real renderer is ported.
+  `presentation-jsx`, basic Office export smoke checks, and bounded pure-JS
+  slide PNG/layout previews, but it intentionally does not provide full
+  upstream rendering or Office import behavior.
+- Presentation visual export has a basic pure-JS PNG path for visible shapes,
+  image placeholders, and text, but high-fidelity rendering still needs a real
+  iOS renderer.
 - The deck-building helper scripts spawn host Python/Node subprocesses for
   contact sheets and reference slide generation. Those paths need in-process
   wrappers or explicit sandbox-provided commands on iOS.
@@ -234,7 +237,8 @@ wrote `/workspace/primary-runtime-skills-ios-report.json` with:
 - Documents blockers: missing `docx`/`lxml`, no `soffice`/LibreOffice, no
   Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
 - Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
-  compatibility is staged, including common structural spreadsheet helpers, but
-  full render/import behavior remains unported and fails explicitly
+  compatibility is staged, including basic slide PNG/layout previews and common
+  structural spreadsheet helpers, but full render/import behavior remains
+  unported
 - Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
   `reportlab` import; `docx`, `lxml`, and `pandas` do not

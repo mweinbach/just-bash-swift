@@ -80,7 +80,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "status": "blocked",
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
-                    "render APIs fail explicitly instead of returning fake visual verification",
+                    "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                     "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                     "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
                     "presentation icon rendering requires sharp or skia-canvas native graphics packages",

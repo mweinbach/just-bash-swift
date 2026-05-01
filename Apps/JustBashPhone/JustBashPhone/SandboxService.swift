@@ -580,6 +580,7 @@ actor SandboxService {
     }
 
     function fillRect(canvas, x, y, width, height, color) {
+      if (!color || color[3] === 0) return;
       for (let yy = Math.max(0, y); yy < Math.min(canvas.height, y + height); yy += 1) {
         for (let xx = Math.max(0, x); xx < Math.min(canvas.width, x + width); xx += 1) setPixel(canvas, xx, yy, color);
       }
@@ -605,6 +606,61 @@ actor SandboxService {
         });
         cursor += 4 * scale;
       }
+    }
+
+    function clampByte(value, fallback) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return fallback;
+      return Math.max(0, Math.min(255, Math.round(number)));
+    }
+
+    function colorBytes(value, fallback) {
+      if (value == null || value === "" || value === "transparent") return fallback;
+      if (Array.isArray(value)) {
+        return [
+          clampByte(value[0], 0),
+          clampByte(value[1], 0),
+          clampByte(value[2], 0),
+          value.length > 3 ? clampByte(value[3], 255) : 255
+        ];
+      }
+      const text = String(value).trim();
+      const hex = text.match(/^#([0-9a-f]{6}|[0-9a-f]{8})$/i);
+      if (hex) {
+        const raw = hex[1];
+        return [
+          parseInt(raw.slice(0, 2), 16),
+          parseInt(raw.slice(2, 4), 16),
+          parseInt(raw.slice(4, 6), 16),
+          raw.length === 8 ? parseInt(raw.slice(6, 8), 16) : 255
+        ];
+      }
+      const rgb = text.match(/^rgba?\(([^)]+)\)$/i);
+      if (rgb) {
+        const parts = rgb[1].split(",").map((part) => part.trim());
+        const alpha = parts.length > 3 ? Math.round(Number(parts[3]) * 255) : 255;
+        return [clampByte(parts[0], 0), clampByte(parts[1], 0), clampByte(parts[2], 0), clampByte(alpha, 255)];
+      }
+      return fallback;
+    }
+
+    function frameOf(position, fallback) {
+      const source = position || {};
+      return {
+        left: Number(source.left ?? source.x ?? fallback.left ?? 0) || 0,
+        top: Number(source.top ?? source.y ?? fallback.top ?? 0) || 0,
+        width: Math.max(1, Number(source.width ?? source.w ?? fallback.width ?? 1) || 1),
+        height: Math.max(1, Number(source.height ?? source.h ?? fallback.height ?? 1) || 1)
+      };
+    }
+
+    function scaledFrame(frame, scale) {
+      return {
+        left: Math.round(frame.left * scale),
+        top: Math.round(frame.top * scale),
+        width: Math.max(1, Math.round(frame.width * scale)),
+        height: Math.max(1, Math.round(frame.height * scale))
+      };
     }
 
     function xml(value) {
@@ -816,7 +872,10 @@ actor SandboxService {
       async export(options) {
         const format = (options && options.format) || "png";
         if (format === "layout") {
-          return new FileBlob(JSON.stringify(this.toJSON(), null, 2), "application/json");
+          return new FileBlob(JSON.stringify(presentationLayout(this, options && options.slide), null, 2), "application/json");
+        }
+        if (format === "png") {
+          return renderPresentationPng(this, options || {});
         }
         unsupportedArtifactToolFeature(`Presentation.export(${format})`);
       }
@@ -853,6 +912,7 @@ actor SandboxService {
     export class Shape {
       constructor(options) {
         this.options = options || {};
+        this.name = this.options.name;
         this.position = this.options.position || {};
         this.fill = this.options.fill;
         this.line = this.options.line;
@@ -866,7 +926,7 @@ actor SandboxService {
         this._text = value instanceof TextFrame ? value : new TextFrame(value);
       }
       toJSON() {
-        return { position: this.position, geometry: this.geometry, text: this.text.plain };
+        return { name: this.name, position: this.position, geometry: this.geometry, text: this.text.plain };
       }
     }
 
@@ -889,11 +949,86 @@ actor SandboxService {
     export class Image {
       constructor(options) {
         this.options = options || {};
+        this.name = this.options.name;
         this.position = this.options.position || {};
       }
       toJSON() {
-        return { position: this.position, alt: this.options.alt || "" };
+        return { name: this.name, position: this.position, alt: this.options.alt || "" };
       }
+    }
+
+    function exportedSlide(presentation, requestedSlide) {
+      return requestedSlide || presentation.slides.getItem(0) || presentation.slides.add();
+    }
+
+    function presentationLayout(presentation, requestedSlide) {
+      const slide = exportedSlide(presentation, requestedSlide);
+      const slideSize = presentation.slideSize || { width: 1280, height: 720 };
+      const elements = [];
+      slide.shapes.items.forEach((shape, index) => {
+        const frame = frameOf(shape.position, {});
+        const text = shape.text && typeof shape.text.plain === "string" ? shape.text.plain : "";
+        elements.push({
+          kind: "shape",
+          name: shape.name || `shape-${index + 1}`,
+          bbox: [frame.left, frame.top, frame.width, frame.height],
+          geometry: shape.geometry,
+          textPreview: text,
+          text,
+          resolvedFontSize: shape.text && shape.text.fontSize ? shape.text.fontSize : 24,
+          resolvedTextStyle: { fontSize: shape.text && shape.text.fontSize ? shape.text.fontSize : 24 },
+          textLayout: { lineCount: Math.max(1, String(text).split(/\r?\n/).length) }
+        });
+      });
+      slide.images.items.forEach((image, index) => {
+        const frame = frameOf(image.position, {});
+        elements.push({
+          kind: "image",
+          name: image.name || image.options.name || `image-${index + 1}`,
+          bbox: [frame.left, frame.top, frame.width, frame.height],
+          alt: image.options.alt || ""
+        });
+      });
+      return {
+        slide: { frame: { left: 0, top: 0, width: slideSize.width, height: slideSize.height } },
+        elements
+      };
+    }
+
+    function renderPresentationPng(presentation, options) {
+      const slide = exportedSlide(presentation, options.slide);
+      const slideSize = presentation.slideSize || { width: 1280, height: 720 };
+      const scale = Math.max(0.1, Math.min(2, Number(options.scale || 1) || 1));
+      const width = Math.max(1, Math.min(1800, Math.round(slideSize.width * scale)));
+      const height = Math.max(1, Math.min(1800, Math.round(slideSize.height * scale)));
+      const actualScale = Math.min(width / slideSize.width, height / slideSize.height);
+      const background = colorBytes(slide.background.fill || slide.background.color || slide.background, [255, 255, 255, 255]);
+      const canvas = makeCanvas(width, height, background);
+      slide.shapes.items.forEach((shape) => {
+        const frame = scaledFrame(frameOf(shape.position, {}), actualScale);
+        const fill = colorBytes(shape.fill, null);
+        if (fill) fillRect(canvas, frame.left, frame.top, frame.width, frame.height, fill);
+        const line = shape.line || {};
+        const stroke = colorBytes(line.fill || line.color, [0, 0, 0, 0]);
+        const lineWidth = Math.max(1, Math.round(Number(line.width || 1) * actualScale));
+        for (let i = 0; i < lineWidth; i += 1) {
+          strokeRect(canvas, frame.left + i, frame.top + i, Math.max(1, frame.width - i * 2), Math.max(1, frame.height - i * 2), stroke);
+        }
+        const text = shape.text && typeof shape.text.plain === "string" ? shape.text.plain : "";
+        if (text) {
+          const insets = (shape.text && shape.text.insets) || {};
+          const x = frame.left + Math.round(Number(insets.left || 8) * actualScale);
+          const y = frame.top + Math.round(Number(insets.top || 8) * actualScale);
+          drawText(canvas, text, x, y, Math.max(1, frame.width - 12), colorBytes(shape.text.color, [17, 24, 39, 255]));
+        }
+      });
+      slide.images.items.forEach((image) => {
+        const frame = scaledFrame(frameOf(image.position, {}), actualScale);
+        fillRect(canvas, frame.left, frame.top, frame.width, frame.height, [229, 231, 235, 255]);
+        strokeRect(canvas, frame.left, frame.top, frame.width, frame.height, [107, 114, 128, 255]);
+        drawText(canvas, image.options.alt || image.name || "IMAGE", frame.left + 8, frame.top + 8, Math.max(1, frame.width - 16), [55, 65, 81, 255]);
+      });
+      return new FileBlob(pngImage(width, height, canvas.rgba), MIME.png);
     }
 
     function slideXml(slide) {
@@ -1348,7 +1483,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:D4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:D4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ name: "title", position: { left: 40, top: 40, width: 400, height: 80 }, fill: "rgb(239,246,255)", line: { fill: "rgb(37,99,235)", width: 2 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const slidePreview = await deck.export({ slide, format: "png", scale: 0.5 }); if (slidePreview.mime !== "image/png" || (await slidePreview.arrayBuffer()).length < 100) throw new Error("presentation render compatibility failed"); await slidePreview.save("/tmp/primary-runtime-slide.png"); const layout = JSON.parse(await (await deck.export({ slide, format: "layout" })).text()); if (!layout.elements || layout.elements[0].name !== "title") throw new Error("presentation layout compatibility failed"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -1369,7 +1504,7 @@ actor SandboxService {
                 )
             }
             let unsupportedFullApiResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Presentation } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
+                #"js-exec -m -c 'import { Presentation } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Presentation.export(pdf)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "pdf" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
             )
 
             let report = Self.primaryRuntimeSkillReportJSON(
@@ -1501,7 +1636,7 @@ actor SandboxService {
               "status": "blocked",
               "blockers": [
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
-                "render APIs fail explicitly instead of returning fake visual verification",
+                "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
                 "presentation icon rendering requires sharp or skia-canvas native graphics packages"
