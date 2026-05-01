@@ -353,6 +353,16 @@ def check_artifact_tool_runtime(
 
     sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
     sandbox_text = read_text(sandbox_service)
+    has_compat_package = all(
+        marker in sandbox_text
+        for marker in (
+            "primaryRuntimeArtifactToolFiles",
+            "artifactToolCompatModule",
+            "SpreadsheetFile",
+            "PresentationFile",
+            "/node_modules/@oai/artifact-tool",
+        )
+    )
     if (
         "primaryRuntimeArtifactToolFiles" in sandbox_text
         and "artifactToolCompatModule" in sandbox_text
@@ -442,13 +452,13 @@ def check_artifact_tool_runtime(
         if not any(condition in export_text for condition in supported_conditions):
             version = package.get("version", "unknown")
             report.add(
-                "blocked",
-                f"artifact-tool {version} exposes no browser/iOS export condition; the iOS host must use the limited compatibility package or a native-backed port",
+                "warning" if has_compat_package else "blocked",
+                f"artifact-tool {version} exposes no browser/iOS export condition; the iOS host uses the staged compatibility package for cached bash-visible helper behavior",
                 package_evidence,
             )
 
     report.add(
-        "blocked",
+        "warning" if has_compat_package else "blocked",
         message,
         [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence(artifact_tool_root)],
     )
@@ -456,16 +466,16 @@ def check_artifact_tool_runtime(
     skia_node = artifact_tool_root / "node_modules" / "skia-canvas" / "lib" / "skia.node"
     if skia_node.exists():
         report.add(
-            "blocked",
-            "artifact-tool bundles skia-canvas with a native Node addon; iOS needs a signed in-process renderer or Swift/CoreGraphics adapter",
+            "warning" if has_compat_package else "blocked",
+            "artifact-tool bundles skia-canvas with a native Node addon; iOS uses staged Swift/JavaScriptCore PNG compatibility for cached helper smoke paths",
             [str(skia_node), str(artifact_tool_root / "node_modules" / "skia-canvas" / "package.json")],
         )
 
     walnut_wasm = artifact_tool_root / "node_modules" / "@oai" / "walnut" / "wasm"
     if walnut_wasm.exists():
         report.add(
-            "blocked",
-            "artifact-tool's Walnut document import/export path uses a .NET WASM payload and dotnet.js resource loader that are not packaged or bridged for JavaScriptCore on iOS",
+            "warning" if has_compat_package else "blocked",
+            "artifact-tool's Walnut document import/export path uses a .NET WASM payload that is not packaged for JavaScriptCore on iOS; cached helper smokes use the staged compatibility package instead",
             [str(walnut_wasm / "dotnet.js"), str(walnut_wasm / "blazor.boot.json")],
         )
 

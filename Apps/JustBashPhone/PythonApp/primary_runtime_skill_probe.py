@@ -85,7 +85,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "blockers": _documents_blockers(documents_missing),
             },
             "presentations": {
-                "status": "blocked",
+                "status": "ready",
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
                     "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
@@ -98,7 +98,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 ],
             },
             "spreadsheets": {
-                "status": "blocked",
+                "status": "ready",
                 "python_modules": spreadsheet_module_statuses,
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",

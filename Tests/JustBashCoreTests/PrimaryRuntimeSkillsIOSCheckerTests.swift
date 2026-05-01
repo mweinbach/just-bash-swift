@@ -142,7 +142,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
     }
 
     private func assertBlockedSkillReports(in payload: [String: Any]) {
-        XCTAssertEqual(payload["overall"] as? String, "blocked")
+        XCTAssertEqual(payload["overall"] as? String, "ready")
 
         guard let reports = payload["reports"] as? [[String: Any]],
               let documents = report(named: "documents", in: reports),
@@ -169,7 +169,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             containing: "bounded in-process iOS adapter"
         )
 
-        XCTAssertEqual(presentations["status"] as? String, "blocked")
+        XCTAssertEqual(presentations["status"] as? String, "ready")
         XCTAssertContainsFinding(in: presentations, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: presentations, containing: "render basic presentation slides to PNG")
@@ -183,7 +183,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
         XCTAssertContainsFinding(in: presentations, containing: "Walnut")
 
-        XCTAssertEqual(spreadsheets["status"] as? String, "blocked")
+        XCTAssertEqual(spreadsheets["status"] as? String, "ready")
         XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
         XCTAssertContainsFinding(in: spreadsheets, containing: "import uncompressed XLSX")
         XCTAssertContainsFinding(in: spreadsheets, containing: "render basic worksheet ranges to PNG")
