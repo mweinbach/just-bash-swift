@@ -9,6 +9,8 @@ configs:
 packages:
   JustBashPackage:
     path: ../..
+  SwiftCodexCorePackage:
+    path: ../../../SwiftCodexCore
 targets:
   JustBashPhone:
     type: application
@@ -20,6 +22,10 @@ targets:
         product: JustBash
       - package: JustBashPackage
         product: JustBashJavaScript
+      - package: SwiftCodexCorePackage
+        product: CodexCore
+      - package: SwiftCodexCorePackage
+        product: CodexCoreJustBash
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mweinbach.JustBashPhone

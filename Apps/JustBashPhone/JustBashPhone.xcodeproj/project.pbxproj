@@ -8,10 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		1D9C3B87C43D9AC8D2BF8854 /* JustBashJavaScript in Frameworks */ = {isa = PBXBuildFile; productRef = FF2C39BA67C53CF099049622 /* JustBashJavaScript */; };
+		2F5EF985DF025640ACB4B0A3 /* CodexCoreJustBash in Frameworks */ = {isa = PBXBuildFile; productRef = E30148527DFF1EBD6A332D7C /* CodexCoreJustBash */; };
 		440FAB9DDD3ADA7DD7F5F45F /* JustBash in Frameworks */ = {isa = PBXBuildFile; productRef = E0DA7933005A38BC5A92F220 /* JustBash */; };
 		4494E2093EA40495A1374EB5 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E2247ED400AADF344D154A /* AppIntents.swift */; };
 		4874ACF1AFAB85D78122CFDD /* ShellRunnerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771F29B6A80ACAD9D44AF829 /* ShellRunnerModel.swift */; };
 		676B3E7B69B93BF84B402522 /* JustBashPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C5A01D6BD4D493D92224C /* JustBashPhoneApp.swift */; };
+		6901F0A6E4AF3AE4DF775EEA /* CodexCore in Frameworks */ = {isa = PBXBuildFile; productRef = 500D66A8ACF81CAE656E9E80 /* CodexCore */; };
 		6A937DC4F7F07751F0179FB0 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE1EA3F41397E339A3A5A5C /* Python.xcframework */; };
 		8CC1537C2EE9FBA686EF29BE /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE1EA3F41397E339A3A5A5C /* Python.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D3785F3FD5844CCF8F69A8BB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEA50DAB5C427E8E8104E0F /* ContentView.swift */; };
@@ -34,6 +36,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		03D801285C11DDC1302F2963 /* SwiftCodexCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftCodexCore; path = ../../../SwiftCodexCore; sourceTree = SOURCE_ROOT; };
 		1A3F384452B74216E6D9F867 /* just-bash-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "just-bash-swift"; path = ../..; sourceTree = SOURCE_ROOT; };
 		1CE1EA3F41397E339A3A5A5C /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Python.xcframework; path = ../../Vendor/BeeWare/Python.xcframework; sourceTree = "<group>"; };
 		1CEA50DAB5C427E8E8104E0F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -53,6 +56,8 @@
 			files = (
 				440FAB9DDD3ADA7DD7F5F45F /* JustBash in Frameworks */,
 				1D9C3B87C43D9AC8D2BF8854 /* JustBashJavaScript in Frameworks */,
+				6901F0A6E4AF3AE4DF775EEA /* CodexCore in Frameworks */,
+				2F5EF985DF025640ACB4B0A3 /* CodexCoreJustBash in Frameworks */,
 				6A937DC4F7F07751F0179FB0 /* Python.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -80,6 +85,7 @@
 			isa = PBXGroup;
 			children = (
 				1A3F384452B74216E6D9F867 /* just-bash-swift */,
+				03D801285C11DDC1302F2963 /* SwiftCodexCore */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -136,6 +142,8 @@
 			packageProductDependencies = (
 				E0DA7933005A38BC5A92F220 /* JustBash */,
 				FF2C39BA67C53CF099049622 /* JustBashJavaScript */,
+				500D66A8ACF81CAE656E9E80 /* CodexCore */,
+				E30148527DFF1EBD6A332D7C /* CodexCoreJustBash */,
 			);
 			productName = JustBashPhone;
 			productReference = D6E0E3912DFB9D5A5FFFB7E0 /* JustBashPhone.app */;
@@ -166,6 +174,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				675B3BF902244CBD6E490E79 /* XCLocalSwiftPackageReference "../.." */,
+				62D2E0E12DA406D3A7847680 /* XCLocalSwiftPackageReference "../../../SwiftCodexCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 31FAC2630847222DAE9D9CA7 /* Products */;
@@ -454,6 +463,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		62D2E0E12DA406D3A7847680 /* XCLocalSwiftPackageReference "../../../SwiftCodexCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../SwiftCodexCore;
+		};
 		675B3BF902244CBD6E490E79 /* XCLocalSwiftPackageReference "../.." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../..;
@@ -461,9 +474,17 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		500D66A8ACF81CAE656E9E80 /* CodexCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CodexCore;
+		};
 		E0DA7933005A38BC5A92F220 /* JustBash */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = JustBash;
+		};
+		E30148527DFF1EBD6A332D7C /* CodexCoreJustBash */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CodexCoreJustBash;
 		};
 		FF2C39BA67C53CF099049622 /* JustBashJavaScript */ = {
 			isa = XCSwiftPackageProductDependency;
