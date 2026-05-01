@@ -100,6 +100,26 @@ def python_import_roots(root: Path) -> set[str]:
     return imports
 
 
+def python_import_usage(root: Path, import_to_package: dict[str, str]) -> dict[str, list[Path]]:
+    usage: dict[str, list[Path]] = {package: [] for package in import_to_package.values()}
+    for path in sorted(root.rglob("*.py")):
+        try:
+            tree = ast.parse(read_text(path), filename=str(path))
+        except SyntaxError:
+            continue
+        roots: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    roots.add(alias.name.split(".", 1)[0])
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".", 1)[0])
+        for import_name, package in import_to_package.items():
+            if import_name in roots:
+                usage.setdefault(package, []).append(path)
+    return {package: paths for package, paths in usage.items() if paths}
+
+
 def python_syntax_errors(root: Path) -> list[tuple[Path, SyntaxError]]:
     errors: list[tuple[Path, SyntaxError]] = []
     for path in sorted(root.rglob("*.py")):
@@ -475,6 +495,15 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
         "openpyxl": "openpyxl",
     }
     required = {py_pkg_map[name] for name in py_pkg_map if name in imports}
+    usage = python_import_usage(skill_dir, py_pkg_map)
+    if usage:
+        summary = ", ".join(f"{package} in {len(paths)} file(s)" for package, paths in sorted(usage.items()))
+        evidence = [str(path) for paths in usage.values() for path in paths[:3]]
+        report.add(
+            "info",
+            "Documents Python dependency scan inspected all helper scripts and detected: " + summary,
+            evidence[:12],
+        )
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
     native_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt")
     missing = sorted(pkg for pkg in required if pkg.lower() not in default_reqs and pkg.lower() not in native_reqs)

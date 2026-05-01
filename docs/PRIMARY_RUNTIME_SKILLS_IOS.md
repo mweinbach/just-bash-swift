@@ -208,7 +208,9 @@ these skills in an iOS build. The checker verifies the cached skill bundles and
 reports the iOS blockers above from the actual files in the cache and this repo.
 For cached bundles that include `manifest.txt` or Python helpers, it also
 checks manifest completeness and Python syntax without importing unavailable
-iOS-only dependencies such as `lxml` or `python-docx`.
+iOS-only dependencies such as `lxml` or `python-docx`. The Documents report also
+scans every Python helper for dependency usage so missing packages are tied to
+the actual helper files, not inferred from a hand-written package list.
 It accepts the primary-runtime cache root by default, or explicit family/version
 paths matching the three skill directories:
 

@@ -150,6 +150,9 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertEqual(documents["status"] as? String, "blocked")
         XCTAssertContainsFinding(in: documents, containing: "skill manifest is complete")
         XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
+        XCTAssertContainsFinding(in: documents, containing: "Documents Python dependency scan inspected all helper scripts")
+        XCTAssertContainsFinding(in: documents, containing: "python-docx")
+        XCTAssertContainsFinding(in: documents, containing: "lxml")
         XCTAssertContainsFinding(
             in: documents,
             containing: "real lxml/python-docx OOXML behavior"
