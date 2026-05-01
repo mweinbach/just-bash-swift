@@ -82,8 +82,8 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                     "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
                     "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                     "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
-                    "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
-                    "presentation icon rendering requires sharp or skia-canvas native graphics packages",
+                    "JavaScript helper scripts can invoke host-provided python3 through child_process; Python subprocess fan-out still needs an in-process iOS adapter",
+                    "ctx.addLucideIcon can use the staged pure-JS lucide SVG package; standalone PNG icon rendering still requires sharp or skia-canvas native graphics packages",
                 ],
             },
             "spreadsheets": {

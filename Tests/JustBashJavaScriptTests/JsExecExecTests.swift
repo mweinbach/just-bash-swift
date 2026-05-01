@@ -23,4 +23,20 @@ final class JsExecExecTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
         XCTAssertTrue(result.stdout.contains("0 hello"))
     }
+
+    func testSpawnSyncCanInvokeHostProvidedCommands() async {
+        let bash = Bash(options: .init(
+            customCommands: [
+                AnyBashCommand(name: "python3") { args, _ in
+                    .success("python3 bridge \(args.joined(separator: " "))\n")
+                }
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec(#"js-exec -c 'var r = require("child_process").spawnSync("python3", ["-c", "print(42)"]); console.log(r.status); console.log(r.stdout.trim ? r.stdout.trim() : String(r.stdout));'"#)
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "0\npython3 bridge -c print(42)\n")
+    }
 }

@@ -159,11 +159,18 @@ def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
     return evidence
 
 
-def presentation_subprocess_evidence(skill_dir: Path) -> list[str]:
+def presentation_js_spawn_evidence(skill_dir: Path) -> list[str]:
     scripts = skill_dir / "scripts"
     candidates = [
         (scripts / "build_artifact_deck.mjs", ["spawnSync"]),
         (scripts / "run_prompt_battle.mjs", ["spawnSync"]),
+    ]
+    return [line_for_any(path, needles) for path, needles in candidates if path.exists()]
+
+
+def presentation_python_subprocess_evidence(skill_dir: Path) -> list[str]:
+    scripts = skill_dir / "scripts"
+    candidates = [
         (scripts / "create_reference_slides.py", ["subprocess.run"]),
     ]
     return [line_for_any(path, needles) for path, needles in candidates if path.exists()]
@@ -522,12 +529,34 @@ def check_presentations(
         "@oai/artifact-tool is required; the iOS host has a limited compatibility package, but the full native rendering/import stack is not ported",
         artifact_tool_root,
     )
-    subprocess_evidence = presentation_subprocess_evidence(skill_dir)
-    if subprocess_evidence:
+    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
+    sandbox_text = read_text(sandbox_service)
+    if "lucidePackageJSON" in sandbox_text and "lucideCompatModule" in sandbox_text:
+        report.add(
+            "ok",
+            "iOS host stages a pure-JS lucide compatibility package so presentation ctx.addLucideIcon can produce SVG data URLs without sharp or skia-canvas",
+            [
+                line_for(sandbox_service, "lucidePackageJSON"),
+                line_for(sandbox_service, "lucideCompatModule"),
+            ],
+        )
+    js_spawn_evidence = presentation_js_spawn_evidence(skill_dir)
+    if js_spawn_evidence:
+        report.add(
+            "ok",
+            "JavaScript presentation helpers use child_process.spawnSync, and the iOS bridge can route those calls to sandbox-provided commands such as python3",
+            [
+                *js_spawn_evidence,
+                str(REPO_ROOT / "Sources/JustBashJavaScript/Bridges/ChildProcessBridge.swift"),
+                line_for(REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift", 'AnyBashCommand(name: "python3"'),
+            ],
+        )
+    python_subprocess_evidence = presentation_python_subprocess_evidence(skill_dir)
+    if python_subprocess_evidence:
         report.add(
             "blocked",
-            "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides; iOS needs in-process wrappers or sandbox-provided commands",
-            subprocess_evidence,
+            "presentation reference-slide helper uses Python subprocess fan-out; iOS needs an in-process wrapper or a sandbox command adapter for that path",
+            python_subprocess_evidence,
         )
     native_graphics_evidence = presentation_native_graphics_evidence(skill_dir)
     if native_graphics_evidence:

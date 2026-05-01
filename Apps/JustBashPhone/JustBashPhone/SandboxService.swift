@@ -295,17 +295,26 @@ actor SandboxService {
     }
 
     private static func primaryRuntimeArtifactToolFiles() -> [String: String] {
-        let packageRoots = [
+        let artifactToolRoots = [
             "/node_modules/@oai/artifact-tool",
             "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
         ]
-        return packageRoots.reduce(into: [:]) { files, packageRoot in
+        var files = artifactToolRoots.reduce(into: [:]) { files, packageRoot in
             files["\(packageRoot)/package.json"] = artifactToolPackageJSON
             files["\(packageRoot)/dist/artifact_tool.mjs"] = artifactToolCompatModule
             files["\(packageRoot)/dist/presentation-jsx/index.mjs"] = presentationJSXCompatModule
             files["\(packageRoot)/dist/presentation-jsx/jsx-runtime.mjs"] = presentationJSXRuntimeCompatModule
             files["\(packageRoot)/dist/presentation-jsx/jsx-dev-runtime.mjs"] = presentationJSXRuntimeCompatModule
         }
+        let lucideRoots = [
+            "/node_modules/lucide",
+            "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/lucide",
+        ]
+        for packageRoot in lucideRoots {
+            files["\(packageRoot)/package.json"] = lucidePackageJSON
+            files["\(packageRoot)/dist/index.mjs"] = lucideCompatModule
+        }
+        return files
     }
 
     private static let artifactToolPackageJSON = #"""
@@ -348,6 +357,49 @@ actor SandboxService {
     private static let presentationJSXRuntimeCompatModule = #"""
     import { Fragment, jsx, jsxs, jsxDEV } from "./index.mjs";
     export { Fragment, jsx, jsxs, jsxDEV };
+    """#
+
+    private static let lucidePackageJSON = #"""
+    {
+      "name": "lucide",
+      "version": "0.0.0-justbash-ios",
+      "type": "module",
+      "exports": {
+        ".": "./dist/index.mjs"
+      }
+    }
+    """#
+
+    private static let lucideCompatModule = #"""
+    function iconNode(name) {
+      return [
+        ["path", { d: "M4 4h16v16H4z" }, []],
+        ["path", { d: "M8 8h8v8H8z" }, []],
+        ["path", { d: "M9 13l2 2 4-5" }, []]
+      ];
+    }
+
+    export const icons = new Proxy({}, {
+      get(_target, prop) {
+        if (typeof prop !== "string") return undefined;
+        return iconNode(prop);
+      },
+      has() {
+        return true;
+      },
+      ownKeys() {
+        return ["Smartphone", "Presentation", "FileText", "ChartLine", "Table"];
+      },
+      getOwnPropertyDescriptor() {
+        return { enumerable: true, configurable: true };
+      }
+    });
+
+    export const Smartphone = iconNode("Smartphone");
+    export const Presentation = iconNode("Presentation");
+    export const FileText = iconNode("FileText");
+    export const ChartLine = iconNode("ChartLine");
+    export const Table = iconNode("Table");
     """#
 
     private static let artifactToolCompatModule = #"""
@@ -1491,11 +1543,14 @@ actor SandboxService {
             let esmResult = await ctx.executeSubshell?(
                 #"js-exec -m -c 'import fs from "node:fs/promises"; await fs.writeFile("/tmp/primary-runtime-esm.txt", "available"); console.log(await fs.readFile("/tmp/primary-runtime-esm.txt", "utf8"));'"#
             )
+            let childProcessPythonResult = await ctx.executeSubshell?(
+                #"js-exec -m -c 'import { spawnSync } from "node:child_process"; const result = spawnSync("python3", ["-c", "print(\"child-process-python\")"]); if (result.status !== 0) { console.error(result.stderr); process.exit(result.status || 1); } if (!String(result.stdout).includes("child-process-python")) throw new Error("python3 child_process bridge returned unexpected output: " + result.stdout); console.log("available");'"#
+            )
             let packageExportsResult: ExecResult?
             do {
                 try Self.stageArtifactToolPackageProbe(in: ctx)
                 packageExportsResult = await ctx.executeSubshell?(
-                    #"cd /tmp/primary-runtime-package-probe && js-exec -m -c 'import { runtimeName, resolveFs } from "@oai/artifact-tool"; import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx"; const fresh = await import("@oai/artifact-tool"); console.log(runtimeName); console.log(resolveFs()); console.log(jsx("slide").type); console.log(Fragment); console.log(fresh.runtimeName);'"#
+                    #"cd /tmp/primary-runtime-package-probe && js-exec -m -c 'import { runtimeName, resolveFs } from "@oai/artifact-tool"; import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx"; import { icons } from "lucide"; const fresh = await import("@oai/artifact-tool"); console.log(runtimeName); console.log(resolveFs()); console.log(jsx("slide").type); console.log(Fragment); console.log(fresh.runtimeName); console.log(icons.Smartphone[0][0]);'"#
                 )
             } catch {
                 packageExportsResult = ExecResult.failure(
@@ -1512,6 +1567,7 @@ actor SandboxService {
                 artifactToolResult: artifactToolResult,
                 nodeModuleResult: nodeModuleResult,
                 esmResult: esmResult,
+                childProcessPythonResult: childProcessPythonResult,
                 packageExportsResult: packageExportsResult,
                 unsupportedFullApiResult: unsupportedFullApiResult
             )
@@ -1542,6 +1598,7 @@ actor SandboxService {
         artifactToolResult: ExecResult?,
         nodeModuleResult: ExecResult?,
         esmResult: ExecResult?,
+        childProcessPythonResult: ExecResult?,
         packageExportsResult: ExecResult?,
         unsupportedFullApiResult: ExecResult?
     ) -> String {
@@ -1549,6 +1606,7 @@ actor SandboxService {
         let artifactToolStatus = artifactToolResult?.exitCode == 0 ? "available" : "blocked"
         let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
         let esmStatus = esmResult?.exitCode == 0 ? "available" : "blocked"
+        let childProcessPythonStatus = childProcessPythonResult?.exitCode == 0 ? "available" : "blocked"
         let packageExportsStatus = packageExportsResult?.exitCode == 0 ? "available" : "blocked"
         let unsupportedFullApiStatus = unsupportedFullApiResult?.exitCode == 0 ? "guarded" : "unguarded"
         let documentBlockers = pythonSkillBlockers(
@@ -1613,6 +1671,12 @@ actor SandboxService {
                 "stdout": "\(jsonEscaped(esmResult?.stdout ?? ""))",
                 "stderr": "\(jsonEscaped(esmResult?.stderr ?? ""))"
               },
+              "childProcessPythonBridge": {
+                "status": "\(childProcessPythonStatus)",
+                "exitCode": \(childProcessPythonResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(childProcessPythonResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(childProcessPythonResult?.stderr ?? ""))"
+              },
               "packageExportsCompatibility": {
                 "status": "\(packageExportsStatus)",
                 "exitCode": \(packageExportsResult?.exitCode ?? 127),
@@ -1638,7 +1702,7 @@ actor SandboxService {
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
                 "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
-                "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
+                "JavaScript helper scripts can invoke host-provided python3 through child_process; Python subprocess fan-out still needs an in-process iOS adapter",
                 "presentation icon rendering requires sharp or skia-canvas native graphics packages"
               ]
             },
@@ -1684,6 +1748,8 @@ actor SandboxService {
     private static func stageArtifactToolPackageProbe(in ctx: CommandContext) throws {
         let packageRoot = "/tmp/primary-runtime-package-probe/node_modules/@oai/artifact-tool"
         try ctx.fileSystem.createDirectory(path: "\(packageRoot)/dist/presentation-jsx", relativeTo: ctx.cwd, recursive: true)
+        let lucideRoot = "/tmp/primary-runtime-package-probe/node_modules/lucide"
+        try ctx.fileSystem.createDirectory(path: "\(lucideRoot)/dist", relativeTo: ctx.cwd, recursive: true)
         try ctx.fileSystem.writeFile(
             """
             {
@@ -1719,6 +1785,8 @@ actor SandboxService {
             to: "\(packageRoot)/dist/presentation-jsx/index.mjs",
             relativeTo: ctx.cwd
         )
+        try ctx.fileSystem.writeFile(lucidePackageJSON, to: "\(lucideRoot)/package.json", relativeTo: ctx.cwd)
+        try ctx.fileSystem.writeFile(lucideCompatModule, to: "\(lucideRoot)/dist/index.mjs", relativeTo: ctx.cwd)
     }
 
     private static func jsonEscaped(_ value: String) -> String {
