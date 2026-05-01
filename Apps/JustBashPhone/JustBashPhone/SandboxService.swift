@@ -774,6 +774,192 @@ actor SandboxService {
       };
     }
 
+    function a1(row, col) {
+      return `${colName(col)}${row + 1}`;
+    }
+
+    function formulaAddress(sheet, row, col) {
+      return `${sheet.name}!${a1(row, col)}`;
+    }
+
+    function resolveFormulaSheet(workbook, name, fallback) {
+      if (!name) return fallback;
+      return workbook.worksheets.getItem(String(name).replace(/^'|'$/g, "")) || fallback;
+    }
+
+    function asNumber(value) {
+      if (value == null || value === "") return 0;
+      if (typeof value === "number") return value;
+      if (typeof value === "boolean") return value ? 1 : 0;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    }
+
+    function flattenFormulaArgs(values) {
+      const out = [];
+      values.forEach((value) => {
+        if (Array.isArray(value)) out.push(...flattenFormulaArgs(value));
+        else out.push(value);
+      });
+      return out;
+    }
+
+    function rangeFormulaValues(sheet, bounds, seen) {
+      const out = [];
+      for (let r = 0; r < bounds.rows; r += 1) {
+        const row = [];
+        for (let c = 0; c < bounds.cols; c += 1) row.push(cellFormulaValue(sheet, bounds.row + r, bounds.col + c, seen));
+        out.push(row);
+      }
+      return out;
+    }
+
+    function formulaDependencies(sheet, formula) {
+      const deps = [];
+      const text = String(formula || "").replace(/^=/, "");
+      const pushRange = (targetSheet, start, end) => {
+        const rangeSheet = resolveFormulaSheet(sheet.workbook, targetSheet, sheet);
+        const first = parseCell(start.replace(/\$/g, ""));
+        const last = parseCell(end.replace(/\$/g, ""));
+        const rowStart = Math.min(first.row, last.row);
+        const rowEnd = Math.max(first.row, last.row);
+        const colStart = Math.min(first.col, last.col);
+        const colEnd = Math.max(first.col, last.col);
+        for (let row = rowStart; row <= rowEnd; row += 1) {
+          for (let col = colStart; col <= colEnd; col += 1) deps.push({ sheet: rangeSheet, row, col });
+        }
+      };
+      text.replace(/(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_ .]*))!)?(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/g, (_, quotedSheet, bareSheet, start, end) => {
+        pushRange(quotedSheet || bareSheet || "", start, end);
+        return "";
+      });
+      text.replace(/(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_ .]*))!)?(\$?[A-Za-z]+\$?\d+)/g, (_, quotedSheet, bareSheet, ref) => {
+        const targetSheet = resolveFormulaSheet(sheet.workbook, quotedSheet || bareSheet || "", sheet);
+        const cell = parseCell(ref.replace(/\$/g, ""));
+        deps.push({ sheet: targetSheet, row: cell.row, col: cell.col });
+        return "";
+      });
+      return deps;
+    }
+
+    function evaluateFormula(sheet, formula, row, col, seen) {
+      let expr = String(formula || "").trim().replace(/^=/, "").replace(/\$/g, "");
+      const activeSeen = new Set(seen || []);
+      const callRange = (sheetName, start, end) => {
+        const targetSheet = resolveFormulaSheet(sheet.workbook, sheetName, sheet);
+        const first = parseCell(start);
+        const last = parseCell(end);
+        return rangeFormulaValues(targetSheet, {
+          row: Math.min(first.row, last.row),
+          col: Math.min(first.col, last.col),
+          rows: Math.abs(last.row - first.row) + 1,
+          cols: Math.abs(last.col - first.col) + 1
+        }, activeSeen);
+      };
+      const callCell = (sheetName, ref) => {
+        const targetSheet = resolveFormulaSheet(sheet.workbook, sheetName, sheet);
+        const cell = parseCell(ref);
+        return cellFormulaValue(targetSheet, cell.row, cell.col, activeSeen);
+      };
+      const placeholders = [];
+      expr = expr.replace(/(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_ .]*))!)?([A-Za-z]+\d+):([A-Za-z]+\d+)/g, (_, quotedSheet, bareSheet, start, end) => {
+        const token = `__JB_FORMULA_${placeholders.length}__`;
+        placeholders.push(`RANGE(${JSON.stringify(quotedSheet || bareSheet || "")},${JSON.stringify(start)},${JSON.stringify(end)})`);
+        return token;
+      });
+      expr = expr.replace(/(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_ .]*))!)?([A-Za-z]+\d+)/g, (_, quotedSheet, bareSheet, ref) => {
+        const token = `__JB_FORMULA_${placeholders.length}__`;
+        placeholders.push(`CELL(${JSON.stringify(quotedSheet || bareSheet || "")},${JSON.stringify(ref)})`);
+        return token;
+      });
+      placeholders.forEach((replacement, index) => {
+        expr = expr.replace(`__JB_FORMULA_${index}__`, replacement);
+      });
+      expr = expr.replace(/\^/g, "**").replace(/<>/g, "!=");
+      const funcs = {
+        SUM: (...args) => flattenFormulaArgs(args).reduce((sum, value) => sum + asNumber(value), 0),
+        AVERAGE: (...args) => {
+          const values = flattenFormulaArgs(args).filter((value) => value !== null && value !== "");
+          return values.length ? values.reduce((sum, value) => sum + asNumber(value), 0) / values.length : 0;
+        },
+        MIN: (...args) => Math.min(...flattenFormulaArgs(args).map(asNumber)),
+        MAX: (...args) => Math.max(...flattenFormulaArgs(args).map(asNumber)),
+        COUNT: (...args) => flattenFormulaArgs(args).filter((value) => value !== null && value !== "" && Number.isFinite(Number(value))).length,
+        COUNTA: (...args) => flattenFormulaArgs(args).filter((value) => value !== null && value !== "").length,
+        ROUND: (value, digits = 0) => Number(asNumber(value).toFixed(asNumber(digits))),
+        ABS: (value) => Math.abs(asNumber(value)),
+        IF: (condition, yesValue, noValue = false) => condition ? yesValue : noValue,
+        IFERROR: (value, fallback) => (value == null || String(value).startsWith("#")) ? fallback : value
+      };
+      try {
+        return Function("CELL", "RANGE", ...Object.keys(funcs), `"use strict"; return (${expr});`)(
+          callCell,
+          callRange,
+          ...Object.values(funcs)
+        );
+      } catch (error) {
+        throw new Error(`Unsupported formula at ${formulaAddress(sheet, row, col)}: ${formula} (${error.message})`);
+      }
+    }
+
+    function cellFormulaValue(sheet, row, col, seen) {
+      const key = `${sheet.name}:${row},${col}`;
+      const activeSeen = new Set(seen || []);
+      if (activeSeen.has(key)) throw new Error(`Circular formula reference at ${formulaAddress(sheet, row, col)}`);
+      const record = sheet.cells[`${row},${col}`] || {};
+      if (!record.formula) return record.value ?? null;
+      activeSeen.add(key);
+      return evaluateFormula(sheet, record.formula, row, col, activeSeen);
+    }
+
+    function inspectFormulaErrors(workbook, options) {
+      const errors = [];
+      workbook.worksheets.items.forEach((sheet) => {
+        Object.keys(sheet.cells).forEach((key) => {
+          const record = sheet.cells[key];
+          if (!record.formula) return;
+          const [row, col] = key.split(",").map((n) => Number(n));
+          try {
+            cellFormulaValue(sheet, row, col, new Set());
+          } catch (error) {
+            errors.push({ address: formulaAddress(sheet, row, col), formula: record.formula, error: error.message });
+          }
+        });
+      });
+      return {
+        ndjson: [
+          JSON.stringify({ kind: "workbook", sheets: workbook.worksheets.items.map((sheet) => sheet.name), options: options || {} }),
+          ...errors.map((error) => JSON.stringify({ kind: "formulaError", ...error }))
+        ].join("\n") + "\n",
+        errors
+      };
+    }
+
+    function traceCell(sheet, row, col, seen) {
+      const key = `${sheet.name}:${row},${col}`;
+      const activeSeen = new Set(seen || []);
+      const record = sheet.cells[`${row},${col}`] || {};
+      if (activeSeen.has(key)) return { address: formulaAddress(sheet, row, col), error: "circular" };
+      activeSeen.add(key);
+      const node = {
+        address: formulaAddress(sheet, row, col),
+        formula: record.formula || null,
+        value: null,
+        dependencies: []
+      };
+      try {
+        node.value = cellFormulaValue(sheet, row, col, new Set(seen || []));
+      } catch (error) {
+        node.error = error.message;
+      }
+      if (record.formula) {
+        node.dependencies = formulaDependencies(sheet, record.formula)
+          .slice(0, 200)
+          .map((dep) => traceCell(dep.sheet, dep.row, dep.col, activeSeen));
+      }
+      return node;
+    }
+
     function parseSharedStrings(xmlText) {
       const strings = [];
       const matches = String(xmlText).match(/<si\b[\s\S]*?<\/si>/g) || [];
@@ -1170,26 +1356,37 @@ actor SandboxService {
           for (let c = 0; c < cols; c += 1) {
             const x = c * cellWidth;
             const y = r * cellHeight;
-            const record = sheet.cells[`${range.bounds.row + r},${range.bounds.col + c}`] || {};
-            const value = record.formula || record.value;
+            let value = null;
+            try {
+              value = cellFormulaValue(sheet, range.bounds.row + r, range.bounds.col + c, new Set());
+            } catch (error) {
+              value = "#ERROR!";
+            }
             strokeRect(canvas, x, y, cellWidth + 1, cellHeight + 1, grid);
             drawText(canvas, value == null ? "" : value, x + 6, y + 8, cellWidth - 12, text);
           }
         }
         return new FileBlob(pngImage(width, height, canvas.rgba), MIME.png);
       }
+      calculate() {
+        const scan = inspectFormulaErrors(this, { summary: "calculate" });
+        if (scan.errors.length) throw new Error(`Formula calculation failed with ${scan.errors.length} error(s)`);
+        return scan;
+      }
       inspect(options) {
-        return { ndjson: JSON.stringify({ kind: "workbook", sheets: this.worksheets.items.map((s) => s.name), options: options || {} }) + "\n" };
+        return inspectFormulaErrors(this, options || {});
       }
       help(query) {
         return { ndjson: JSON.stringify({ query, note: "Just Bash iOS artifact-tool compatibility surface" }) + "\n" };
       }
       trace(address) {
+        const parts = String(address).split("!");
+        const sheet = parts.length > 1 ? this.worksheets.getItem(parts[0].replace(/^'|'$/g, "")) : this.getActiveWorksheet();
+        const cell = parseCell(parts.length > 1 ? parts[1] : parts[0]);
+        const tree = traceCell(sheet || this.getActiveWorksheet(), cell.row, cell.col, new Set());
         return {
-          ndjson: JSON.stringify({
-            address,
-            note: "Formula tracing is structural only in the Just Bash iOS artifact-tool compatibility surface"
-          }) + "\n"
+          ndjson: JSON.stringify(tree) + "\n",
+          tree
         };
       }
     }
@@ -1337,7 +1534,13 @@ actor SandboxService {
         const out = [];
         for (let r = 0; r < this.bounds.rows; r += 1) {
           const row = [];
-          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).value ?? null);
+          for (let c = 0; c < this.bounds.cols; c += 1) {
+            try {
+              row.push(cellFormulaValue(this.sheet, this.bounds.row + r, this.bounds.col + c, new Set()));
+            } catch (error) {
+              row.push("#ERROR!");
+            }
+          }
           out.push(row);
         }
         return out;
@@ -1370,8 +1573,18 @@ actor SandboxService {
       get displayFormulas() {
         return this.formulas;
       }
+      get displayValues() {
+        return this.values;
+      }
       get formulaInfos() {
-        return this.formulas.map((row) => row.map((formula) => formula ? { formula } : null));
+        return this.formulas.map((row, r) => row.map((formula, c) => {
+          if (!formula) return null;
+          try {
+            return { formula, value: cellFormulaValue(this.sheet, this.bounds.row + r, this.bounds.col + c, new Set()) };
+          } catch (error) {
+            return { formula, error: error.message };
+          }
+        }));
       }
       write(payload) {
         if (Array.isArray(payload)) {
@@ -1535,7 +1748,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:D4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ name: "title", position: { left: 40, top: 40, width: 400, height: 80 }, fill: "rgb(239,246,255)", line: { fill: "rgb(37,99,235)", width: 2 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const slidePreview = await deck.export({ slide, format: "png", scale: 0.5 }); if (slidePreview.mime !== "image/png" || (await slidePreview.arrayBuffer()).length < 100) throw new Error("presentation render compatibility failed"); await slidePreview.save("/tmp/primary-runtime-slide.png"); const layout = JSON.parse(await (await deck.export({ slide, format: "layout" })).text()); if (!layout.elements || layout.elements[0].name !== "title") throw new Error("presentation layout compatibility failed"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], [2, 3]]; ws.getRange("E1:E3").formulas = [["=SUM(A2:B2)"], ["=AVERAGE(A2:B2)"], ["=E1*2"]]; if (ws.getRange("E1:E3").values[0][0] !== 5 || ws.getRange("E1:E3").values[2][0] !== 10) throw new Error("formula compatibility failed"); if ((await wb.inspect({ kind: "formula" })).errors.length) throw new Error("formula error scan failed"); if (!JSON.parse(wb.trace("Smoke!E3").ndjson).dependencies.length) throw new Error("trace dependencies unavailable"); await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:E4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ name: "title", position: { left: 40, top: 40, width: 400, height: 80 }, fill: "rgb(239,246,255)", line: { fill: "rgb(37,99,235)", width: 2 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const slidePreview = await deck.export({ slide, format: "png", scale: 0.5 }); if (slidePreview.mime !== "image/png" || (await slidePreview.arrayBuffer()).length < 100) throw new Error("presentation render compatibility failed"); await slidePreview.save("/tmp/primary-runtime-slide.png"); const layout = JSON.parse(await (await deck.export({ slide, format: "layout" })).text()); if (!layout.elements || layout.elements[0].name !== "title") throw new Error("presentation layout compatibility failed"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#

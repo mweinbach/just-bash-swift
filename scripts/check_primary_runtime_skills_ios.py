@@ -607,11 +607,29 @@ def check_spreadsheets(
         "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render behavior is not ported",
         artifact_tool_root,
     )
-    report.add(
-        "blocked",
-        "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
-        spreadsheet_calculation_evidence(skill_md),
-    )
+    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
+    sandbox_text = read_text(sandbox_service)
+    if all(marker in sandbox_text for marker in ("evaluateFormula", "inspectFormulaErrors", "traceCell")):
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility computes common arithmetic/range formulas, scans formula errors, and returns dependency trace trees",
+            [
+                line_for(sandbox_service, "function evaluateFormula"),
+                line_for(sandbox_service, "function inspectFormulaErrors"),
+                line_for(sandbox_service, "function traceCell"),
+            ],
+        )
+        report.add(
+            "warning",
+            "spreadsheet formula support is a bounded iOS compatibility evaluator, not the full Excel calculation engine",
+            spreadsheet_calculation_evidence(skill_md),
+        )
+    else:
+        report.add(
+            "blocked",
+            "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
+            spreadsheet_calculation_evidence(skill_md),
+        )
     report.add(
         "blocked",
         "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",

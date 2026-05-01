@@ -175,10 +175,10 @@ iOS blockers:
 - `Workbook.render(...)` has a bounded pure-JS PNG path for visible cell ranges,
   and `.xlsx` import/export is a bounded compatibility path for uncompressed
   OOXML, not a full Excel inspection/render stack.
-- The skill's completion criteria require formulas to compute, formula-error
-  scans to work, and `workbook.trace(...)` to return real dependency trees. The
-  iOS compatibility package stores formulas structurally but does not evaluate
-  them.
+- The iOS compatibility package now evaluates common arithmetic/range formulas,
+  scans formula errors, and returns `workbook.trace(...)` dependency trees. This
+  is still a bounded compatibility evaluator, not Excel's full calculation
+  engine.
 - Chart and dashboard workflows require native Excel chart export plus rendered
   visual verification. The iOS compatibility package exposes only placeholder
   chart objects and does not export or render real charts.

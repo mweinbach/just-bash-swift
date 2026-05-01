@@ -92,7 +92,8 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
                     "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
-                    "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
+                    "bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged for common arithmetic/range formulas",
+                    "full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine",
                     "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
                     (
                         "missing optional spreadsheet Python modules: " + ", ".join(spreadsheet_missing)
