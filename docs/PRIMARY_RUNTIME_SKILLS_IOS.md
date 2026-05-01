@@ -234,6 +234,29 @@ compatibility package, but full Documents rendering plus high-fidelity
 artifact-tool render/import behavior still require desktop/container runtime
 capabilities that this iOS runtime does not yet provide.
 
+Use the helper smoke harness to verify representative cached helper entrypoints
+against the same staged JavaScript packages the iPhone host injects:
+
+```bash
+python3 scripts/smoke_primary_runtime_skill_helpers.py --json
+```
+
+This stages `@oai/artifact-tool`, `@oai/artifact-tool/presentation-jsx`,
+`lucide`, and `sharp` from `SandboxService.swift` under a temporary Codex
+runtime-shaped `HOME`, then runs:
+
+- the cached Presentations `build_artifact_deck.mjs` helper with a generated
+  slide module, preview PNG, layout JSON, and PPTX export
+- the cached Presentations `render_lucide_icon.mjs` helper through the staged
+  pure-JS `sharp` compatibility package
+- a spreadsheet API smoke covering formulas, inspect, trace, chart creation,
+  PNG render, XLSX export, and XLSX import through the staged compatibility
+  package
+
+Passing this smoke harness proves those bounded staged paths are runnable. It
+does not clear the strict readiness blockers for full Documents render/OOXML
+behavior or high-fidelity artifact-tool native render/import parity.
+
 ## Latest Simulator Smoke
 
 On May 1, 2026, the iPhone host was installed on a booted iPhone 17 Pro Max

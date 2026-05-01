@@ -35,6 +35,38 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         assertBlockedSkillReports(in: payload)
     }
 
+    func testStagedCompatibilityCanRunRepresentativeCachedHelpers() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let smokeScript = repoRoot.appendingPathComponent("scripts/smoke_primary_runtime_skill_helpers.py")
+        let presentationsSkillFamily = URL(
+            fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations"
+        )
+
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: smokeScript.path)
+                && FileManager.default.fileExists(atPath: presentationsSkillFamily.path),
+            "Primary-runtime presentation/spreadsheet skill cache is not available on this machine"
+        )
+        try XCTSkipUnless(commandSucceeds("node", "--version"), "Node is required for cached helper smoke")
+
+        let payload = try runJSONCommand(
+            ["python3", smokeScript.path, "--json"],
+            repoRoot: repoRoot
+        )
+
+        XCTAssertEqual(payload["overall"] as? String, "ok")
+        guard let checks = payload["checks"] as? [[String: Any]] else {
+            XCTFail("Missing smoke checks in payload: \(payload)")
+            return
+        }
+        XCTAssertContainsCheck(named: "presentations.build_artifact_deck", in: checks)
+        XCTAssertContainsCheck(named: "presentations.render_lucide_icon", in: checks)
+        XCTAssertContainsCheck(named: "spreadsheets.artifact_tool_api", in: checks)
+    }
+
     private func runChecker(
         _ checker: URL,
         repoRoot: URL,
@@ -48,9 +80,18 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             "Primary-runtime skill cache is not available on this machine"
         )
 
+        return try runJSONCommand(["python3", checker.path, "--json"] + extraArguments, repoRoot: repoRoot)
+    }
+
+    private func runJSONCommand(_ arguments: [String], repoRoot: URL) throws -> [String: Any] {
+        let output = try runCommand(arguments, repoRoot: repoRoot)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: output.stdout) as? [String: Any])
+    }
+
+    private func runCommand(_ arguments: [String], repoRoot: URL) throws -> (stdout: Data, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", checker.path, "--json"] + extraArguments
+        process.arguments = arguments
         process.currentDirectoryURL = repoRoot
 
         let stdout = Pipe()
@@ -67,8 +108,18 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             encoding: .utf8
         ) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, errorOutput)
+        return (output, errorOutput)
+    }
 
-        return try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? [String: Any])
+    private func commandSucceeds(_ arguments: String...) throws -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = Array(arguments)
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     private func assertBlockedSkillReports(in payload: [String: Any]) {
@@ -138,5 +189,18 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    private func XCTAssertContainsCheck(
+        named name: String,
+        in checks: [[String: Any]],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let check = checks.first(where: { $0["name"] as? String == name }) else {
+            XCTFail("Missing smoke check named \(name): \(checks)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(check["status"] as? String, "ok", file: file, line: line)
     }
 }
