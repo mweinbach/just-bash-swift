@@ -113,6 +113,36 @@ def js_import_specs(root: Path) -> set[str]:
     return specs
 
 
+def version_key(path: Path) -> tuple[int, ...]:
+    parts = [int(part) for part in re.findall(r"\d+", path.name)]
+    return tuple(parts) if parts else (0,)
+
+
+def resolve_cached_plugin_root(cache_root: Path, family: str, plugin_name: str) -> Path:
+    """Find the cached version directory for a skill family.
+
+    Accepts either the primary-runtime cache root, a family directory such as
+    `.../documents`, or a concrete version directory.
+    """
+
+    candidates: list[Path] = []
+    direct_skill = cache_root / "skills" / plugin_name / "SKILL.md"
+    if (cache_root / ".codex-plugin" / "plugin.json").exists() and direct_skill.exists():
+        candidates.append(cache_root)
+
+    family_root = cache_root if cache_root.name == family else cache_root / family
+    if family_root.exists():
+        for child in family_root.iterdir():
+            skill_md = child / "skills" / plugin_name / "SKILL.md"
+            plugin_json = child / ".codex-plugin" / "plugin.json"
+            if child.is_dir() and skill_md.exists() and plugin_json.exists():
+                candidates.append(child)
+
+    if not candidates:
+        return family_root / "missing"
+    return sorted(candidates, key=version_key)[-1]
+
+
 def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
     """Return representative uses that need real lxml/python-docx behavior."""
 
@@ -226,7 +256,7 @@ def validate_plugin(report: SkillReport, plugin_name: str) -> Path | None:
 
 
 def check_documents(cache_root: Path) -> SkillReport:
-    root = cache_root / "documents" / "26.430.10722"
+    root = resolve_cached_plugin_root(cache_root, "documents", "documents")
     report = SkillReport("documents", root)
     skill_dir = validate_plugin(report, "documents")
     if skill_dir is None:
@@ -286,7 +316,7 @@ def check_documents(cache_root: Path) -> SkillReport:
 
 
 def check_presentations(cache_root: Path) -> SkillReport:
-    root = cache_root / "presentations" / "26.430.10722"
+    root = resolve_cached_plugin_root(cache_root, "presentations", "presentations")
     report = SkillReport("presentations", root)
     skill_dir = validate_plugin(report, "presentations")
     if skill_dir is None:
@@ -361,7 +391,7 @@ def check_presentations(cache_root: Path) -> SkillReport:
 
 
 def check_spreadsheets(cache_root: Path) -> SkillReport:
-    root = cache_root / "spreadsheets" / "26.430.10722"
+    root = resolve_cached_plugin_root(cache_root, "spreadsheets", "spreadsheets")
     report = SkillReport("spreadsheets", root)
     skill_dir = validate_plugin(report, "spreadsheets")
     if skill_dir is None:
