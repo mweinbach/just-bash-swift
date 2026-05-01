@@ -292,6 +292,21 @@ func jsValueToData(_ value: JSValue) -> Data {
     if value.isString {
         return Data((value.toString() ?? "").utf8)
     }
+    if let lengthValue = value.objectForKeyedSubscript("length"), !lengthValue.isUndefined {
+        let length = Int(lengthValue.toInt32())
+        if length >= 0, length < 100_000_000 {
+            var bytes: [UInt8] = []
+            bytes.reserveCapacity(length)
+            for index in 0..<length {
+                if let entry = value.objectAtIndexedSubscript(index), !entry.isUndefined {
+                    bytes.append(UInt8(truncatingIfNeeded: entry.toInt32()))
+                }
+            }
+            if bytes.count == length {
+                return Data(bytes)
+            }
+        }
+    }
     if let typed = value.toObject() as? [Any] {
         var bytes: [UInt8] = []
         for entry in typed {

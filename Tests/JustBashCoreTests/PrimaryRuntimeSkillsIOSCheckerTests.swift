@@ -190,7 +190,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
 
         XCTAssertEqual(spreadsheets["status"] as? String, "ready")
         XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "import uncompressed XLSX")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "compressed XLSX")
         XCTAssertContainsFinding(in: spreadsheets, containing: "render basic worksheet ranges to PNG")
         XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: spreadsheets, containing: "computes common arithmetic/range formulas")

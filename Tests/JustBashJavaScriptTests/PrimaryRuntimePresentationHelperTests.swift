@@ -96,6 +96,14 @@ final class PrimaryRuntimePresentationHelperTests: XCTestCase {
         )
         XCTAssertEqual(quality.exitCode, 0, "stdout: \(quality.stdout)\nstderr: \(quality.stderr)")
 
+        let importRoundTrip = await bash.exec(
+            """
+            js-exec -m -c 'import { FileBlob, PresentationFile } from "@oai/artifact-tool"; const deck = await PresentationFile.importPptx(await FileBlob.load("/workspace/output/deck.pptx")); if (deck.slides.count !== 1) throw new Error("pptx import slide count failed"); const layout = JSON.parse(await (await deck.export({ slide: deck.slides.getItem(0), format: "layout" })).text()); if (!layout.elements.some((element) => String(element.text || "").includes("iOS staged helper smoke"))) throw new Error("pptx import text failed"); console.log("ok");'
+            """
+        )
+        XCTAssertEqual(importRoundTrip.exitCode, 0, "stdout: \(importRoundTrip.stdout)\nstderr: \(importRoundTrip.stderr)")
+        XCTAssertEqual(importRoundTrip.stdout, "ok\n")
+
         let artifacts = await bash.exec(
             """
             test -s output/rendered-slide.png && \

@@ -61,7 +61,7 @@ final class ZipCommandTests: XCTestCase {
         let cat = await bash.exec("cat /tmp/round.txt")
         XCTAssertEqual(cat.stdout, "Round trip content\n")
     }
-    
+
     func testZipHelp() async {
         let bash = Bash()
         let result = await bash.exec("zip -h")

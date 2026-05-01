@@ -545,11 +545,20 @@ actor SandboxService {
 
     private static let artifactToolCompatModule = #"""
     import fs from "node:fs/promises";
+    import { spawnSync } from "node:child_process";
+    import { createRequire as __createRequire } from "node:module";
+
+    const require = __createRequire(import.meta.url);
+    export const runtimeName = "artifact-tool";
+    export function resolveFs() {
+      return require.resolve("node:fs");
+    }
 
     const MIME = {
       png: "image/png",
       pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       csv: "text/csv",
       txt: "text/plain",
       json: "application/json"
@@ -697,7 +706,7 @@ actor SandboxService {
       ]);
     }
 
-    function unzipStored(filesBlob) {
+    function unzipLocalZip(filesBlob) {
       const data = bytes(filesBlob);
       const files = {};
       let offset = 0;
@@ -715,10 +724,13 @@ actor SandboxService {
         const nameLength = u16At(data, offset + 26);
         const extraLength = u16At(data, offset + 28);
         if (flags & 8) {
-          throw new Error("SpreadsheetFile.importXlsx supports stored ZIP entries without data descriptors on iOS");
+          throw new Error("ZIP entries with data descriptors require sandbox unzip fallback on iOS");
         }
-        if (method !== 0) {
-          throw new Error("SpreadsheetFile.importXlsx supports uncompressed XLSX files only on iOS");
+        if (method !== 0 && method !== 8) {
+          throw new Error(`ZIP compression method ${method} is not supported on iOS`);
+        }
+        if (method === 8) {
+          throw new Error("Deflated ZIP entries require sandbox unzip fallback on iOS");
         }
         const nameStart = offset + 30;
         const dataStart = nameStart + nameLength + extraLength;
@@ -727,6 +739,55 @@ actor SandboxService {
         offset = dataStart + compressedSize;
       }
       return files;
+    }
+
+    let unzipSequence = 0;
+
+    async function rmForce(path) {
+      try {
+        await fs.rm(path, { recursive: true, force: true });
+      } catch (_) {}
+    }
+
+    async function unzipViaSandbox(filesBlob, reason) {
+      const data = bytes(filesBlob);
+      const token = `${Date.now()}-${unzipSequence++}`;
+      const baseDir = `${process.cwd()}/.justbash-artifacts`;
+      const archivePath = `${baseDir}/artifact-${token}.zip`;
+      const outputDir = `${baseDir}/artifact-${token}`;
+      await fs.mkdir(baseDir, { recursive: true });
+      await fs.writeFile(archivePath, data);
+      await rmForce(outputDir);
+      await fs.mkdir(outputDir, { recursive: true });
+      const result = spawnSync("unzip", ["-q", "-o", archivePath, "-d", outputDir], { timeout: 30000 });
+      if (result.status !== 0) {
+        const stderr = result.stderr || result.stdout || "unknown unzip failure";
+        throw new Error(`artifact-tool iOS unzip fallback failed after ${reason.message}: ${stderr}`);
+      }
+      const files = {};
+      async function walk(relativePath) {
+        const directory = relativePath ? `${outputDir}/${relativePath}` : outputDir;
+        const names = await fs.readdir(directory);
+        for (const name of names) {
+          const childRelative = relativePath ? `${relativePath}/${name}` : name;
+          const childPath = `${outputDir}/${childRelative}`;
+          const stat = await fs.stat(childPath);
+          if (stat.isDirectory()) await walk(childRelative);
+          else files[childRelative] = await fs.readFile(childPath);
+        }
+      }
+      await walk("");
+      await rmForce(outputDir);
+      await rmForce(archivePath);
+      return files;
+    }
+
+    async function unzipOfficeZip(filesBlob) {
+      try {
+        return unzipLocalZip(filesBlob);
+      } catch (error) {
+        return await unzipViaSandbox(filesBlob, error);
+      }
     }
 
     const FONT_3X5 = {
@@ -960,6 +1021,74 @@ actor SandboxService {
       return out;
     }
 
+    export function SUM(...args) {
+      return flattenFormulaArgs(args).reduce((sum, value) => sum + asNumber(value), 0);
+    }
+
+    export function AVERAGE(...args) {
+      const values = flattenFormulaArgs(args).filter((value) => value !== null && value !== "");
+      return values.length ? values.reduce((sum, value) => sum + asNumber(value), 0) / values.length : 0;
+    }
+
+    export function MIN(...args) {
+      return Math.min(...flattenFormulaArgs(args).map(asNumber));
+    }
+
+    export function MAX(...args) {
+      return Math.max(...flattenFormulaArgs(args).map(asNumber));
+    }
+
+    export function COUNT(...args) {
+      return flattenFormulaArgs(args).filter((value) => value !== null && value !== "" && Number.isFinite(Number(value))).length;
+    }
+
+    export function COUNTA(...args) {
+      return flattenFormulaArgs(args).filter((value) => value !== null && value !== "").length;
+    }
+
+    export function ROUND(value, digits = 0) {
+      return Number(asNumber(value).toFixed(asNumber(digits)));
+    }
+
+    export function ROUNDDOWN(value, digits = 0) {
+      const factor = 10 ** asNumber(digits);
+      return Math.trunc(asNumber(value) * factor) / factor;
+    }
+
+    export function ROUNDUP(value, digits = 0) {
+      const factor = 10 ** asNumber(digits);
+      const number = asNumber(value) * factor;
+      return (number < 0 ? Math.floor(number) : Math.ceil(number)) / factor;
+    }
+
+    export function ABS(value) { return Math.abs(asNumber(value)); }
+    export function POWER(value, exponent) { return asNumber(value) ** asNumber(exponent); }
+    export function SQRT(value) { return Math.sqrt(asNumber(value)); }
+    export function IF(condition, yesValue, noValue = false) { return condition ? yesValue : noValue; }
+    export function IFERROR(value, fallback) { return (value == null || String(value).startsWith("#")) ? fallback : value; }
+    export function AND(...args) { return flattenFormulaArgs(args).every(Boolean); }
+    export function OR(...args) { return flattenFormulaArgs(args).some(Boolean); }
+    export function NOT(value) { return !value; }
+    export function CONCAT(...args) { return flattenFormulaArgs(args).map((value) => value == null ? "" : String(value)).join(""); }
+    export const CONCATENATE = CONCAT;
+    export function LEN(value) { return String(value == null ? "" : value).length; }
+    export function LEFT(value, count = 1) { return String(value == null ? "" : value).slice(0, asNumber(count)); }
+    export function RIGHT(value, count = 1) { const text = String(value == null ? "" : value); return text.slice(Math.max(0, text.length - asNumber(count))); }
+    export function MID(value, start, count) { return String(value == null ? "" : value).slice(Math.max(0, asNumber(start) - 1), Math.max(0, asNumber(start) - 1) + asNumber(count)); }
+    export function LOWER(value) { return String(value == null ? "" : value).toLowerCase(); }
+    export function UPPER(value) { return String(value == null ? "" : value).toUpperCase(); }
+    export function TRIM(value) { return String(value == null ? "" : value).trim().replace(/\s+/g, " "); }
+    export function TODAY() { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
+    export function NOW() { return new Date(); }
+    export const TRUE = true;
+    export const FALSE = false;
+
+    const FORMULA_FUNCTIONS = {
+      SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, ROUND, ROUNDDOWN, ROUNDUP, ABS, POWER, SQRT,
+      IF, IFERROR, AND, OR, NOT, CONCAT, CONCATENATE, LEN, LEFT, RIGHT, MID, LOWER, UPPER, TRIM,
+      TODAY, NOW
+    };
+
     function rangeFormulaValues(sheet, bounds, seen) {
       const out = [];
       for (let r = 0; r < bounds.rows; r += 1) {
@@ -1032,21 +1161,7 @@ actor SandboxService {
         expr = expr.replace(`__JB_FORMULA_${index}__`, replacement);
       });
       expr = expr.replace(/\^/g, "**").replace(/<>/g, "!=");
-      const funcs = {
-        SUM: (...args) => flattenFormulaArgs(args).reduce((sum, value) => sum + asNumber(value), 0),
-        AVERAGE: (...args) => {
-          const values = flattenFormulaArgs(args).filter((value) => value !== null && value !== "");
-          return values.length ? values.reduce((sum, value) => sum + asNumber(value), 0) / values.length : 0;
-        },
-        MIN: (...args) => Math.min(...flattenFormulaArgs(args).map(asNumber)),
-        MAX: (...args) => Math.max(...flattenFormulaArgs(args).map(asNumber)),
-        COUNT: (...args) => flattenFormulaArgs(args).filter((value) => value !== null && value !== "" && Number.isFinite(Number(value))).length,
-        COUNTA: (...args) => flattenFormulaArgs(args).filter((value) => value !== null && value !== "").length,
-        ROUND: (value, digits = 0) => Number(asNumber(value).toFixed(asNumber(digits))),
-        ABS: (value) => Math.abs(asNumber(value)),
-        IF: (condition, yesValue, noValue = false) => condition ? yesValue : noValue,
-        IFERROR: (value, fallback) => (value == null || String(value).startsWith("#")) ? fallback : value
-      };
+      const funcs = FORMULA_FUNCTIONS;
       try {
         return Function("CELL", "RANGE", ...Object.keys(funcs), `"use strict"; return (${expr});`)(
           callCell,
@@ -1214,13 +1329,18 @@ actor SandboxService {
       return strings;
     }
 
-    function parseWorkbookSheets(workbookXml, relsXml) {
+    function parseRelationships(relsXml, basePrefix) {
       const relTargets = {};
       (String(relsXml).match(/<Relationship\b[^>]*\/>/g) || []).forEach((rel) => {
         const id = (rel.match(/\bId="([^"]+)"/) || [])[1];
         const target = (rel.match(/\bTarget="([^"]+)"/) || [])[1];
-        if (id && target) relTargets[id] = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+        if (id && target) relTargets[id] = target.startsWith("/") ? target.slice(1) : `${basePrefix || ""}${target}`;
       });
+      return relTargets;
+    }
+
+    function parseWorkbookSheets(workbookXml, relsXml) {
+      const relTargets = parseRelationships(relsXml, "xl/");
 
       const sheets = [];
       (String(workbookXml).match(/<sheet\b[^>]*\/>/g) || []).forEach((sheet) => {
@@ -1307,8 +1427,13 @@ actor SandboxService {
         this.items.push(item);
         return item;
       }
-      getItem(index) {
-        return this.items[index];
+      getItem(indexOrName) {
+        if (typeof indexOrName === "number") return this.items[indexOrName];
+        if (indexOrName && typeof indexOrName === "object" && indexOrName.id) return this.items.find((item) => item && item.id === indexOrName.id);
+        return this.items.find((item) => item && (item.name === indexOrName || item.id === indexOrName));
+      }
+      getItemOrNullObject(indexOrName) {
+        return this.getItem(indexOrName) || { isNullObject: true, name: indexOrName, delete() {} };
       }
       deleteAll() {
         this.items = [];
@@ -1339,13 +1464,90 @@ actor SandboxService {
       throw new Error(`${name} is not implemented by the Just Bash iOS artifact-tool compatibility package`);
     }
 
+    function docParagraphXml(text) {
+      return `<w:p><w:r><w:t>${xml(text)}</w:t></w:r></w:p>`;
+    }
+
+    function parseWordParagraphs(documentXml) {
+      const paragraphs = [];
+      const matches = String(documentXml).match(/<w:p\b[\s\S]*?<\/w:p>/g) || [];
+      matches.forEach((paragraphXml) => {
+        const parts = [];
+        const textMatches = paragraphXml.match(/<w:t\b[^>]*>[\s\S]*?<\/w:t>/g) || [];
+        textMatches.forEach((part) => {
+          parts.push(xmlDecode(part.replace(/^<w:t\b[^>]*>/, "").replace(/<\/w:t>$/, "")));
+        });
+        paragraphs.push(parts.join(""));
+      });
+      return paragraphs;
+    }
+
+    export class DocumentModel {
+      constructor(options) {
+        const source = options || {};
+        this.paragraphs = Array.isArray(source.paragraphs) ? [...source.paragraphs] : [];
+        this.metadata = source.metadata || {};
+      }
+      static create(options) {
+        return new DocumentModel(options || {});
+      }
+      get text() {
+        return this.paragraphs.join("\n");
+      }
+      set text(value) {
+        this.paragraphs = String(value == null ? "" : value).split(/\r?\n/);
+      }
+      addParagraph(text = "") {
+        this.paragraphs.push(String(text));
+        return { text: String(text), index: this.paragraphs.length - 1 };
+      }
+      inspect(options = {}) {
+        const rows = [
+          JSON.stringify({ kind: "document", paragraphs: this.paragraphs.length, options }),
+          ...this.paragraphs.map((text, index) => JSON.stringify({ kind: "paragraph", index, text }))
+        ];
+        return { ndjson: rows.join("\n") + "\n", paragraphs: [...this.paragraphs] };
+      }
+      help(query) {
+        return { ndjson: JSON.stringify({ query, note: "Just Bash iOS DocumentModel supports text paragraphs plus DOCX import/export" }) + "\n" };
+      }
+      toJSON() {
+        return { paragraphs: [...this.paragraphs], metadata: this.metadata };
+      }
+    }
+
+    export class DocumentFile {
+      static async importDocx(blob) {
+        const files = await unzipOfficeZip(blob instanceof FileBlob ? blob.data : blob);
+        const documentXml = zipText(files, "word/document.xml");
+        if (!documentXml) throw new Error("DocumentFile.importDocx could not find word/document.xml");
+        return new DocumentModel({ paragraphs: parseWordParagraphs(documentXml) });
+      }
+      static async exportDocx(document) {
+        const model = document instanceof DocumentModel ? document : new DocumentModel(document || {});
+        const body = (model.paragraphs.length ? model.paragraphs : [""]).map(docParagraphXml).join("");
+        const files = {
+          "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+          "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+          "word/document.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr/></w:body></w:document>`
+        };
+        return new FileBlob(zip(files), MIME.docx);
+      }
+    }
+
     export class Presentation {
       constructor(options) {
         this.slideSize = (options && options.slideSize) || { width: 1280, height: 720 };
         this.slides = new SlideCollection(this);
+        this.comments = new CommentCollection();
+        this.layouts = new LooseCollection((name, options) => ({ name, id: `layout-${this.layouts.count + 1}`, options: options || {}, shapes: new LooseCollection((shapeOptions) => new Shape(shapeOptions)), setParentLayoutId(value) { this.parentLayoutId = value; }, setColorMap(value) { this.colorMap = value; } }));
+        this.masters = new LooseCollection((name) => ({ name, id: `master-${this.masters.count + 1}` }));
       }
       static create(options) {
         return new Presentation(options || {});
+      }
+      getActiveSlide() {
+        return this.slides.getItem(0) || this.slides.add();
       }
       async export(options) {
         const format = (options && options.format) || "png";
@@ -1357,6 +1559,34 @@ actor SandboxService {
         }
         unsupportedArtifactToolFeature(`Presentation.export(${format})`);
       }
+      async inspect(options = {}) {
+        return { ndjson: this.slides.items.map((slide, index) => JSON.stringify({ kind: "slide", index, id: slide.id, elements: slide.shapes.count + slide.images.count })).join("\n") + "\n" };
+      }
+      help(query) {
+        return { ndjson: JSON.stringify({ query, note: "Just Bash iOS Presentation supports slides, shapes, images, comments, layout preview, PNG and PPTX export" }) + "\n" };
+      }
+      resolve(id) {
+        const value = String(id || "");
+        const slideMatch = value.match(/^sl\/(.+)$/);
+        if (slideMatch) return this.slides.items.find((slide) => slide.id === slideMatch[1]);
+        const shapeMatch = value.match(/^sh\/([^./]+)\.(.+)$/);
+        if (shapeMatch) {
+          const slide = this.slides.items.find((candidate) => candidate.id === shapeMatch[1]);
+          return slide && slide.shapes.items.find((shape) => shape.id === shapeMatch[2]);
+        }
+        return null;
+      }
+      record(fn) {
+        const value = fn();
+        return { value, patch: [] };
+      }
+      template(name) {
+        return { name, patch: [] };
+      }
+      apply(template) {
+        if (template && Array.isArray(template.patch)) return template.patch;
+        return [];
+      }
       toJSON() {
         return {
           slideSize: this.slideSize,
@@ -1367,20 +1597,66 @@ actor SandboxService {
 
     class SlideCollection extends LooseCollection {
       constructor(presentation) {
-        super(() => new Slide(presentation));
+        super((options) => new Slide(presentation, options || {}));
+        this.presentation = presentation;
+      }
+      getItem(indexOrId) {
+        if (typeof indexOrId === "number") return this.items[indexOrId];
+        if (indexOrId && typeof indexOrId === "object" && indexOrId.id) return this.items.find((slide) => slide.id === indexOrId.id);
+        return this.items.find((slide) => slide.id === indexOrId);
       }
     }
 
     export class Slide {
-      constructor(presentation) {
+      constructor(presentation, options) {
         this.presentation = presentation;
+        this.id = (options && options.id) || `slide-${presentation.slides.count + 1}`;
         this.shapes = new LooseCollection((options) => new Shape(options));
         this.images = new LooseCollection((options) => new Image(options));
         this.tables = new LooseCollection((options) => ({ options: options || {}, position: (options || {}).position || {} }));
         this.background = {};
+        this.speakerNotes = {
+          text: "",
+          append: (value) => { this.speakerNotes.text += String(value == null ? "" : value); },
+          clear: () => { this.speakerNotes.text = ""; }
+        };
+      }
+      get index() {
+        return this.presentation.slides.items.indexOf(this);
+      }
+      setLayout(layout) {
+        this.layout = layout;
+        return this;
+      }
+      setViewportSize(width, height) {
+        this.presentation.slideSize = { width: Number(width) || this.presentation.slideSize.width, height: Number(height) || this.presentation.slideSize.height };
+        return this;
+      }
+      duplicate() {
+        const copy = new Slide(this.presentation, { id: `slide-${this.presentation.slides.count + 1}` });
+        copy.background = { ...this.background };
+        this.shapes.items.forEach((shape) => copy.shapes.items.push(shape.clone()));
+        this.images.items.forEach((image) => copy.images.items.push(image.clone()));
+        this.presentation.slides.items.splice(this.index + 1, 0, copy);
+        return copy;
+      }
+      moveTo(index) {
+        const slides = this.presentation.slides.items;
+        const current = slides.indexOf(this);
+        if (current < 0) return this;
+        slides.splice(current, 1);
+        slides.splice(Math.max(0, Math.min(slides.length, Number(index) || 0)), 0, this);
+        return this;
+      }
+      delete() {
+        this.presentation.slides.items = this.presentation.slides.items.filter((slide) => slide !== this);
+      }
+      async export(options = {}) {
+        return await this.presentation.export({ ...options, slide: this });
       }
       toJSON() {
         return {
+          id: this.id,
           shapes: this.shapes.items.map((shape) => shape.toJSON()),
           images: this.images.items.map((image) => image.toJSON())
         };
@@ -1390,6 +1666,7 @@ actor SandboxService {
     export class Shape {
       constructor(options) {
         this.options = options || {};
+        this.id = this.options.id || `shape-${Math.random().toString(36).slice(2, 10)}`;
         this.name = this.options.name;
         this.position = this.options.position || {};
         this.fill = this.options.fill;
@@ -1403,8 +1680,26 @@ actor SandboxService {
       set text(value) {
         this._text = value instanceof TextFrame ? value : new TextFrame(value);
       }
+      get frame() {
+        return this.position;
+      }
+      set frame(value) {
+        this.position = value || {};
+      }
+      bringToFront() {}
+      sendToBack() {}
+      delete() {
+        this.deleted = true;
+      }
+      clone() {
+        const copy = new Shape({ ...this.options, id: undefined, name: this.name, position: { ...this.position }, fill: this.fill, line: this.line, geometry: this.geometry });
+        copy.text = new TextFrame(this.text.plain);
+        copy.text.fontSize = this.text.fontSize;
+        copy.text.color = this.text.color;
+        return copy;
+      }
       toJSON() {
-        return { name: this.name, position: this.position, geometry: this.geometry, text: this.text.plain };
+        return { id: this.id, name: this.name, position: this.position, geometry: this.geometry, text: this.text.plain };
       }
     }
 
@@ -1422,16 +1717,66 @@ actor SandboxService {
       toString() {
         return this.plain;
       }
+      add(value) {
+        this.plain += String(value == null ? "" : value);
+        return this;
+      }
+      replace(search, replacement) {
+        this.plain = this.plain.replace(search instanceof RegExp ? search : String(search), String(replacement == null ? "" : replacement));
+        return this;
+      }
+      get(search) {
+        const text = this;
+        return {
+          bold: text.bold,
+          italic: text.italic || false,
+          fontSize: text.fontSize,
+          color: text.color,
+          text: String(search == null ? "" : search)
+        };
+      }
+      getRange(start, length) {
+        return { start, length, text: this.plain.slice(start, start + length), bold: this.bold, fontSize: this.fontSize, color: this.color };
+      }
     }
 
     export class Image {
       constructor(options) {
         this.options = options || {};
+        this.id = this.options.id || `image-${Math.random().toString(36).slice(2, 10)}`;
         this.name = this.options.name;
         this.position = this.options.position || {};
+        this.alt = this.options.alt || "";
+        this.prompt = this.options.prompt;
+        this.fit = this.options.fit || "contain";
+        this.crop = this.options.crop || {};
+        this.geometry = this.options.geometry;
+      }
+      get frame() {
+        return this.position;
+      }
+      set frame(value) {
+        this.position = value || {};
+      }
+      get isPlaceholder() {
+        return !!this.prompt && !this.options.path && !this.options.dataUrl && !this.options.uri;
+      }
+      replace(source) {
+        this.options = { ...this.options, ...(source || {}) };
+        return this;
+      }
+      regenerate(options) {
+        this.regeneration = options || {};
+        return this;
+      }
+      delete() {
+        this.deleted = true;
+      }
+      clone() {
+        return new Image({ ...this.options, id: undefined, name: this.name, position: { ...this.position } });
       }
       toJSON() {
-        return { name: this.name, position: this.position, alt: this.options.alt || "" };
+        return { id: this.id, name: this.name, position: this.position, alt: this.options.alt || "" };
       }
     }
 
@@ -1518,6 +1863,38 @@ actor SandboxService {
     }
 
     export class PresentationFile {
+      static async importPptx(blob) {
+        const files = await unzipOfficeZip(blob instanceof FileBlob ? blob.data : blob);
+        const presentationXml = zipText(files, "ppt/presentation.xml");
+        if (!presentationXml) throw new Error("PresentationFile.importPptx could not find ppt/presentation.xml");
+        const relTargets = parseRelationships(zipText(files, "ppt/_rels/presentation.xml.rels"), "ppt/");
+        const presentation = Presentation.create();
+        presentation.slides.deleteAll();
+        const slideIds = [];
+        presentationXml.replace(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/>/g, (_, relId) => {
+          slideIds.push(relId);
+          return "";
+        });
+        const targets = slideIds.length ? slideIds.map((relId) => relTargets[relId]).filter(Boolean) : Object.keys(files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort();
+        targets.forEach((target, index) => {
+          const slideXmlText = zipText(files, target);
+          const slide = presentation.slides.add({ id: `slide-${index + 1}` });
+          const textRuns = [];
+          (slideXmlText.match(/<a:t\b[^>]*>[\s\S]*?<\/a:t>/g) || []).forEach((part) => {
+            textRuns.push(xmlDecode(part.replace(/^<a:t\b[^>]*>/, "").replace(/<\/a:t>$/, "")));
+          });
+          if (textRuns.length) {
+            const shape = slide.shapes.add({
+              name: `imported-text-${index + 1}`,
+              position: { left: 48, top: 48, width: presentation.slideSize.width - 96, height: 120 },
+              fill: "transparent",
+              line: { fill: "transparent", width: 0 }
+            });
+            shape.text = textRuns.join("\n");
+          }
+        });
+        return presentation;
+      }
       static async exportPptx(presentation) {
         const files = {
           "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${presentation.slides.items.map((_, i) => `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}</Types>`,
@@ -1643,7 +2020,7 @@ actor SandboxService {
       }
     }
 
-    class ChartCollection {
+    export class ChartCollection {
       constructor(sheet) {
         this.sheet = sheet;
         this.items = [];
@@ -2019,7 +2396,7 @@ actor SandboxService {
 
     export class SpreadsheetFile {
       static async importXlsx(blob) {
-        const files = unzipStored(blob instanceof FileBlob ? blob.data : blob);
+        const files = await unzipOfficeZip(blob instanceof FileBlob ? blob.data : blob);
         const workbookXml = zipText(files, "xl/workbook.xml");
         if (!workbookXml) throw new Error("SpreadsheetFile.importXlsx could not find xl/workbook.xml");
         const workbook = Workbook.create();
@@ -2065,6 +2442,211 @@ actor SandboxService {
         return new FileBlob(zip(files), MIME.xlsx);
       }
     }
+
+    class IOSCompatModel {
+      constructor(config = {}) {
+        Object.assign(this, config || {});
+        if (!this.id) this.id = `${this.constructor.name}-${Math.random().toString(36).slice(2, 10)}`;
+      }
+      static create(config) {
+        return new this(config || {});
+      }
+      toConfig() {
+        return { ...this };
+      }
+      toJSON() {
+        return this.toConfig();
+      }
+      toProto() {
+        return this.toConfig();
+      }
+    }
+
+    export class AutoLayout extends IOSCompatModel {}
+    export class BorderLineModel extends IOSCompatModel {}
+    export class BorderModel extends IOSCompatModel {}
+    export class BoundingBox extends IOSCompatModel {}
+    export class Cell extends IOSCompatModel {}
+    export class CellStore extends IOSCompatModel {}
+    export class Chart extends IOSCompatModel {}
+    export class ChartAreaOptions extends IOSCompatModel {}
+    export class ChartAxis extends IOSCompatModel {}
+    export class ChartAxisTitle extends IOSCompatModel {}
+    export class ChartBarOptions extends IOSCompatModel {}
+    export class ChartBoxWhiskerOptions extends IOSCompatModel {}
+    export class ChartDataLabels extends IOSCompatModel {}
+    export class ChartDataTable extends IOSCompatModel {}
+    export class ChartDoughnutOptions extends IOSCompatModel {}
+    export class ChartElement extends IOSCompatModel {}
+    export class ChartElementCollection extends LooseCollection {}
+    export class ChartErrorBars extends IOSCompatModel {}
+    export class ChartFunnelOptions extends IOSCompatModel {}
+    export class ChartLegend extends IOSCompatModel {}
+    export class ChartLineOptions extends IOSCompatModel {}
+    export class ChartMapOptions extends IOSCompatModel {}
+    export class ChartPieOptions extends IOSCompatModel {}
+    export class ChartScatterOptions extends IOSCompatModel {}
+    export class ChartSeries extends IOSCompatModel {}
+    export class ChartSeriesCollection extends LooseCollection {}
+    export class ChartSeriesDataLabelOverride extends IOSCompatModel {}
+    export class ChartSeriesDataLabelOverrideCollection extends LooseCollection {}
+    export class ChartSeriesMarker extends IOSCompatModel {}
+    export class ChartSeriesPoint extends IOSCompatModel {}
+    export class ChartSeriesPointCollection extends LooseCollection {}
+    export class ChartStyleOptions extends IOSCompatModel {}
+    export class ChartTreemapOptions extends IOSCompatModel {}
+    export class ChartTrendline extends IOSCompatModel {}
+    export class ChartTrendlineCollection extends LooseCollection {}
+    export class ChartTrendlineLabel extends IOSCompatModel {}
+    export class ChartView3d extends IOSCompatModel {}
+    export class Citation extends IOSCompatModel {}
+    export class CitationsCollection extends LooseCollection {}
+    export class Color extends IOSCompatModel {}
+    export class Comment extends IOSCompatModel {}
+    export class Comments extends CommentCollection {}
+    export class ConditionalFormat extends IOSCompatModel {}
+    export class DefinedNames extends IOSCompatModel {}
+    export class Element extends IOSCompatModel {}
+    export class ElementsCollection extends LooseCollection {}
+    export class Fill extends IOSCompatModel {}
+    export class FontMetricsProvider extends IOSCompatModel {}
+    export class GoogleSheetsAdapter extends IOSCompatModel {}
+    export class GoogleSlidesAdapter extends IOSCompatModel {}
+    export class FetchGoogleSheetsClient extends IOSCompatModel {}
+    export class FetchGoogleSlidesClient extends IOSCompatModel {}
+    export class GapiGoogleSheetsClient extends IOSCompatModel {}
+    export class GapiGoogleSlidesClient extends IOSCompatModel {}
+    export class GeometryHitTester extends IOSCompatModel {}
+    export class HiddenTextareaBridge extends IOSCompatModel {}
+    export class ImageCollection extends LooseCollection {}
+    export class ImageElement extends Image {}
+    export class ImageElementCollection extends LooseCollection {}
+    export class InMemoryEngineEventBus extends IOSCompatModel {}
+    export class InputController extends IOSCompatModel {}
+    export class LabelFilterCondition extends IOSCompatModel {}
+    export class Layout extends IOSCompatModel {}
+    export class LayoutCollection extends LooseCollection {}
+    export class Line extends IOSCompatModel {}
+    export class Note extends IOSCompatModel {}
+    export class NotesCollection extends LooseCollection {}
+    export class NullTable extends IOSCompatModel {}
+    export class NullWorksheet extends IOSCompatModel {}
+    export class Paragraph extends IOSCompatModel {}
+    export class ParagraphCollection extends LooseCollection {}
+    export class Pattern extends IOSCompatModel {}
+    export class PeopleCollection extends LooseCollection {}
+    export class Person extends IOSCompatModel {}
+    export class PivotCacheDefinition extends IOSCompatModel {}
+    export class PivotCacheIndex extends IOSCompatModel {}
+    export class PivotDataHierarchy extends IOSCompatModel {}
+    export class PivotDataHierarchyCollection extends LooseCollection {}
+    export class PivotField extends IOSCompatModel {}
+    export class PivotFieldCollection extends LooseCollection {}
+    export class PivotHierarchy extends IOSCompatModel {}
+    export class PivotHierarchyCollection extends LooseCollection {}
+    export class PivotItem extends IOSCompatModel {}
+    export class PivotItemCollection extends LooseCollection {}
+    export class PivotLayout extends IOSCompatModel {}
+    export class PivotSourceTable extends IOSCompatModel {}
+    export class PivotTable extends IOSCompatModel {}
+    export class PivotTableCollection extends LooseCollection {}
+    export class PlaceholderCollection extends LooseCollection {}
+    export class Position extends IOSCompatModel {}
+    export class PresentationAwarenessState extends IOSCompatModel {}
+    export class PresentationCell extends IOSCompatModel {}
+    export class PresentationTable extends IOSCompatModel {}
+    export class PresentationTheme extends IOSCompatModel {}
+    export class RangeConditionalFormats extends LooseCollection {}
+    export class RangeDataValidation extends IOSCompatModel {}
+    export class RangeFormat extends IOSCompatModel {}
+    export class Row extends IOSCompatModel {}
+    export class Scripts extends IOSCompatModel {}
+    export class SelectionTool extends IOSCompatModel {}
+    export class ShapeCollection extends LooseCollection {}
+    export class ShapeGeometry extends IOSCompatModel {}
+    export class ShapePlaceholder extends IOSCompatModel {}
+    export class ShapePositionUnit extends IOSCompatModel {}
+    export class Slicer extends IOSCompatModel {}
+    export class SlicerCollection extends LooseCollection {}
+    export class SlideBackground extends IOSCompatModel {}
+    export class SlideCollectionFacade extends LooseCollection {}
+    export class SlideComposeThemeFacade extends IOSCompatModel {}
+    export class SparklineAxis extends IOSCompatModel {}
+    export class SparklineGroup extends IOSCompatModel {}
+    export class SparklineGroupCollection extends LooseCollection {}
+    export class SparklineMarkers extends IOSCompatModel {}
+    export class SparklinePreview extends IOSCompatModel {}
+    export class SpeakerNotes extends IOSCompatModel {}
+    export class SpillManager extends IOSCompatModel {}
+    export class SpreadsheetKeyboardEventBus extends IOSCompatModel {}
+    export class Style extends IOSCompatModel {}
+    export class StyleRegistry extends IOSCompatModel {}
+    export class StylesCollection extends LooseCollection {}
+    export class Table extends IOSCompatModel {}
+    export class TableBorders extends IOSCompatModel {}
+    export class TableCellRange extends IOSCompatModel {}
+    export class TableCollection extends LooseCollection {}
+    export class TableColumn extends IOSCompatModel {}
+    export class TableColumns extends LooseCollection {}
+    export class TableRowCollection extends LooseCollection {}
+    export class Tables extends LooseCollection {}
+    export class Text extends TextFrame {}
+    export class TextAutoFit extends IOSCompatModel {}
+    export class TextDirection extends IOSCompatModel {}
+    export class TextEditController extends IOSCompatModel {}
+    export class TextLayoutIndex extends IOSCompatModel {}
+    export class TextOverlayPainter extends IOSCompatModel {}
+    export class TextRange extends IOSCompatModel {}
+    export class TextRun extends IOSCompatModel {}
+    export class TextRunCollection extends LooseCollection {}
+    export class TextSelectionModel extends IOSCompatModel {}
+    export class TextStyle extends IOSCompatModel {}
+    export class TextStyleModel extends IOSCompatModel {}
+    export class TextWrap extends IOSCompatModel {}
+    export class Theme extends IOSCompatModel {}
+    export class Thread extends IOSCompatModel {}
+    export class ThreadsCollection extends LooseCollection {}
+    export class ValueFilterCondition extends IOSCompatModel {}
+    export class WorkbookAwarenessState extends IOSCompatModel {}
+    export class WorkbookRecorder extends IOSCompatModel {}
+    export class WorksheetCells extends IOSCompatModel {}
+    export class WorksheetChart extends IOSCompatModel {}
+    export class WorksheetChartCollection extends LooseCollection {}
+    export class WorksheetChartOfficeCompat extends IOSCompatModel {}
+    export class WorksheetCollectionFacade extends LooseCollection {}
+    export class WorksheetConditionalFormattingCollection extends LooseCollection {}
+    export class WorksheetDataTableCollection extends LooseCollection {}
+    export class WorksheetDataValidationCollection extends LooseCollection {}
+    export class WorksheetDrawingCollection extends LooseCollection {}
+    export class WorksheetFreezePanes extends IOSCompatModel {}
+    export class WorksheetImage extends Image {}
+    export class WorksheetImageCollection extends LooseCollection {}
+    export class WorksheetShape extends Shape {}
+    export class WorksheetShapeCollection extends LooseCollection {}
+
+    export const AggregationFunction = {};
+    export const AnnotationTarget = {};
+    export const AutoLayoutAlign = { start: "start", center: "center", end: "end" };
+    export const AutoLayoutDirection = { horizontal: "horizontal", vertical: "vertical" };
+    export const DataConsolidateFunction = {};
+    export const DateFilterCondition = {};
+    export const FilterDatetimeSpecificity = {};
+    export const HorizontalAlignment = { left: "left", center: "center", right: "right" };
+    export const LayoutType = {};
+    export const ShowAs = {};
+    export const ShowAsCalculation = {};
+
+    export function executeTool() {
+      unsupportedArtifactToolFeature("executeTool");
+    }
+    export function executeToolCall() {
+      unsupportedArtifactToolFeature("executeToolCall");
+    }
+    export function setupSpreadsheetAgent(workbook = Workbook.create()) {
+      return { workbook, tools: granolaSpreadsheetAgentTools_17 };
+    }
+    export const granolaSpreadsheetAgentTools_3 = [];
+    export const granolaSpreadsheetAgentTools_17 = [];
     """#
 
     private static func primaryRuntimeSkillCommands() -> [AnyBashCommand] {
@@ -2195,8 +2777,8 @@ actor SandboxService {
             from: pythonResult,
             skill: "spreadsheets",
             fallback: [
-                "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
-                "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
+                "broad pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
+                "stored and sandbox-extracted compressed .xlsx import/export plus basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
                 "bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged for common arithmetic/range formulas",
                 "full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine",
                 "bounded native XLSX chart parts and basic chart PNG previews are staged for common source-range charts",
@@ -2273,7 +2855,8 @@ actor SandboxService {
             "presentations": {
               "status": "\(presentationsStatus)",
               "blockers": [
-                "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
+                "broad pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
+                "basic PresentationFile.importPptx and DocumentFile.importDocx facades are staged for common OOXML text extraction paths",
                 "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 "JavaScript helper scripts can invoke host-provided python3 through child_process",

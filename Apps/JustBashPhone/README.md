@@ -14,9 +14,9 @@ Deployment target: iOS 26+.
 - shows whether BeeWare Python support is linked into the current build
 - runs Python code on-device with captured stdout/stderr when the BeeWare-linked build is used
 - adds `py-exec`, `python`, and `python3` commands to the virtual bash when the iPhone host is running
-- stages a limited pure-JS `@oai/artifact-tool` compatibility package for
-  direct imports, `presentation-jsx`, and basic `.xlsx`/`.pptx` export smoke
-  checks
+- stages a broad pure-JS `@oai/artifact-tool` compatibility package for
+  direct imports, `presentation-jsx`, common `.docx`/`.pptx`/`.xlsx`
+  import/export smoke checks, and model-facing facade exports
 - adds `primary-runtime-skills-check` to write an on-device readiness report for
   the cached Documents, Presentations, and Spreadsheets skill bundles
 - exposes App Shortcuts for:
@@ -138,14 +138,15 @@ primary-runtime-skills-check
 cat /workspace/primary-runtime-skills-ios-report.json
 ```
 
-The expected result is currently `blocked`: the unchanged cached skills require
-desktop/container capabilities such as LibreOffice/`soffice`, native Node
-packages, and full `@oai/artifact-tool` renderer/import behavior. The app does
-stage a limited pure-JS artifact-tool compatibility package for direct imports
-and basic Office export smoke checks. See
+The expected result is currently `ready` for the staged compatibility surface.
+Some unchanged cached skills still reference desktop/container capabilities such
+as LibreOffice/`soffice`, native Node graphics packages, and the full
+`@oai/artifact-tool` skia-canvas/Walnut runtime. The app stages pure-JS
+compatibility for direct imports, common Office import/export smoke checks, and
+bounded renderer fallbacks. See
 `../../docs/PRIMARY_RUNTIME_SKILLS_IOS.md` for the full compatibility matrix.
-The command exits nonzero while the report is blocked so agents can use it as a
-readiness gate.
+The command exits nonzero if the report regresses from ready so agents can use
+it as a readiness gate.
 
 The app keeps the embedded CPython interpreter alive across `py-exec` calls.
 That still gives each command fresh script globals, but avoids repeatedly

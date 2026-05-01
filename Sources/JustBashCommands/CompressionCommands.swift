@@ -217,6 +217,56 @@ func gzipData(_ data: Data) throws -> Data {
     }
 }
 
+func deflateRawData(_ data: Data, level: Int32 = Z_DEFAULT_COMPRESSION) throws -> Data {
+    var stream = z_stream()
+    let initStatus = deflateInit2_(
+        &stream,
+        level,
+        Z_DEFLATED,
+        -MAX_WBITS,
+        MAX_MEM_LEVEL,
+        Z_DEFAULT_STRATEGY,
+        ZLIB_VERSION,
+        Int32(MemoryLayout<z_stream>.size)
+    )
+    guard initStatus == Z_OK else {
+        throw NSError(domain: "deflate", code: Int(initStatus), userInfo: [NSLocalizedDescriptionKey: "failed to initialize raw deflater"])
+    }
+    defer { deflateEnd(&stream) }
+
+    return try data.withUnsafeBytes { rawBuffer in
+        guard let baseAddress = rawBuffer.bindMemory(to: Bytef.self).baseAddress else {
+            return Data()
+        }
+        stream.next_in = UnsafeMutablePointer(mutating: baseAddress)
+        stream.avail_in = uInt(data.count)
+
+        let chunkSize = 64 * 1024
+        var output = Data()
+        repeat {
+            var chunk = Data(count: chunkSize)
+            let status: Int32 = chunk.withUnsafeMutableBytes { rawOutput in
+                let outputBuffer = rawOutput.bindMemory(to: Bytef.self)
+                stream.next_out = outputBuffer.baseAddress
+                stream.avail_out = uInt(outputBuffer.count)
+                return deflate(&stream, Z_FINISH)
+            }
+            let produced = chunkSize - Int(stream.avail_out)
+            if produced > 0 {
+                output.append(chunk.prefix(produced))
+            }
+            if status == Z_STREAM_END {
+                return output
+            }
+            guard status == Z_OK || status == Z_BUF_ERROR else {
+                throw NSError(domain: "deflate", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "raw deflate failed"])
+            }
+        } while stream.avail_out == 0
+
+        throw NSError(domain: "deflate", code: Int(Z_BUF_ERROR), userInfo: [NSLocalizedDescriptionKey: "raw deflate did not finish"])
+    }
+}
+
 func gunzipData(_ data: Data) throws -> Data {
     guard !data.isEmpty else { return Data() }
     var stream = z_stream()
@@ -257,6 +307,51 @@ func gunzipData(_ data: Data) throws -> Data {
             }
             guard status == Z_OK else {
                 throw NSError(domain: "gzip", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "invalid gzip data"])
+            }
+        }
+    }
+}
+
+func inflateRawData(_ data: Data) throws -> Data {
+    guard !data.isEmpty else { return Data() }
+    var stream = z_stream()
+    let initStatus = inflateInit2_(
+        &stream,
+        -MAX_WBITS,
+        ZLIB_VERSION,
+        Int32(MemoryLayout<z_stream>.size)
+    )
+    guard initStatus == Z_OK else {
+        throw NSError(domain: "deflate", code: Int(initStatus), userInfo: [NSLocalizedDescriptionKey: "failed to initialize raw inflater"])
+    }
+    defer { inflateEnd(&stream) }
+
+    return try data.withUnsafeBytes { rawBuffer in
+        guard let baseAddress = rawBuffer.bindMemory(to: Bytef.self).baseAddress else {
+            return Data()
+        }
+        stream.next_in = UnsafeMutablePointer(mutating: baseAddress)
+        stream.avail_in = uInt(data.count)
+
+        let chunkSize = 64 * 1024
+        var output = Data()
+        while true {
+            var chunk = Data(count: chunkSize)
+            let status: Int32 = chunk.withUnsafeMutableBytes { rawOutput in
+                let outputBuffer = rawOutput.bindMemory(to: Bytef.self)
+                stream.next_out = outputBuffer.baseAddress
+                stream.avail_out = uInt(outputBuffer.count)
+                return inflate(&stream, Z_NO_FLUSH)
+            }
+            let produced = chunkSize - Int(stream.avail_out)
+            if produced > 0 {
+                output.append(chunk.prefix(produced))
+            }
+            if status == Z_STREAM_END {
+                return output
+            }
+            guard status == Z_OK else {
+                throw NSError(domain: "deflate", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "invalid raw deflate data"])
             }
         }
     }

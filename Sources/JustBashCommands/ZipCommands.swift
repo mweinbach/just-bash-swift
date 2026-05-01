@@ -341,8 +341,7 @@ private func createZipArchive(entries: [(name: String, data: Data)], compression
             compressed = entry.data
             compressionMethod = 0 // Store
         } else {
-            // Use zlib for DEFLATE compression
-            compressed = try gzipData(entry.data) // Use existing gzip function
+            compressed = try deflateRawData(entry.data, level: Int32(compressionLevel))
             compressionMethod = 8 // DEFLATE
         }
         
@@ -478,7 +477,7 @@ private func decompressZipEntry(_ entry: ZipEntry) throws -> Data {
     case 0: // Store (no compression)
         return entry.compressedData
     case 8: // DEFLATE
-        return try gunzipData(entry.compressedData)
+        return try inflateRawData(entry.compressedData)
     default:
         throw NSError(domain: "zip", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unsupported compression method \(entry.compressionMethod)"])
     }

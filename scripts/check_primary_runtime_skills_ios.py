@@ -370,7 +370,7 @@ def check_artifact_tool_runtime(
     ):
         report.add(
             "ok",
-            "iOS host stages a limited pure-JS @oai/artifact-tool compatibility package for direct imports, presentation-jsx, and basic xlsx/pptx export smoke checks",
+            "iOS host stages a broad pure-JS @oai/artifact-tool compatibility package for direct imports, presentation-jsx, common Office import/export smoke checks, and model-facing facade exports",
             artifact_tool_compat_evidence(),
         )
 
@@ -392,12 +392,13 @@ def check_artifact_tool_runtime(
             artifact_tool_compat_evidence(),
         )
 
-    if "unzipStored" in sandbox_text and "parseWorksheetCells" in sandbox_text:
+    if "unzipOfficeZip" in sandbox_text and "unzipViaSandbox" in sandbox_text and "parseWorksheetCells" in sandbox_text:
         report.add(
             "ok",
-            "iOS artifact-tool compatibility can import uncompressed XLSX workbooks, including files produced by its own exportXlsx path",
+            "iOS artifact-tool compatibility can import stored XLSX workbooks and sandbox-extracted compressed XLSX workbooks, including files produced by its own exportXlsx path",
             [
-                line_for(sandbox_service, "unzipStored"),
+                line_for(sandbox_service, "unzipOfficeZip"),
+                line_for(sandbox_service, "unzipViaSandbox"),
                 line_for(sandbox_service, "parseWorksheetCells"),
                 line_for(sandbox_service, "static async importXlsx"),
             ],
@@ -708,7 +709,7 @@ def check_presentations(
     check_artifact_tool_runtime(
         report,
         skill_md,
-        "@oai/artifact-tool is required; the iOS host has a limited compatibility package, but the full native rendering/import stack is not ported",
+        "@oai/artifact-tool is required; the iOS host has a broad compatibility package, but the native skia-canvas/Walnut runtime stack is not ported",
         artifact_tool_root,
     )
     sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
@@ -815,7 +816,7 @@ def check_spreadsheets(
     check_artifact_tool_runtime(
         report,
         skill_md,
-        "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render behavior is not ported",
+        "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a broad compatibility package, but full-fidelity native inspection/render behavior is not ported",
         artifact_tool_root,
     )
     sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
