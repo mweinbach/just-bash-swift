@@ -1,4 +1,6 @@
 import AppIntents
+import CodexCore
+import Foundation
 import JustBash
 
 struct RunShellScriptIntent: AppIntent {
@@ -87,6 +89,46 @@ struct RunPythonCodeIntent: AppIntent {
             parts.append("stderr:\n\(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
         return parts.joined(separator: "\n\n")
+    }
+}
+
+struct RunCodexPromptIntent: AppIntent {
+    static var title: LocalizedStringResource { "Run Codex Prompt" }
+    static var description: IntentDescription {
+        IntentDescription("Send a prompt to Codex using the on-device Just Bash workspace.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    @Parameter(
+        title: "Prompt",
+        requestValueDialog: IntentDialog("What should Codex do?")
+    )
+    var prompt: String
+
+    @Parameter(title: "Model")
+    var model: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Run Codex prompt")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let key = CodexPhoneSettings.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            return .result(value: "", dialog: "Add an OpenAI API key in Just Bash first.")
+        }
+        let selectedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let provider = OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key))
+        let configuration = AgentConfiguration(
+            model: selectedModel?.isEmpty == false ? selectedModel! : CodexPhoneSettings.defaultModel,
+            instructions: "You are Codex running fully on iOS inside Just Bash. Use JustBash-backed tools for workspace work.",
+            approvalPolicy: .never,
+            sandboxPolicy: .workspaceWrite
+        )
+        let runtime = try await SandboxService.shared.makeCodexRuntime(modelProvider: provider, configuration: configuration)
+        let thread = try await runtime.createThread(title: "Shortcuts Codex")
+        let response = try await runtime.sendMessage(threadID: thread.id, text: prompt)
+        return .result(value: response, dialog: "Codex finished.")
     }
 }
 
@@ -185,6 +227,15 @@ struct JustBashShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Run Python",
             systemImageName: "curlybraces.square"
+        )
+        AppShortcut(
+            intent: RunCodexPromptIntent(),
+            phrases: [
+                "Run Codex in \(.applicationName)",
+                "Ask Codex with \(.applicationName)"
+            ],
+            shortTitle: "Run Codex",
+            systemImageName: "sparkles"
         )
         AppShortcut(
             intent: ReadWorkspaceFileIntent(),

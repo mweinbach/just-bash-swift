@@ -6,6 +6,61 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Codex") {
+                    SecureField("OpenAI API key", text: $model.codexAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    TextField("Model", text: $model.codexModel)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Button {
+                        model.saveCodexAPIKey()
+                    } label: {
+                        Label("Save Key", systemImage: "key")
+                    }
+                    .buttonStyle(.bordered)
+
+                    TextEditor(text: $model.codexPrompt)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 120)
+
+                    HStack {
+                        Button {
+                            model.sendCodexPrompt()
+                        } label: {
+                            Label(model.isCodexRunning ? "Steer" : "Send", systemImage: model.isCodexRunning ? "arrowshape.turn.up.right.fill" : "paperplane.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.codexPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button(role: .destructive) {
+                            model.interruptCodexTurn()
+                        } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.isCodexRunning)
+                    }
+
+                    Text(model.codexStatus)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(model.isCodexRunning ? .blue : .secondary)
+
+                    if model.codexTranscript.isEmpty && model.codexStreamingText.isEmpty {
+                        Text("Codex output will appear here.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.codexTranscript) { item in
+                            outputBlock(title: item.role.rawValue, text: item.text, tint: item.role == .error ? .red : .primary)
+                        }
+                        if !model.codexStreamingText.isEmpty {
+                            outputBlock(title: "Codex", text: model.codexStreamingText, tint: .blue)
+                        }
+                    }
+                }
+
                 Section("Sample") {
                     Picker("Sample Script", selection: $model.selectedSampleID) {
                         ForEach(ShellRunnerModel.samples) { sample in

@@ -47,11 +47,16 @@ actor SandboxService {
     func makeCodexRuntime(
         modelProvider: any ModelProvider,
         configuration: AgentConfiguration = AgentConfiguration(),
+        embeddedSkills: [EmbeddedAgentSkill] = SandboxService.defaultCodexSkills,
         threadStore: any ThreadStore = JSONFileThreadStore(),
         approvalHandler: ApprovalHandler? = nil
-    ) -> CodexRuntime {
+    ) throws -> CodexRuntime {
         var config = configuration
         config.workspaceURL = URL(fileURLWithPath: Self.workspaceDirectoryPath(), isDirectory: true)
+        if !embeddedSkills.isEmpty {
+            let skillsRoot = CodexDefaultLocations.embeddedSkillsDirectory.appendingPathComponent("just-bash-phone", isDirectory: true)
+            _ = try config.installEmbeddedSkills(embeddedSkills, rootURL: skillsRoot)
+        }
         return CodexRuntime(
             configuration: config,
             modelProvider: modelProvider,
@@ -252,6 +257,33 @@ actor SandboxService {
         }
         return Bash(options: options)
     }
+
+    private static let defaultCodexSkills: [EmbeddedAgentSkill] = [
+        EmbeddedAgentSkill(
+            name: "documents",
+            description: "Create, inspect, and edit document artifacts with the on-device primary runtime compatibility layer.",
+            instructions: """
+            Use the Just Bash workspace and run primary-runtime-skills-check before document artifact work. Prefer Python OOXML helpers for .docx text structure and use the staged @oai/artifact-tool compatibility package when JavaScript artifact APIs are requested. Save outputs under /Users/coder/Documents unless the user asks for another workspace path.
+            """,
+            allowImplicitInvocation: true
+        ),
+        EmbeddedAgentSkill(
+            name: "presentations",
+            description: "Create and inspect presentation artifacts with the on-device primary runtime compatibility layer.",
+            instructions: """
+            Use primary-runtime-skills-check before presentation work. Build decks through the staged @oai/artifact-tool/presentation-jsx compatibility package when possible, and be explicit that iOS rendering is bounded compatibility rather than full desktop artifact-tool fidelity. Save .pptx, layout JSON, and PNG previews under /Users/coder/Documents.
+            """,
+            allowImplicitInvocation: true
+        ),
+        EmbeddedAgentSkill(
+            name: "spreadsheets",
+            description: "Create and inspect spreadsheet artifacts with the on-device primary runtime compatibility layer.",
+            instructions: """
+            Use primary-runtime-skills-check before spreadsheet work. Prefer the staged @oai/artifact-tool workbook APIs for common .xlsx import/export, formulas, table/chart stubs, CSV import, comments, and PNG previews. Call out limitations around full Excel calculation and chart fidelity when they affect the task.
+            """,
+            allowImplicitInvocation: true
+        )
+    ]
 
     private static func pythonCommands() -> [AnyBashCommand] {
         let handler: CommandHandler = { args, ctx in
