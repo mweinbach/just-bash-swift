@@ -130,6 +130,19 @@ Use `scripts/check_primary_runtime_skills_ios.py` before attempting to register
 these skills in an iOS build. The checker verifies the cached skill bundles and
 reports the iOS blockers above from the actual files in the cache and this repo.
 
+The Python-linked iPhone host also exposes an on-device command:
+
+```bash
+primary-runtime-skills-check
+cat /workspace/primary-runtime-skills-ios-report.json
+```
+
+That command does not install or register the skills. It writes a JSON readiness
+report from inside the iOS host by probing BeeWare Python imports and
+JavaScriptCore module resolution for the runtime pieces these skills expect. It
+exits nonzero while the report is blocked so an on-device agent can use it as a
+readiness gate.
+
 The current expected result is `blocked`: the skill bundles are present and
 parseable, but they require desktop/container runtime capabilities that this iOS
 runtime does not yet provide.

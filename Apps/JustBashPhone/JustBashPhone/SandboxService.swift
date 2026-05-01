@@ -171,7 +171,7 @@ actor SandboxService {
 
         return Bash(options: .init(
             files: seedFiles,
-            customCommands: Self.pythonCommands(),
+            customCommands: Self.pythonCommands() + Self.primaryRuntimeSkillCommands(),
             filesystem: mountable,
             embeddedRuntimes: [
                 JavaScriptRuntime(options: .init(
@@ -274,6 +274,149 @@ actor SandboxService {
             AnyBashCommand(name: "python", execute: handler),
             AnyBashCommand(name: "python3", execute: handler),
         ]
+    }
+
+    private static func primaryRuntimeSkillCommands() -> [AnyBashCommand] {
+        let handler: CommandHandler = { _, ctx in
+            let pythonResult = PythonSupport.run(
+                code: """
+                import json
+                from pathlib import Path
+                import primary_runtime_skill_probe
+
+                report = primary_runtime_skill_probe.build_report()
+                Path("primary-runtime-skills-python-report.json").write_text(
+                    json.dumps(report, indent=2, sort_keys=True) + "\\n"
+                )
+                print(json.dumps(report, sort_keys=True))
+                """,
+                workspacePath: Self.workspaceDirectoryPath(),
+                scriptName: "<primary-runtime-skills-check>"
+            )
+
+            let artifactToolResult = await ctx.executeSubshell?(
+                #"js-exec -c 'try { require("@oai/artifact-tool"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exitCode = 1; }'"#
+            )
+            let nodeModuleResult = await ctx.executeSubshell?(
+                #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exitCode = 1; }'"#
+            )
+
+            let report = Self.primaryRuntimeSkillReportJSON(
+                pythonResult: pythonResult,
+                artifactToolResult: artifactToolResult,
+                nodeModuleResult: nodeModuleResult
+            )
+
+            do {
+                try ctx.fileSystem.writeFile(
+                    report,
+                    to: "/workspace/primary-runtime-skills-ios-report.json",
+                    relativeTo: ctx.cwd
+                )
+            } catch {
+                return ExecResult.failure(
+                    "primary-runtime-skills-check: cannot write report: \(error.localizedDescription)",
+                    exitCode: 1
+                )
+            }
+
+            return ExecResult(stdout: report, stderr: pythonResult.stderr, exitCode: 1)
+        }
+
+        return [
+            AnyBashCommand(name: "primary-runtime-skills-check", execute: handler),
+        ]
+    }
+
+    private static func primaryRuntimeSkillReportJSON(
+        pythonResult: PythonExecResult,
+        artifactToolResult: ExecResult?,
+        nodeModuleResult: ExecResult?
+    ) -> String {
+        let pythonStatus = pythonResult.exitCode == 0 ? "available" : "unavailable"
+        let artifactToolStatus = artifactToolResult?.exitCode == 0 ? "available" : "blocked"
+        let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
+        return """
+        {
+          "platform": "ios",
+          "overall": "blocked",
+          "runtime": {
+            "beeWarePython": {
+              "status": "\(pythonStatus)",
+              "exitCode": \(pythonResult.exitCode),
+              "stdout": "\(jsonEscaped(pythonResult.stdout))",
+              "stderr": "\(jsonEscaped(pythonResult.stderr))"
+            },
+            "javaScriptCore": {
+              "status": "available",
+              "artifactToolRequire": {
+                "status": "\(artifactToolStatus)",
+                "exitCode": \(artifactToolResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(artifactToolResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(artifactToolResult?.stderr ?? ""))"
+              },
+              "nodeModuleRequire": {
+                "status": "\(nodeModuleStatus)",
+                "exitCode": \(nodeModuleResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(nodeModuleResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(nodeModuleResult?.stderr ?? ""))"
+              }
+            }
+          },
+          "skills": {
+            "documents": {
+              "status": "blocked",
+              "blockers": [
+                "requires soffice/LibreOffice render QA",
+                "uses subprocess-based document rendering",
+                "requires Python packages not staged in the default iOS bundle"
+              ]
+            },
+            "presentations": {
+              "status": "blocked",
+              "blockers": [
+                "requires Node node:* modules",
+                "requires @oai/artifact-tool/presentation-jsx",
+                "uses child-process helpers"
+              ]
+            },
+            "spreadsheets": {
+              "status": "blocked",
+              "blockers": [
+                "requires @oai/artifact-tool workbook APIs",
+                "requires Node-style workspace dependency resolution"
+              ]
+            }
+          },
+          "reportPath": "/workspace/primary-runtime-skills-ios-report.json"
+        }
+
+        """
+    }
+
+    private static func jsonEscaped(_ value: String) -> String {
+        var escaped = ""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\":
+                escaped += "\\\\"
+            case "\"":
+                escaped += "\\\""
+            case "\n":
+                escaped += "\\n"
+            case "\r":
+                escaped += "\\r"
+            case "\t":
+                escaped += "\\t"
+            default:
+                if scalar.value < 0x20 {
+                    escaped += String(format: "\\u%04X", scalar.value)
+                } else {
+                    escaped.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return escaped
     }
 
     private static func workspaceDirectoryPath() -> String {

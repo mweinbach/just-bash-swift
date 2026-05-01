@@ -14,6 +14,8 @@ Deployment target: iOS 26+.
 - shows whether BeeWare Python support is linked into the current build
 - runs Python code on-device with captured stdout/stderr when the BeeWare-linked build is used
 - adds `py-exec`, `python`, and `python3` commands to the virtual bash when the iPhone host is running
+- adds `primary-runtime-skills-check` to write an on-device readiness report for
+  the cached Documents, Presentations, and Spreadsheets skill bundles
 - exposes App Shortcuts for:
   - `Run Shell Script`
   - `Reset Sandbox`
@@ -120,6 +122,25 @@ cd Apps/JustBashPhone
 Anything in `Apps/JustBashPhone/PythonApp` is copied into the app bundle's
 `app` resource directory. `app` and `app/site-packages` are added to `sys.path`
 before user code runs.
+
+### Primary Runtime Skill Probe
+
+The Python-linked host includes a small pure-Python probe module for the cached
+OpenAI primary-runtime Documents, Presentations, and Spreadsheets skills. It does
+not install or register those skills. It verifies the on-device runtime surface
+and writes a report:
+
+```bash
+primary-runtime-skills-check
+cat /workspace/primary-runtime-skills-ios-report.json
+```
+
+The expected result is currently `blocked`: the unchanged cached skills require
+desktop/container capabilities such as LibreOffice/`soffice`, Node `node:*`
+modules, child processes, and `@oai/artifact-tool`. See
+`../../docs/PRIMARY_RUNTIME_SKILLS_IOS.md` for the full compatibility matrix.
+The command exits nonzero while the report is blocked so agents can use it as a
+readiness gate.
 
 The app keeps the embedded CPython interpreter alive across `py-exec` calls.
 That still gives each command fresh script globals, but avoids repeatedly

@@ -81,6 +81,17 @@ final class ShellRunnerModel {
             js-exec -c 'const fs = require("fs"); const text = fs.readFileSync("/data/input.txt", "utf8"); console.log(text.toUpperCase())'
             """#
         ),
+        .init(
+            id: "primary-runtime-skills-check",
+            title: "Skill Runtime Check",
+            description: "Write an on-device capability report for the cached Documents, Presentations, and Spreadsheets skills.",
+            script: """
+            primary-runtime-skills-check
+            echo
+            echo "Saved report:"
+            cat /workspace/primary-runtime-skills-ios-report.json
+            """
+        ),
     ]
 
     static let pythonSamples: [SamplePython] = [
