@@ -303,12 +303,25 @@ actor SandboxService {
             let esmResult = await ctx.executeSubshell?(
                 #"js-exec -m -c 'import fs from "node:fs/promises"; await fs.writeFile("/tmp/primary-runtime-esm.txt", "available"); console.log(await fs.readFile("/tmp/primary-runtime-esm.txt", "utf8"));'"#
             )
+            let packageExportsResult: ExecResult?
+            do {
+                try Self.stageArtifactToolPackageProbe(in: ctx)
+                packageExportsResult = await ctx.executeSubshell?(
+                    #"cd /tmp/primary-runtime-package-probe && js-exec -m -c 'import { runtimeName, resolveFs } from "@oai/artifact-tool"; import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx"; const fresh = await import("@oai/artifact-tool"); console.log(runtimeName); console.log(resolveFs()); console.log(jsx("slide").type); console.log(Fragment); console.log(fresh.runtimeName);'"#
+                )
+            } catch {
+                packageExportsResult = ExecResult.failure(
+                    "primary-runtime-skills-check: cannot stage package probe: \(error.localizedDescription)",
+                    exitCode: 1
+                )
+            }
 
             let report = Self.primaryRuntimeSkillReportJSON(
                 pythonResult: pythonResult,
                 artifactToolResult: artifactToolResult,
                 nodeModuleResult: nodeModuleResult,
-                esmResult: esmResult
+                esmResult: esmResult,
+                packageExportsResult: packageExportsResult
             )
 
             do {
@@ -336,12 +349,14 @@ actor SandboxService {
         pythonResult: PythonExecResult,
         artifactToolResult: ExecResult?,
         nodeModuleResult: ExecResult?,
-        esmResult: ExecResult?
+        esmResult: ExecResult?,
+        packageExportsResult: ExecResult?
     ) -> String {
         let pythonStatus = pythonResult.exitCode == 0 ? "available" : "unavailable"
         let artifactToolStatus = artifactToolResult?.exitCode == 0 ? "available" : "blocked"
         let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
         let esmStatus = esmResult?.exitCode == 0 ? "available" : "blocked"
+        let packageExportsStatus = packageExportsResult?.exitCode == 0 ? "available" : "blocked"
         return """
         {
           "platform": "ios",
@@ -372,6 +387,12 @@ actor SandboxService {
                 "exitCode": \(esmResult?.exitCode ?? 127),
                 "stdout": "\(jsonEscaped(esmResult?.stdout ?? ""))",
                 "stderr": "\(jsonEscaped(esmResult?.stderr ?? ""))"
+              },
+              "packageExportsCompatibility": {
+                "status": "\(packageExportsStatus)",
+                "exitCode": \(packageExportsResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(packageExportsResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(packageExportsResult?.stderr ?? ""))"
               }
             }
           },
@@ -395,7 +416,7 @@ actor SandboxService {
               "status": "blocked",
               "blockers": [
                 "requires @oai/artifact-tool workbook APIs",
-                "requires Node-style workspace dependency resolution"
+                "requires the real @oai/artifact-tool package to be bundled and adapted for iOS"
               ]
             }
           },
@@ -403,6 +424,46 @@ actor SandboxService {
         }
 
         """
+    }
+
+    private static func stageArtifactToolPackageProbe(in ctx: CommandContext) throws {
+        let packageRoot = "/tmp/primary-runtime-package-probe/node_modules/@oai/artifact-tool"
+        try ctx.fileSystem.createDirectory(path: "\(packageRoot)/dist/presentation-jsx", relativeTo: ctx.cwd, recursive: true)
+        try ctx.fileSystem.writeFile(
+            """
+            {
+              "name": "@oai/artifact-tool",
+              "type": "module",
+              "exports": {
+                ".": "./dist/artifact_tool.mjs",
+                "./presentation-jsx": "./dist/presentation-jsx/index.mjs"
+              }
+            }
+            """,
+            to: "\(packageRoot)/package.json",
+            relativeTo: ctx.cwd
+        )
+        try ctx.fileSystem.writeFile(
+            """
+            import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);
+            export const runtimeName = "artifact-tool";
+            export function resolveFs() {
+                return require.resolve("node:fs");
+            }
+            """,
+            to: "\(packageRoot)/dist/artifact_tool.mjs",
+            relativeTo: ctx.cwd
+        )
+        try ctx.fileSystem.writeFile(
+            """
+            export default function jsx(type) {
+                return { type };
+            }
+            export const Fragment = "Fragment";
+            """,
+            to: "\(packageRoot)/dist/presentation-jsx/index.mjs",
+            relativeTo: ctx.cwd
+        )
     }
 
     private static func jsonEscaped(_ value: String) -> String {

@@ -66,7 +66,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "python_modules": [_module_status(name) for name in spreadsheet_modules],
                 "blockers": [
                     "cached skill requires @oai/artifact-tool workbook APIs",
-                    "Node-style workspace dependency resolution is not available on iOS",
+                    "real @oai/artifact-tool package is not bundled or adapted as an iOS runtime module",
                 ],
             },
         },
