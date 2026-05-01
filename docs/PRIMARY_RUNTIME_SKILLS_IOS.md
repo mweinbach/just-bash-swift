@@ -195,3 +195,19 @@ parseable, and the iPhone host can import a limited pure-JS artifact-tool
 compatibility package, but full Documents rendering plus high-fidelity
 artifact-tool render/import behavior still require desktop/container runtime
 capabilities that this iOS runtime does not yet provide.
+
+## Latest Simulator Smoke
+
+On May 1, 2026, the iPhone host was installed on a booted iPhone 17 Pro Max
+simulator and launched with `JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS=1`. The app
+wrote `/workspace/primary-runtime-skills-ios-report.json` with:
+
+- `overall: blocked`
+- JavaScriptCore `artifactToolRequire: available`
+- JavaScriptCore `packageExportsCompatibility: available`
+- Documents blockers: missing `docx`/`lxml`, no `soffice`/LibreOffice, no
+  Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
+- Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
+  compatibility is staged, but full render/import behavior remains unported
+- Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
+  `reportlab` import; `docx`, `lxml`, and `pandas` do not
