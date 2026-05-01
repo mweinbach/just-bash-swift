@@ -1011,13 +1011,17 @@ actor SandboxService {
                     exitCode: 1
                 )
             }
+            let unsupportedFullApiResult = await ctx.executeSubshell?(
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, FileBlob } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Workbook.render", () => Workbook.create().render({ sheetName: "Sheet1" })); await expectReject("SpreadsheetFile.importXlsx", () => SpreadsheetFile.importXlsx(new FileBlob(new Uint8Array(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))); await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
+            )
 
             let report = Self.primaryRuntimeSkillReportJSON(
                 pythonResult: pythonResult,
                 artifactToolResult: artifactToolResult,
                 nodeModuleResult: nodeModuleResult,
                 esmResult: esmResult,
-                packageExportsResult: packageExportsResult
+                packageExportsResult: packageExportsResult,
+                unsupportedFullApiResult: unsupportedFullApiResult
             )
 
             do {
@@ -1046,13 +1050,15 @@ actor SandboxService {
         artifactToolResult: ExecResult?,
         nodeModuleResult: ExecResult?,
         esmResult: ExecResult?,
-        packageExportsResult: ExecResult?
+        packageExportsResult: ExecResult?,
+        unsupportedFullApiResult: ExecResult?
     ) -> String {
         let pythonStatus = pythonResult.exitCode == 0 ? "available" : "unavailable"
         let artifactToolStatus = artifactToolResult?.exitCode == 0 ? "available" : "blocked"
         let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
         let esmStatus = esmResult?.exitCode == 0 ? "available" : "blocked"
         let packageExportsStatus = packageExportsResult?.exitCode == 0 ? "available" : "blocked"
+        let unsupportedFullApiStatus = unsupportedFullApiResult?.exitCode == 0 ? "guarded" : "unguarded"
         let documentBlockers = pythonSkillBlockers(
             from: pythonResult,
             skill: "documents",
@@ -1069,6 +1075,9 @@ actor SandboxService {
             fallback: [
                 "limited pure-JS @oai/artifact-tool workbook export and common structural spreadsheet API compatibility is staged",
                 "full artifact-tool inspection/render/import behavior is not ported to iOS",
+                "full render/import APIs fail explicitly instead of returning fake visual verification",
+                "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
+                "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
                 "missing optional spreadsheet Python modules: pandas, docx",
             ]
         )
@@ -1118,6 +1127,12 @@ actor SandboxService {
                 "exitCode": \(packageExportsResult?.exitCode ?? 127),
                 "stdout": "\(jsonEscaped(packageExportsResult?.stdout ?? ""))",
                 "stderr": "\(jsonEscaped(packageExportsResult?.stderr ?? ""))"
+              },
+              "unsupportedFullApiGuards": {
+                "status": "\(unsupportedFullApiStatus)",
+                "exitCode": \(unsupportedFullApiResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(unsupportedFullApiResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(unsupportedFullApiResult?.stderr ?? ""))"
               }
             }
           },
@@ -1130,7 +1145,10 @@ actor SandboxService {
               "status": "blocked",
               "blockers": [
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
-                "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS"
+                "full render/import APIs fail explicitly instead of returning fake visual verification",
+                "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
+                "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
+                "presentation icon rendering requires sharp or skia-canvas native graphics packages"
               ]
             },
             "spreadsheets": {
