@@ -63,6 +63,7 @@ Four modules, zero dependencies beyond Foundation:
 - Fully in-process execution through the Swift parser, interpreter, builtins, and virtual commands
 - Shared in-memory filesystem across `exec()` calls, with fresh shell state per call
 - Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
+- Host-native `git` passthrough on macOS / Mac Catalyst when the active filesystem maps the shell cwd onto a real writable host path
 - Optional embedded language runtimes via the `EmbeddedRuntime` protocol (see [Optional Products](#optional-products))
 - Selective, test-driven parity with upstream `just-bash`, not line-for-line feature parity yet
 
@@ -204,7 +205,14 @@ For complex command substitutions, shell functions are recommended over aliases.
 
 **Shell builtins:** `cd`, `pwd`, `echo`, `printf`, `env`, `printenv`, `which`/`type`, `true`, `false`, `export`, `unset`, `local`, `declare`/`typeset`, `read`, `set`, `shift`, `return`, `exit`, `break`, `continue`, `test`/`[`, `eval`, `source`/`.`, `trap`, `alias`, `unalias`, `:`, `command`, `let`, `getopts`, `mapfile`/`readarray`, `pushd`, `popd`, `dirs`, `builtin`, `hash`, `exec`, `readonly`, `shopt`, `wait`, `select`
 
-**External commands:** `cat`, `tee`, `ls`, `mkdir`, `mktemp`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `bc`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `tar`, `sqlite3`, `jq`, `yq`, `xan`, `curl`, `html-to-markdown`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
+**External commands:** `cat`, `tee`, `ls`, `mkdir`, `mktemp`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `bc`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `tar`, `sqlite3`, `jq`, `yq`, `xan`, `curl`, `git`, `html-to-markdown`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
+
+`git` is intentionally different from the pure-Swift commands above: on macOS
+and Mac Catalyst it shells out to the host machine's real `git`, preserving
+normal subcommand syntax, remote-host support, and credential-helper behavior.
+That requires the active filesystem to expose a real writable host path (for
+example `ReadWriteFileSystem`, or a `MountableFileSystem` mount backed by one).
+Pure virtual or overlay-only filesystems do not vend `git`.
 
 ### Execution Limits
 
@@ -295,6 +303,11 @@ The `BashFilesystem` protocol requires methods for:
 | **Audit trail** | Record all file operations for compliance |
 
 **Note:** All filesystem implementations must be `Sendable` and handle their own synchronization for thread safety.
+
+If you want host-native tooling such as `git`, prefer a host-backed filesystem
+like `ReadWriteFileSystem` for the working tree you want `git` to operate on.
+The default `VirtualFileSystem` is intentionally sandboxed and does not expose a
+real host path for process-backed commands.
 
 ## API Reference
 

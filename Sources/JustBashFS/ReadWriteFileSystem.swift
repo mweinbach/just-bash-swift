@@ -242,4 +242,11 @@ extension ReadWriteFileSystem: BashFilesystem {
         descend(path: startPath, remaining: ArraySlice(searchComponents))
         return Array(Set(results)).sorted()
     }
+
+    public func hostPath(for path: String, relativeTo: String) -> String? {
+        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
+        return realPath(for: normalized)
+    }
 }
+
+extension ReadWriteFileSystem: HostPathFileSystem {}

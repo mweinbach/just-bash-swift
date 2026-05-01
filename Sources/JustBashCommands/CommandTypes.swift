@@ -129,7 +129,7 @@ public final class CommandRegistry: @unchecked Sendable {
             // Data manipulation
             shuf(), ts(), sponge(), vidir(), vipe(), pee(), combine(), ifdata(), chronic(), errno(),
             // Misc
-            xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(), whoami(), clear(), help(), history(), bash(), sh(), time(), timeout(), curl(), htmlToMarkdown(),
+            xargs(), diff(), comm(), date(), sleep_(), uname(), hostname(), whoami(), clear(), help(), history(), bash(), sh(), time(), timeout(), curl(), git(), htmlToMarkdown(),
             tput(), getconf(), nproc(), env(),
         ]
     }
