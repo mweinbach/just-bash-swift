@@ -542,6 +542,23 @@ actor SandboxService {
       }
     }
 
+    function rangeFormat() {
+      return {
+        fill: {},
+        font: {},
+        borders: {},
+        alignment: {},
+        numberFormat: "",
+        wrapText: false,
+        columnWidth: undefined,
+        rowHeight: undefined,
+        columnWidthPx: undefined,
+        rowHeightPx: undefined,
+        autofitColumns() {},
+        autofitRows() {}
+      };
+    }
+
     export class Presentation {
       constructor(options) {
         this.slideSize = (options && options.slideSize) || { width: 1280, height: 720 };
@@ -668,6 +685,12 @@ actor SandboxService {
         if (rows.length) sheet.getRangeByIndexes(0, 0, rows.length, Math.max(...rows.map((row) => row.length))).values = rows;
         return workbook;
       }
+      async fromCSV(csvText, options) {
+        const sheet = this.worksheets.getOrAdd((options && options.sheetName) || "ImportedData");
+        const rows = csvRows(csvText);
+        if (rows.length) sheet.getRangeByIndexes(0, 0, rows.length, Math.max(...rows.map((row) => row.length))).values = rows;
+        return sheet;
+      }
       getActiveWorksheet() {
         return this.worksheets.items[0] || this.worksheets.add("Sheet1");
       }
@@ -680,15 +703,38 @@ actor SandboxService {
       help(query) {
         return { ndjson: JSON.stringify({ query, note: "Just Bash iOS artifact-tool compatibility surface" }) + "\n" };
       }
+      trace(address) {
+        return {
+          ndjson: JSON.stringify({
+            address,
+            note: "Formula tracing is structural only in the Just Bash iOS artifact-tool compatibility surface"
+          }) + "\n"
+        };
+      }
     }
 
     class WorksheetCollection extends LooseCollection {
       constructor(workbook) {
         super((name) => new Worksheet(workbook, typeof name === "string" ? name : "Sheet" + (workbook.worksheets.count + 1)));
+        this.workbook = workbook;
       }
       getItem(nameOrIndex) {
         if (typeof nameOrIndex === "number") return this.items[nameOrIndex];
         return this.items.find((sheet) => sheet.name === nameOrIndex);
+      }
+      getOrAdd(name, options) {
+        let sheet = this.getItem(name);
+        if (!sheet && options && options.renameFirstIfOnlyNewSpreadsheet && this.items.length === 1) {
+          sheet = this.items[0];
+          sheet.name = name;
+        }
+        return sheet || this.add(name);
+      }
+      getItemAt(index) {
+        return this.items[index];
+      }
+      getActiveWorksheet() {
+        return this.workbook.getActiveWorksheet();
       }
     }
 
@@ -701,13 +747,39 @@ actor SandboxService {
         this.shapes = new LooseCollection((options) => ({ options: options || {}, text: "", position: (options || {}).position || {} }));
         this.images = new LooseCollection((options) => ({ options: options || {}, position: (options || {}).position || {} }));
         this.tables = new LooseCollection((options) => ({ options: options || {} }));
-        this.freezePanes = { freezeRows() {}, freezeColumns() {} };
+        this.sparklineGroups = new LooseCollection((options) => ({ options: options || {} }));
+        this.sparklines = this.sparklineGroups;
+        this.dataTables = new LooseCollection((options) => ({ options: options || {} }));
+        this.conditionalFormattings = new LooseCollection((options) => ({ options: options || {} }));
+        this.dataValidations = new LooseCollection((options) => ({ options: options || {} }));
+        this.showGridLines = true;
+        this.mergedRanges = [];
+        this.freezePanes = { freezeRows() {}, freezeColumns() {}, unfreeze() {} };
       }
       getRange(address) {
         return new Range(this, parseRange(address));
       }
       getRangeByIndexes(row, col, rows, cols) {
         return new Range(this, { row, col, rows, cols });
+      }
+      getCell(row, col) {
+        return this.getRangeByIndexes(row, col, 1, 1);
+      }
+      getUsedRange() {
+        const keys = Object.keys(this.cells);
+        if (!keys.length) return this.getRangeByIndexes(0, 0, 1, 1);
+        const points = keys.map((key) => key.split(",").map((n) => Number(n)));
+        const rows = points.map((point) => point[0]);
+        const cols = points.map((point) => point[1]);
+        const minRow = Math.min(...rows);
+        const minCol = Math.min(...cols);
+        return this.getRangeByIndexes(minRow, minCol, Math.max(...rows) - minRow + 1, Math.max(...cols) - minCol + 1);
+      }
+      mergeCells(address) {
+        this.mergedRanges.push(address);
+      }
+      unmergeCells(address) {
+        this.mergedRanges = this.mergedRanges.filter((range) => range !== address);
       }
       deleteAllDrawings() {
         this.charts.items = [];
@@ -720,7 +792,7 @@ actor SandboxService {
       constructor(sheet, bounds) {
         this.sheet = sheet;
         this.bounds = bounds;
-        this.format = { fill: {}, font: {}, borders: {}, alignment: {}, numberFormat: "" };
+        this.format = rangeFormat();
         this.dataValidation = {};
         this.conditionalFormats = new LooseCollection();
       }
@@ -728,7 +800,7 @@ actor SandboxService {
         const out = [];
         for (let r = 0; r < this.bounds.rows; r += 1) {
           const row = [];
-          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).value || null);
+          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).value ?? null);
           out.push(row);
         }
         return out;
@@ -742,7 +814,7 @@ actor SandboxService {
         const out = [];
         for (let r = 0; r < this.bounds.rows; r += 1) {
           const row = [];
-          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).formula || null);
+          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).formula ?? null);
           out.push(row);
         }
         return out;
@@ -752,10 +824,108 @@ actor SandboxService {
           this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] = { ...(this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}), formula };
         }));
       }
-      clear() {
-        for (let r = 0; r < this.bounds.rows; r += 1) {
-          for (let c = 0; c < this.bounds.cols; c += 1) delete this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`];
+      get formulasR1C1() {
+        return this.formulas;
+      }
+      set formulasR1C1(matrix) {
+        this.formulas = matrix;
+      }
+      get displayFormulas() {
+        return this.formulas;
+      }
+      get formulaInfos() {
+        return this.formulas.map((row) => row.map((formula) => formula ? { formula } : null));
+      }
+      write(payload) {
+        if (Array.isArray(payload)) {
+          this.values = payload;
+        } else if (payload && Array.isArray(payload.values)) {
+          this.values = payload.values;
+        } else {
+          this.values = [[payload]];
         }
+        return this;
+      }
+      writeValues(matrix) {
+        this.values = matrix;
+        return this;
+      }
+      clear(options) {
+        const applyTo = (options && options.applyTo) || "all";
+        for (let r = 0; r < this.bounds.rows; r += 1) {
+          for (let c = 0; c < this.bounds.cols; c += 1) {
+            const key = `${this.bounds.row + r},${this.bounds.col + c}`;
+            if (applyTo === "formats") continue;
+            delete this.sheet.cells[key];
+          }
+        }
+        if (applyTo === "formats" || applyTo === "all") {
+          this.format = rangeFormat();
+        }
+      }
+      copyFrom(sourceRange, kind) {
+        if (!sourceRange) return this;
+        const mode = kind || "all";
+        if (mode === "values" || mode === "all") this.values = sourceRange.values;
+        if (mode === "formulas" || mode === "all") this.formulas = sourceRange.formulas;
+        return this;
+      }
+      copyTo(destinationRange, kind) {
+        destinationRange.copyFrom(this, kind);
+        return destinationRange;
+      }
+      offset(rows, cols) {
+        return new Range(this.sheet, {
+          row: this.bounds.row + (rows || 0),
+          col: this.bounds.col + (cols || 0),
+          rows: this.bounds.rows,
+          cols: this.bounds.cols
+        });
+      }
+      resize(rows, cols) {
+        return new Range(this.sheet, {
+          row: this.bounds.row,
+          col: this.bounds.col,
+          rows: rows || this.bounds.rows,
+          cols: cols || this.bounds.cols
+        });
+      }
+      getCurrentRegion() {
+        return this.sheet.getUsedRange();
+      }
+      getRow(index) {
+        return new Range(this.sheet, {
+          row: this.bounds.row + index,
+          col: this.bounds.col,
+          rows: 1,
+          cols: this.bounds.cols
+        });
+      }
+      getColumn(index) {
+        return new Range(this.sheet, {
+          row: this.bounds.row,
+          col: this.bounds.col + index,
+          rows: this.bounds.rows,
+          cols: 1
+        });
+      }
+      getRangeByIndexes(row, col, rows, cols) {
+        return new Range(this.sheet, {
+          row: this.bounds.row + row,
+          col: this.bounds.col + col,
+          rows,
+          cols
+        });
+      }
+      getCell(row, col) {
+        return this.getRangeByIndexes(row, col, 1, 1);
+      }
+      merge() {
+        this.sheet.mergedRanges.push(this.bounds);
+      }
+      unmerge() {}
+      setNumberFormat(value) {
+        this.format.numberFormat = value;
       }
       autofit() {}
       fillDown() {}
@@ -819,7 +989,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -895,7 +1065,7 @@ actor SandboxService {
             from: pythonResult,
             skill: "spreadsheets",
             fallback: [
-                "limited pure-JS @oai/artifact-tool workbook export compatibility is staged",
+                "limited pure-JS @oai/artifact-tool workbook export and common structural spreadsheet API compatibility is staged",
                 "full artifact-tool inspection/render/import behavior is not ported to iOS",
                 "missing optional spreadsheet Python modules: pandas, docx",
             ]

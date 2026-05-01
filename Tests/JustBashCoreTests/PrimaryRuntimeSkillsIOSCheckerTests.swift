@@ -98,6 +98,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: presentations, containing: "Walnut")
 
         XCTAssertEqual(spreadsheets["status"] as? String, "blocked")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
         XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: spreadsheets, containing: "skia-canvas")
         XCTAssertContainsFinding(

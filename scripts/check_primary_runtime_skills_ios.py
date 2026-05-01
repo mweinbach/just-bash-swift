@@ -232,6 +232,14 @@ def check_artifact_tool_runtime(
             artifact_tool_compat_evidence(),
         )
 
+    spreadsheet_structural_methods = ("getOrAdd", "getUsedRange", "copyFrom", "copyTo", "trace(address)")
+    if all(method in sandbox_text for method in spreadsheet_structural_methods):
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility covers common spreadsheet structural APIs such as worksheet getOrAdd/getUsedRange, range copy/write helpers, and workbook trace stubs",
+            artifact_tool_compat_evidence(),
+        )
+
     package, package_evidence = artifact_tool_package_shape(artifact_tool_root)
     if package is not None:
         export_text = json.dumps(package.get("exports", {}), sort_keys=True)

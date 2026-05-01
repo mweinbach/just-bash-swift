@@ -143,7 +143,9 @@ Required pieces found in the skill:
 iOS blockers:
 
 - The iPhone host exposes a limited pure-JS artifact-tool compatibility package
-  for workbook creation and basic `.xlsx` export smoke checks.
+  for workbook creation, common structural spreadsheet helpers such as
+  worksheet lookup/range copy/write methods, and basic `.xlsx` export smoke
+  checks.
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.
@@ -212,6 +214,7 @@ wrote `/workspace/primary-runtime-skills-ios-report.json` with:
 - Documents blockers: missing `docx`/`lxml`, no `soffice`/LibreOffice, no
   Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
 - Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
-  compatibility is staged, but full render/import behavior remains unported
+  compatibility is staged, including common structural spreadsheet helpers, but
+  full render/import behavior remains unported
 - Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
   `reportlab` import; `docx`, `lxml`, and `pandas` do not
