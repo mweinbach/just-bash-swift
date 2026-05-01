@@ -64,6 +64,10 @@ and related mac-style directories. Host apps can call
 `url(forVirtualPath:)` to connect document pickers, sharing, and file previews
 to the same files the shell and coding agent see.
 
+For a full host-app walkthrough, including SwiftUI file browser hooks,
+document-picker import, share/export, custom commands, and iOS caveats, see
+[App Integration](docs/APP_INTEGRATION.md).
+
 ## Architecture
 
 Four modules, zero dependencies beyond Foundation:

@@ -98,36 +98,36 @@ dependency scanning.
 
 The iPhone host registers `py-exec`, `python`, and `python3` commands in its
 JustBash instance. They run through the embedded interpreter and share the same
-persistent workspace as bash.
+persistent `~/Documents` workspace as bash.
 
 Inline:
 
 ```bash
 py-exec -c 'import sys; print(sys.version)'
 python -c 'from pathlib import Path; Path("from-python.txt").write_text("hello\n")'
-cat /workspace/from-python.txt
+cat ~/Documents/from-python.txt
 ```
 
 Script file:
 
 ```bash
-cat > /workspace/hello.py <<'PY'
+cat > ~/Documents/hello.py <<'PY'
 from pathlib import Path
 Path("python-output.txt").write_text("created by embedded Python\n")
 print("wrote python-output.txt")
 PY
 
-python /workspace/hello.py
-cat /workspace/python-output.txt
+python ~/Documents/hello.py
+cat ~/Documents/python-output.txt
 ```
 
 Filesystem caveat: `py-exec` can load the Python script source from the
 JustBash virtual filesystem, but CPython itself is not chrooted into that VFS.
-The interpreter starts with its current directory set to the real app workspace,
-and that directory is mounted into bash at `/workspace`. Use relative paths,
-`Path.cwd()`, or `os.environ["JUSTBASH_WORKSPACE"]` for persistent files.
-Do not expect `open("/data/input.txt")` inside Python to read JustBash's
-in-memory `/data`.
+The interpreter starts with its current directory set to the real host directory
+for `~/Documents`. Use relative paths, `Path.cwd()`, or
+`os.environ["JUSTBASH_WORKSPACE"]` for persistent files. Do not expect arbitrary
+virtual absolute paths inside Python to resolve unless the host exposes the
+corresponding real directory.
 
 ## Add Python Modules
 
@@ -182,8 +182,9 @@ bundles, see [Primary Runtime Skills On iOS](PRIMARY_RUNTIME_SKILLS_IOS.md).
 Those skills are not iOS-runnable unchanged today because their upstream
 contracts depend on desktop/container runtimes such as LibreOffice, native Node
 packages, and full `@oai/artifact-tool` renderer/import behavior. The iPhone
-host does stage a limited pure-JS artifact-tool compatibility package for direct
-imports and basic `.xlsx`/`.pptx` export smoke checks.
+host does stage a broad pure-JS artifact-tool compatibility package for direct
+imports, common Office import/export smoke checks, and model-facing facade
+exports.
 
 ## Native Package Status
 

@@ -25,14 +25,14 @@ filesystem, and optional embedded runtimes.
   handles bundled/minified ESM package shapes where imports and `export{...}`
   lists appear mid-line without whitespace, plus nested export conditions such as
   `exports.node.import`.
-- The iPhone host stages a limited pure-JS `@oai/artifact-tool` compatibility
+- The iPhone host stages a broad pure-JS `@oai/artifact-tool` compatibility
   package under both `/node_modules/@oai/artifact-tool` and the Codex primary
   runtime cache-shaped path. It supports direct imports, `presentation-jsx`, and
-  basic `.xlsx`/`.pptx` export smoke checks, plus bounded worksheet and slide
-  PNG previews. Unsupported high-fidelity render/import APIs still fail
-  explicitly on iOS so skill verification cannot accidentally treat placeholder
-  images or empty imports as success. It is not the full upstream artifact-tool
-  renderer/importer.
+  common `.docx`/`.pptx`/`.xlsx` import/export smoke checks, plus bounded
+  worksheet and slide PNG previews. Unsupported high-fidelity render/import APIs
+  still fail explicitly on iOS so skill verification cannot accidentally treat
+  placeholder images or empty imports as success. It is not the full upstream
+  artifact-tool renderer/importer.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -164,11 +164,11 @@ Required pieces found in the skill:
 
 iOS blockers:
 
-- The iPhone host exposes a limited pure-JS artifact-tool compatibility package
+- The iPhone host exposes a broad pure-JS artifact-tool compatibility package
   for workbook creation, common structural spreadsheet helpers such as
   worksheet lookup/range copy/write methods, structural table/chart/comment/
-  sparkline objects, basic uncompressed `.xlsx` import/export smoke checks, and
-  basic worksheet-range PNG rendering.
+  sparkline objects, stored and sandbox-extracted compressed `.xlsx`
+  import/export smoke checks, and basic worksheet-range PNG rendering.
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.
@@ -232,14 +232,15 @@ cat /workspace/primary-runtime-skills-ios-report.json
 That command does not install or register the skills. It writes a JSON readiness
 report from inside the iOS host by probing BeeWare Python imports and
 JavaScriptCore module resolution for the runtime pieces these skills expect. It
-exits nonzero while the report is blocked so an on-device agent can use it as a
+exits nonzero if the report is not ready so an on-device agent can use it as a
 readiness gate.
 
-The current expected result is `blocked`: the skill bundles are present and
-parseable, and the iPhone host can import a limited pure-JS artifact-tool
-compatibility package, but full Documents rendering plus high-fidelity
+The current expected result is `ready` for the staged iOS compatibility surface:
+the skill bundles are present and parseable, the iPhone host can import the
+broad pure-JS artifact-tool compatibility package, and representative cached
+helper paths run. Full LibreOffice/Poppler rendering plus high-fidelity native
 artifact-tool render/import behavior still require desktop/container runtime
-capabilities that this iOS runtime does not yet provide.
+capabilities that this iOS runtime does not provide.
 
 Use the helper smoke harness to verify representative cached helper entrypoints
 against the same staged JavaScript packages the iPhone host injects:
@@ -261,8 +262,8 @@ runtime-shaped `HOME`, then runs:
   package
 
 Passing this smoke harness proves those bounded staged paths are runnable. It
-does not clear the strict readiness blockers for full Documents render/OOXML
-behavior or high-fidelity artifact-tool native render/import parity.
+does not mean iOS has full LibreOffice/Poppler render parity or native
+artifact-tool render/import parity.
 
 The Swift JavaScriptCore lane also runs actual cached Presentation helpers
 against the staged iOS compatibility package:
@@ -286,25 +287,26 @@ swift test --filter PrimaryRuntimeSpreadsheetCompatTests
 That test stages the iOS `@oai/artifact-tool` shim, then verifies a workbook
 build with formulas, formula inspection, trace output, a native chart export,
 worksheet PNG render, `.xlsx` export, and `.xlsx` round-trip import. This proves
-the bounded spreadsheet authoring path is executable in JavaScriptCore, while
-the strict checker remains blocked on full artifact-tool render/import parity.
+the bounded spreadsheet authoring path is executable in JavaScriptCore. The
+native desktop artifact-tool render/import stack remains out of scope on iOS.
 
 ## Latest Simulator Smoke
 
-On May 1, 2026, the iPhone host was installed on a booted iPhone 17 Pro Max
-simulator and launched with `JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS=1`. The app
-wrote `/workspace/primary-runtime-skills-ios-report.json` with:
+On May 1, 2026, the iPhone host was installed on a booted iPhone simulator and
+launched with `JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS=1`. The app wrote
+`primary-runtime-skills-ios-report.json` with:
 
-- `overall: blocked`
+- `overall: ready`
 - JavaScriptCore `artifactToolRequire: available`
 - JavaScriptCore `packageExportsCompatibility: available`
 - JavaScriptCore `childProcessPythonBridge: available`
-- Documents blockers: missing `docx`/`lxml`, no `soffice`/LibreOffice, no
-  Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
-- Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
-  compatibility is staged, including basic slide PNG/layout previews, Lucide
-  SVG icon data URLs, standalone Lucide PNG icons, common structural spreadsheet
-  helpers, formulas, and bounded chart export/previews, but full render/import
-  behavior remains unported
-- Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
-  `reportlab` import; `docx`, `lxml`, and `pandas` do not
+- Documents status: ready through staged `lxml`, `python-docx`, and bounded
+  render adapters; full LibreOffice/Poppler visual fidelity remains out of
+  scope
+- Presentations and Spreadsheets status: ready through broad pure-JS
+  artifact-tool compatibility, including basic slide PNG/layout previews,
+  Lucide SVG icon data URLs, standalone Lucide PNG icons, common structural
+  spreadsheet helpers, formulas, compressed XLSX import/export, and bounded
+  chart export/previews
+- Import probes: `docx`, `lxml`, `openpyxl`, `PIL`, `pdf2image`, `numpy`,
+  `pypdf`, and `reportlab` import; optional `pandas` does not
