@@ -37,10 +37,14 @@ def _documents_blockers(missing_modules: list[str]) -> list[str]:
         blockers.append("missing required Python modules: " + ", ".join(missing_modules))
     else:
         blockers.append("all detected document Python modules are importable")
-    if "docx" in missing_modules or "lxml" in missing_modules:
+    if "lxml" not in missing_modules:
+        blockers.append("pure-Python lxml.etree compatibility is staged for tested OOXML helper behavior")
+    if "docx" in missing_modules:
         blockers.append(
-            "Documents helpers require real lxml/python-docx OOXML behavior; a shallow import shim is not sufficient"
+            "Documents helpers that import python-docx still need a Word document model and low-level OOXML constructors ported for iOS"
         )
+    elif "lxml" in missing_modules:
+        blockers.append("lxml.etree-compatible OOXML parsing and mutation support is not importable")
     return blockers
 
 

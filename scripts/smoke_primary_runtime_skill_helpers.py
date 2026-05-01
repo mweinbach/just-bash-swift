@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -30,6 +31,11 @@ SPREADSHEETS_ROOT = (
     PRIMARY_RUNTIME_CACHE
     / "spreadsheets/26.430.10722/skills/spreadsheets"
 )
+DOCUMENTS_ROOT = (
+    PRIMARY_RUNTIME_CACHE
+    / "documents/26.430.10722/skills/documents"
+)
+IOS_PYTHON_APP = REPO_ROOT / "Apps/JustBashPhone/PythonApp"
 
 
 SWIFT_STRING_NAMES = [
@@ -312,6 +318,121 @@ console.log(JSON.stringify({ ok: true }));
     }
 
 
+def write_minimal_docx(path: Path) -> None:
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+</Types>
+"""
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+"""
+    document_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdComments" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
+</Relationships>
+"""
+    document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:commentRangeStart w:id="0"/>
+      <w:r><w:t>Hello</w:t></w:r>
+      <w:commentRangeEnd w:id="0"/>
+      <w:r><w:commentReference w:id="0"/></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+    comments = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="JustBash"><w:p><w:r><w:t>Remove me</w:t></w:r></w:p></w:comment>
+</w:comments>
+"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("word/_rels/document.xml.rels", document_rels)
+        zf.writestr("word/document.xml", document)
+        zf.writestr("word/comments.xml", comments)
+
+
+def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str, object]:
+    input_docx = workdir / "documents-in.docx"
+    protected_docx = workdir / "documents-protected.docx"
+    stripped_docx = workdir / "documents-stripped.docx"
+    write_minimal_docx(input_docx)
+
+    python_env = env.copy()
+    existing_path = python_env.get("PYTHONPATH")
+    python_env["PYTHONPATH"] = (
+        str(IOS_PYTHON_APP)
+        if not existing_path
+        else str(IOS_PYTHON_APP) + os.pathsep + existing_path
+    )
+
+    protection = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "scripts/set_protection.py"),
+            str(input_docx),
+            "--mode",
+            "readOnly",
+            "--out",
+            str(protected_docx),
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents set_protection",
+    )
+    require_success(protection)
+
+    strip = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "scripts/comments_strip.py"),
+            str(protected_docx),
+            "--out",
+            str(stripped_docx),
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents comments_strip",
+    )
+    require_success(strip)
+
+    with zipfile.ZipFile(stripped_docx) as zf:
+        names = set(zf.namelist())
+        settings = zf.read("word/settings.xml").decode("utf-8")
+        document = zf.read("word/document.xml").decode("utf-8")
+        content_types = zf.read("[Content_Types].xml").decode("utf-8")
+        rels = zf.read("word/_rels/document.xml.rels").decode("utf-8")
+
+    if "word/comments.xml" in names:
+        raise RuntimeError("comments_strip did not remove word/comments.xml")
+    for marker in ["commentRangeStart", "commentRangeEnd", "commentReference"]:
+        if marker in document:
+            raise RuntimeError(f"comments_strip left {marker} in document.xml")
+    if "comments" in rels or "comments.xml" in content_types:
+        raise RuntimeError("comments_strip left comment relationships/content types")
+    if "documentProtection" not in settings or "readOnly" not in settings:
+        raise RuntimeError("set_protection did not create readOnly settings.xml")
+
+    return {
+        "result": protection,
+        "secondResult": strip,
+        "artifacts": {
+            "protected": {"path": str(protected_docx), "bytes": protected_docx.stat().st_size},
+            "stripped": {"path": str(stripped_docx), "bytes": stripped_docx.stat().st_size},
+        },
+    }
+
+
 def build_report(workdir: Path) -> dict[str, object]:
     if not SANDBOX_SERVICE.exists():
         raise FileNotFoundError(SANDBOX_SERVICE)
@@ -319,6 +440,8 @@ def build_report(workdir: Path) -> dict[str, object]:
         raise FileNotFoundError(PRESENTATIONS_ROOT)
     if not SPREADSHEETS_ROOT.exists():
         raise FileNotFoundError(SPREADSHEETS_ROOT)
+    if not DOCUMENTS_ROOT.exists():
+        raise FileNotFoundError(DOCUMENTS_ROOT)
 
     strings = extract_swift_raw_strings(SANDBOX_SERVICE.read_text(encoding="utf-8"))
     home = workdir / "home"
@@ -329,6 +452,7 @@ def build_report(workdir: Path) -> dict[str, object]:
 
     checks: list[dict[str, object]] = []
     for label, fn in [
+        ("documents.lxml_ooxml_helpers", smoke_documents_lxml_helpers),
         ("presentations.build_artifact_deck", smoke_presentation_helper),
         ("presentations.render_lucide_icon", smoke_lucide_renderer),
         ("spreadsheets.artifact_tool_api", smoke_spreadsheet_api),

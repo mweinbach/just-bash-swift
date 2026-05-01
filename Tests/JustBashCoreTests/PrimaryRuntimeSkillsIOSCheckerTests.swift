@@ -44,11 +44,15 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         let presentationsSkillFamily = URL(
             fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations"
         )
+        let documentsSkillFamily = URL(
+            fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents"
+        )
 
         try XCTSkipUnless(
             FileManager.default.fileExists(atPath: smokeScript.path)
-                && FileManager.default.fileExists(atPath: presentationsSkillFamily.path),
-            "Primary-runtime presentation/spreadsheet skill cache is not available on this machine"
+                && FileManager.default.fileExists(atPath: presentationsSkillFamily.path)
+                && FileManager.default.fileExists(atPath: documentsSkillFamily.path),
+            "Primary-runtime document/presentation/spreadsheet skill cache is not available on this machine"
         )
         try XCTSkipUnless(commandSucceeds("node", "--version"), "Node is required for cached helper smoke")
 
@@ -62,6 +66,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             XCTFail("Missing smoke checks in payload: \(payload)")
             return
         }
+        XCTAssertContainsCheck(named: "documents.lxml_ooxml_helpers", in: checks)
         XCTAssertContainsCheck(named: "presentations.build_artifact_deck", in: checks)
         XCTAssertContainsCheck(named: "presentations.render_lucide_icon", in: checks)
         XCTAssertContainsCheck(named: "spreadsheets.artifact_tool_api", in: checks)
@@ -152,10 +157,10 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(in: documents, containing: "Documents Python dependency scan inspected all helper scripts")
         XCTAssertContainsFinding(in: documents, containing: "python-docx")
-        XCTAssertContainsFinding(in: documents, containing: "lxml")
+        XCTAssertContainsFinding(in: documents, containing: "pure-Python lxml.etree compatibility")
         XCTAssertContainsFinding(
             in: documents,
-            containing: "real lxml/python-docx OOXML behavior"
+            containing: "Word document model and low-level OOXML constructors"
         )
         XCTAssertContainsFinding(
             in: documents,

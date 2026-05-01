@@ -9,8 +9,10 @@
 # - Pillow has CPython 3.14 iOS wheels on PyPI.
 # - pdf2image and reportlab resolve for iOS when Pillow's native wheel is
 #   installed per architecture.
-# - lxml, pandas, and scipy do not currently resolve for CPython 3.14 iPhoneOS
-#   via PyPI + BeeWare's secondary wheel index.
+# - upstream lxml, pandas, and scipy do not currently resolve for CPython 3.14
+#   iPhoneOS via PyPI + BeeWare's secondary wheel index. A pure-Python
+#   lxml.etree compatibility package is staged in the app package root for
+#   tested cached Documents helper behavior.
 # - python-docx does not currently resolve for CPython 3.14 iPhoneOS because
 #   its lxml dependency is unavailable for this target.
 numpy==2.3.5.post1

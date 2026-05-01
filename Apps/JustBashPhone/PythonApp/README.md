@@ -24,16 +24,17 @@ per device/simulator architecture:
 
 The native installer currently targets packages with compatible CPython 3.14
 iOS wheels: `numpy`, `pillow`, and the Pillow-backed `pdf2image`/`reportlab`
-helpers. `lxml`, `pandas`, and `scipy` are tracked in
-`requirements-native-ios.txt`, but are intentionally left commented until
-compatible iOS wheels resolve. `python-docx` is also tracked there and remains
-disabled because its `lxml` dependency does not resolve for this iOS target.
+helpers. `pandas` and `scipy` are tracked in `requirements-native-ios.txt`, but
+are intentionally left commented until compatible iOS wheels resolve.
+`python-docx` is also tracked there and remains disabled because its upstream
+`lxml` dependency does not resolve for this iOS target.
 
-The primary-runtime Documents skill currently remains blocked on iOS because
-its helpers use real `lxml`/`python-docx` OOXML behavior: namespace-aware XPath,
-parent/sibling mutation, parser options, and low-level Word XML constructors. A
-minimal import shim would not be enough. The viable paths are compatible iOS
-wheels/ports for those packages or a native in-process OOXML adapter that covers
-the same behavior, plus a replacement for `soffice`/Poppler-based rendering.
+The app bundle root includes a pure-Python `lxml.etree` compatibility package
+for the OOXML behavior exercised by cached Documents helpers: namespace-aware XPath,
+parent/sibling mutation, parser options, and XML serialization. The smoke script
+runs cached `set_protection.py` and `comments_strip.py` against generated DOCX
+files with this staged package. Broader Documents support is still blocked on
+helpers that import `python-docx` for the Word document model and low-level OOXML
+constructors, plus replacements for `soffice`/Poppler-based rendering.
 
 Runtime `pip install` is not the supported path on iPhone.

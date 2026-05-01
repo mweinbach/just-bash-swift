@@ -25,6 +25,7 @@ DEFAULT_ARTIFACT_TOOL = (
     Path("/Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime")
     / "dependencies/node/node_modules/@oai/artifact-tool"
 )
+IOS_PYTHON_APP = REPO_ROOT / "Apps/JustBashPhone/PythonApp"
 
 
 @dataclass
@@ -82,6 +83,17 @@ def load_requirements(path: Path) -> set[str]:
         if name:
             packages.add(name)
     return packages
+
+
+def staged_ios_python_package(package_name: str) -> Path | None:
+    package_paths = {
+        "lxml": IOS_PYTHON_APP / "lxml" / "etree.py",
+        "python-docx": IOS_PYTHON_APP / "site-packages/docx/__init__.py",
+    }
+    path = package_paths.get(package_name.lower())
+    if path is not None and path.exists():
+        return path
+    return None
 
 
 def python_import_roots(root: Path) -> set[str]:
@@ -506,7 +518,24 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
         )
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
     native_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt")
-    missing = sorted(pkg for pkg in required if pkg.lower() not in default_reqs and pkg.lower() not in native_reqs)
+    staged_compat = {
+        pkg: staged_path
+        for pkg in required
+        if (staged_path := staged_ios_python_package(pkg)) is not None
+    }
+    if "lxml" in {pkg.lower() for pkg in staged_compat}:
+        report.add(
+            "ok",
+            "pure-Python lxml.etree compatibility is staged for tested OOXML helper behavior",
+            [str(staged_compat[next(pkg for pkg in staged_compat if pkg.lower() == "lxml")])],
+        )
+    missing = sorted(
+        pkg
+        for pkg in required
+        if pkg.lower() not in default_reqs
+        and pkg.lower() not in native_reqs
+        and pkg not in staged_compat
+    )
     if missing:
         report.add(
             "blocked",
@@ -516,14 +545,14 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
                 str(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt"),
             ],
         )
-        if "lxml" in {pkg.lower() for pkg in missing} or "python-docx" in {pkg.lower() for pkg in missing}:
+        if "python-docx" in {pkg.lower() for pkg in missing}:
             report.add(
                 "blocked",
-                "Documents helpers require real lxml/python-docx OOXML behavior; a shallow import shim is not sufficient",
+                "Documents helpers that import python-docx still need a Word document model and low-level OOXML constructors ported for iOS",
                 documents_ooxml_evidence(skill_dir),
             )
     else:
-        report.add("ok", "all detected Python packages are declared for iOS staging")
+        report.add("ok", "all detected Python packages are declared or compat-staged for iOS")
 
     render_text = read_text(render_py)
     if "soffice" in render_text:
