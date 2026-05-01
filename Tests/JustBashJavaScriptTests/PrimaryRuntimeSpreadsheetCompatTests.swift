@@ -5,10 +5,6 @@ import XCTest
 
 final class PrimaryRuntimeSpreadsheetCompatTests: XCTestCase {
     func testSpreadsheetSkillCoreAuthoringRunsAgainstStagedIOSCompatPackageInJavaScriptCore() async throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let spreadsheetSkill = URL(
             fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets/26.430.10722/skills/spreadsheets/SKILL.md"
         )
@@ -18,7 +14,14 @@ final class PrimaryRuntimeSpreadsheetCompatTests: XCTestCase {
             "Primary-runtime spreadsheet skill cache is not available on this machine"
         )
 
-        var files = try stagedArtifactToolFiles(repoRoot: repoRoot)
+        var files = OAIPrimaryRuntimeSupport.packageFiles(configuration: .init(
+            artifactToolRoots: [
+                "/workspace/node_modules/@oai/artifact-tool",
+                "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
+            ],
+            lucideRoots: [],
+            sharpRoots: []
+        ))
         files["/workspace/spreadsheet-smoke.mjs"] = """
         import fs from "node:fs/promises";
         import { DocumentFile, DocumentModel, FileBlob, SpreadsheetFile, Workbook, SUM, Chart } from "@oai/artifact-tool";
@@ -161,49 +164,5 @@ final class PrimaryRuntimeSpreadsheetCompatTests: XCTestCase {
         )
         XCTAssertEqual(artifacts.exitCode, 0, "stdout: \(artifacts.stdout)\nstderr: \(artifacts.stderr)")
         XCTAssertEqual(artifacts.stdout, "ok\n")
-    }
-
-    private func stagedArtifactToolFiles(repoRoot: URL) throws -> [String: String] {
-        let sandboxService = repoRoot.appendingPathComponent("Apps/JustBashPhone/JustBashPhone/SandboxService.swift")
-        let source = try String(contentsOf: sandboxService, encoding: .utf8)
-        let strings = try Dictionary(
-            uniqueKeysWithValues: [
-                "artifactToolPackageJSON",
-                "artifactToolCompatModule",
-                "presentationJSXCompatModule",
-                "presentationJSXRuntimeCompatModule",
-            ].map { name in
-                (name, try extractSwiftRawString(named: name, from: source))
-            }
-        )
-
-        let artifactRoots = [
-            "/workspace/node_modules/@oai/artifact-tool",
-            "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
-        ]
-        return artifactRoots.reduce(into: [:]) { files, artifactRoot in
-            files["\(artifactRoot)/package.json"] = strings["artifactToolPackageJSON"]!
-            files["\(artifactRoot)/dist/artifact_tool.mjs"] = strings["artifactToolCompatModule"]!
-            files["\(artifactRoot)/dist/presentation-jsx/index.mjs"] = strings["presentationJSXCompatModule"]!
-            files["\(artifactRoot)/dist/presentation-jsx/jsx-runtime.mjs"] = strings["presentationJSXRuntimeCompatModule"]!
-            files["\(artifactRoot)/dist/presentation-jsx/jsx-dev-runtime.mjs"] = strings["presentationJSXRuntimeCompatModule"]!
-        }
-    }
-
-    private func extractSwiftRawString(named name: String, from source: String) throws -> String {
-        let escapedName = NSRegularExpression.escapedPattern(for: name)
-        let pattern = "private static let \(escapedName) = #\"\"\"\\n([\\s\\S]*?)\\n    \"\"\"#"
-        let regex = try NSRegularExpression(pattern: pattern)
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        guard let match = regex.firstMatch(in: source, range: range),
-              match.numberOfRanges == 2,
-              let valueRange = Range(match.range(at: 1), in: source) else {
-            throw NSError(
-                domain: "PrimaryRuntimeSpreadsheetCompatTests",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not extract \(name) from SandboxService.swift"]
-            )
-        }
-        return String(source[valueRange])
     }
 }

@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SANDBOX_SERVICE = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
+RUNTIME_SUPPORT = REPO_ROOT / "Sources/JustBash/OAIPrimaryRuntimeSupport.swift"
 PRIMARY_RUNTIME_CACHE = Path("/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime")
 PRESENTATIONS_ROOT = (
     PRIMARY_RUNTIME_CACHE
@@ -56,7 +56,7 @@ def extract_swift_raw_strings(source: str) -> dict[str, str]:
         pattern = rf"private static let {re.escape(name)} = #\"\"\"\n(.*?)\n    \"\"\"#"
         match = re.search(pattern, source, flags=re.S)
         if not match:
-            raise RuntimeError(f"Could not extract {name} from {SANDBOX_SERVICE}")
+            raise RuntimeError(f"Could not extract {name} from {RUNTIME_SUPPORT}")
         values[name] = match.group(1)
     return values
 
@@ -417,11 +417,10 @@ def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str
 
     python_env = env.copy()
     existing_path = python_env.get("PYTHONPATH")
-    python_env["PYTHONPATH"] = (
-        str(IOS_PYTHON_APP)
-        if not existing_path
-        else str(IOS_PYTHON_APP) + os.pathsep + existing_path
-    )
+    python_paths = [str(IOS_PYTHON_APP), str(IOS_PYTHON_APP / "site-packages")]
+    if existing_path:
+        python_paths.append(existing_path)
+    python_env["PYTHONPATH"] = os.pathsep.join(python_paths)
     python_env["PATH"] = str(fake_bin) + os.pathsep + python_env.get("PATH", "")
 
     protection = run_command(
@@ -595,8 +594,8 @@ wb.save(out)
 
 
 def build_report(workdir: Path) -> dict[str, object]:
-    if not SANDBOX_SERVICE.exists():
-        raise FileNotFoundError(SANDBOX_SERVICE)
+    if not RUNTIME_SUPPORT.exists():
+        raise FileNotFoundError(RUNTIME_SUPPORT)
     if not PRESENTATIONS_ROOT.exists():
         raise FileNotFoundError(PRESENTATIONS_ROOT)
     if not SPREADSHEETS_ROOT.exists():
@@ -604,7 +603,7 @@ def build_report(workdir: Path) -> dict[str, object]:
     if not DOCUMENTS_ROOT.exists():
         raise FileNotFoundError(DOCUMENTS_ROOT)
 
-    strings = extract_swift_raw_strings(SANDBOX_SERVICE.read_text(encoding="utf-8"))
+    strings = extract_swift_raw_strings(RUNTIME_SUPPORT.read_text(encoding="utf-8"))
     home = workdir / "home"
     node_modules = stage_runtime(home, strings)
     env = os.environ.copy()

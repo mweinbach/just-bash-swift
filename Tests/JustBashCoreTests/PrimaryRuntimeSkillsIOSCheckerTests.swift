@@ -77,8 +77,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let sandboxService = repoRoot.appendingPathComponent("Apps/JustBashPhone/JustBashPhone/SandboxService.swift")
-        let text = try String(contentsOf: sandboxService, encoding: .utf8)
+        let runtimeSupport = repoRoot.appendingPathComponent("Sources/JustBash/OAIPrimaryRuntimeSupport.swift")
+        let text = try String(contentsOf: runtimeSupport, encoding: .utf8)
 
         XCTAssertTrue(text.contains("bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged"))
         XCTAssertTrue(text.contains("full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine"))

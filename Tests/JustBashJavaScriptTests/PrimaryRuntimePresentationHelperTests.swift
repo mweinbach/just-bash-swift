@@ -5,10 +5,6 @@ import XCTest
 
 final class PrimaryRuntimePresentationHelperTests: XCTestCase {
     func testCachedPresentationHelpersRunAgainstStagedIOSCompatPackageInJavaScriptCore() async throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let presentationScripts = URL(
             fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations/26.430.10722/skills/presentations/scripts"
         )
@@ -18,7 +14,12 @@ final class PrimaryRuntimePresentationHelperTests: XCTestCase {
             "Primary-runtime presentation skill cache is not available on this machine"
         )
 
-        var files = try stagedPrimaryRuntimePackageFiles(repoRoot: repoRoot)
+        let nodeModules = "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"
+        var files = OAIPrimaryRuntimeSupport.packageFiles(configuration: .init(
+            artifactToolRoots: ["\(nodeModules)/@oai/artifact-tool"],
+            lucideRoots: ["\(nodeModules)/lucide"],
+            sharpRoots: []
+        ))
         for script in [
             "artifact_tool_utils.mjs",
             "build_artifact_deck.mjs",
@@ -122,52 +123,5 @@ final class PrimaryRuntimePresentationHelperTests: XCTestCase {
         let layout = try await bash.readFile("/workspace/output/rendered-slide.layout.json")
         XCTAssertTrue(layout.contains(#""name":"title""#) || layout.contains(#""name": "title""#))
         XCTAssertTrue(layout.contains("Smartphone icon"))
-    }
-
-    private func stagedPrimaryRuntimePackageFiles(repoRoot: URL) throws -> [String: String] {
-        let sandboxService = repoRoot.appendingPathComponent("Apps/JustBashPhone/JustBashPhone/SandboxService.swift")
-        let source = try String(contentsOf: sandboxService, encoding: .utf8)
-        let strings = try Dictionary(
-            uniqueKeysWithValues: [
-                "artifactToolPackageJSON",
-                "artifactToolCompatModule",
-                "presentationJSXCompatModule",
-                "presentationJSXRuntimeCompatModule",
-                "lucidePackageJSON",
-                "lucideCompatModule",
-            ].map { name in
-                (name, try extractSwiftRawString(named: name, from: source))
-            }
-        )
-
-        let nodeModules = "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"
-        let artifactRoot = "\(nodeModules)/@oai/artifact-tool"
-        let lucideRoot = "\(nodeModules)/lucide"
-        return [
-            "\(artifactRoot)/package.json": strings["artifactToolPackageJSON"]!,
-            "\(artifactRoot)/dist/artifact_tool.mjs": strings["artifactToolCompatModule"]!,
-            "\(artifactRoot)/dist/presentation-jsx/index.mjs": strings["presentationJSXCompatModule"]!,
-            "\(artifactRoot)/dist/presentation-jsx/jsx-runtime.mjs": strings["presentationJSXRuntimeCompatModule"]!,
-            "\(artifactRoot)/dist/presentation-jsx/jsx-dev-runtime.mjs": strings["presentationJSXRuntimeCompatModule"]!,
-            "\(lucideRoot)/package.json": strings["lucidePackageJSON"]!,
-            "\(lucideRoot)/dist/index.mjs": strings["lucideCompatModule"]!,
-        ]
-    }
-
-    private func extractSwiftRawString(named name: String, from source: String) throws -> String {
-        let escapedName = NSRegularExpression.escapedPattern(for: name)
-        let pattern = "private static let \(escapedName) = #\"\"\"\\n([\\s\\S]*?)\\n    \"\"\"#"
-        let regex = try NSRegularExpression(pattern: pattern)
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        guard let match = regex.firstMatch(in: source, range: range),
-              match.numberOfRanges == 2,
-              let valueRange = Range(match.range(at: 1), in: source) else {
-            throw NSError(
-                domain: "PrimaryRuntimePresentationHelperTests",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not extract \(name) from SandboxService.swift"]
-            )
-        }
-        return String(source[valueRange])
     }
 }

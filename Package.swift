@@ -40,7 +40,7 @@ let package = Package(
             name: "JustBash",
             dependencies: ["JustBashCore", "JustBashFS", "JustBashCommands"],
             path: "Sources/JustBash",
-            sources: ["Bash.swift", "WorkspaceOptions.swift"]
+            sources: ["Bash.swift", "WorkspaceOptions.swift", "OAIPrimaryRuntimeSupport.swift"]
         ),
         .target(
             name: "JustBashJavaScript",

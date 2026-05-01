@@ -26,6 +26,8 @@ DEFAULT_ARTIFACT_TOOL = (
     / "dependencies/node/node_modules/@oai/artifact-tool"
 )
 IOS_PYTHON_APP = REPO_ROOT / "Apps/JustBashPhone/PythonApp"
+RUNTIME_SUPPORT = REPO_ROOT / "Sources/JustBash/OAIPrimaryRuntimeSupport.swift"
+SANDBOX_SERVICE = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
 
 
 @dataclass
@@ -311,11 +313,10 @@ def artifact_tool_evidence(artifact_tool_root: Path) -> list[str]:
 
 
 def artifact_tool_compat_evidence() -> list[str]:
-    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
     evidence = [
-        line_for(sandbox_service, "primaryRuntimeArtifactToolFiles"),
-        line_for(sandbox_service, '"/node_modules/@oai/artifact-tool"'),
-        line_for(sandbox_service, "artifactToolCompatModule"),
+        line_for(RUNTIME_SUPPORT, "packageFiles"),
+        line_for(RUNTIME_SUPPORT, '"/node_modules/@oai/artifact-tool"'),
+        line_for(RUNTIME_SUPPORT, "artifactToolCompatModule"),
     ]
     return evidence
 
@@ -351,12 +352,11 @@ def check_artifact_tool_runtime(
             [str(require_resolver), str(artifact_tool_root / "dist" / "artifact_tool.mjs")],
         )
 
-    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
-    sandbox_text = read_text(sandbox_service)
+    runtime_text = read_text(RUNTIME_SUPPORT)
     has_compat_package = all(
-        marker in sandbox_text
+        marker in runtime_text
         for marker in (
-            "primaryRuntimeArtifactToolFiles",
+            "packageFiles",
             "artifactToolCompatModule",
             "SpreadsheetFile",
             "PresentationFile",
@@ -364,9 +364,9 @@ def check_artifact_tool_runtime(
         )
     )
     if (
-        "primaryRuntimeArtifactToolFiles" in sandbox_text
-        and "artifactToolCompatModule" in sandbox_text
-        and "/node_modules/@oai/artifact-tool" in sandbox_text
+        "packageFiles" in runtime_text
+        and "artifactToolCompatModule" in runtime_text
+        and "/node_modules/@oai/artifact-tool" in runtime_text
     ):
         report.add(
             "ok",
@@ -385,64 +385,64 @@ def check_artifact_tool_runtime(
         "this.tables = new LooseCollection",
         "this.sparklines = new LooseCollection",
     )
-    if all(method in sandbox_text for method in spreadsheet_structural_methods):
+    if all(method in runtime_text for method in spreadsheet_structural_methods):
         report.add(
             "ok",
             "iOS artifact-tool compatibility covers common spreadsheet structural APIs such as worksheet getOrAdd/getUsedRange, range copy/write helpers, table/chart/comment/sparkline stubs, and workbook trace stubs",
             artifact_tool_compat_evidence(),
         )
 
-    if "unzipOfficeZip" in sandbox_text and "unzipViaSandbox" in sandbox_text and "parseWorksheetCells" in sandbox_text:
+    if "unzipOfficeZip" in runtime_text and "unzipViaSandbox" in runtime_text and "parseWorksheetCells" in runtime_text:
         report.add(
             "ok",
             "iOS artifact-tool compatibility can import stored XLSX workbooks and sandbox-extracted compressed XLSX workbooks, including files produced by its own exportXlsx path",
             [
-                line_for(sandbox_service, "unzipOfficeZip"),
-                line_for(sandbox_service, "unzipViaSandbox"),
-                line_for(sandbox_service, "parseWorksheetCells"),
-                line_for(sandbox_service, "static async importXlsx"),
+                line_for(RUNTIME_SUPPORT, "unzipOfficeZip"),
+                line_for(RUNTIME_SUPPORT, "unzipViaSandbox"),
+                line_for(RUNTIME_SUPPORT, "parseWorksheetCells"),
+                line_for(RUNTIME_SUPPORT, "static async importXlsx"),
             ],
         )
-    elif "SpreadsheetFile.importXlsx" in sandbox_text:
+    elif "SpreadsheetFile.importXlsx" in runtime_text:
         report.add(
             "blocked",
             "SpreadsheetFile.importXlsx is not implemented for the iOS artifact-tool compatibility package",
-            [line_for(sandbox_service, "SpreadsheetFile.importXlsx")],
+            [line_for(RUNTIME_SUPPORT, "SpreadsheetFile.importXlsx")],
         )
 
-    if "pngImage" in sandbox_text and "drawText" in sandbox_text and "async render(options)" in sandbox_text:
+    if "pngImage" in runtime_text and "drawText" in runtime_text and "async render(options)" in runtime_text:
         report.add(
             "ok",
             "iOS artifact-tool compatibility can render basic worksheet ranges to PNG without native renderer dependencies",
             [
-                line_for(sandbox_service, "pngImage"),
-                line_for(sandbox_service, "drawText"),
-                line_for(sandbox_service, "async render(options)"),
+                line_for(RUNTIME_SUPPORT, "pngImage"),
+                line_for(RUNTIME_SUPPORT, "drawText"),
+                line_for(RUNTIME_SUPPORT, "async render(options)"),
             ],
         )
-    elif "unsupportedArtifactToolFeature(\"Workbook.render\")" in sandbox_text:
+    elif "unsupportedArtifactToolFeature(\"Workbook.render\")" in runtime_text:
         report.add(
             "blocked",
             "Workbook.render is not implemented for the iOS artifact-tool compatibility package",
-            [line_for(sandbox_service, "Workbook.render")],
+            [line_for(RUNTIME_SUPPORT, "Workbook.render")],
         )
 
-    if "renderPresentationPng" in sandbox_text and "presentationLayout" in sandbox_text:
+    if "renderPresentationPng" in runtime_text and "presentationLayout" in runtime_text:
         report.add(
             "ok",
             "iOS artifact-tool compatibility can render basic presentation slides to PNG and emit layout JSON without native renderer dependencies",
             [
-                line_for(sandbox_service, "renderPresentationPng"),
-                line_for(sandbox_service, "presentationLayout"),
+                line_for(RUNTIME_SUPPORT, "renderPresentationPng"),
+                line_for(RUNTIME_SUPPORT, "presentationLayout"),
             ],
         )
-    elif "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text:
+    elif "unsupportedArtifactToolFeature(`Presentation.export" in runtime_text:
         report.add(
             "blocked",
             "iOS artifact-tool compatibility explicitly rejects presentation PNG export required by the presentation skill instead of returning fake visual verification",
             [
-                line_for(sandbox_service, "unsupportedArtifactToolFeature"),
-                line_for(sandbox_service, "Presentation.export"),
+                line_for(RUNTIME_SUPPORT, "unsupportedArtifactToolFeature"),
+                line_for(RUNTIME_SUPPORT, "Presentation.export"),
             ],
         )
 
@@ -712,28 +712,27 @@ def check_presentations(
         "@oai/artifact-tool is required; the iOS host has a broad compatibility package, but the native skia-canvas/Walnut runtime stack is not ported",
         artifact_tool_root,
     )
-    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
-    sandbox_text = read_text(sandbox_service)
-    if "lucidePackageJSON" in sandbox_text and "lucideCompatModule" in sandbox_text:
+    runtime_text = read_text(RUNTIME_SUPPORT)
+    if "lucidePackageJSON" in runtime_text and "lucideCompatModule" in runtime_text:
         report.add(
             "ok",
             "iOS host stages a pure-JS lucide compatibility package so presentation ctx.addLucideIcon can produce SVG data URLs without sharp or skia-canvas",
             [
-                line_for(sandbox_service, "lucidePackageJSON"),
-                line_for(sandbox_service, "lucideCompatModule"),
+                line_for(RUNTIME_SUPPORT, "lucidePackageJSON"),
+                line_for(RUNTIME_SUPPORT, "lucideCompatModule"),
             ],
         )
     js_spawn_evidence = presentation_js_spawn_evidence(skill_dir)
     if js_spawn_evidence:
         report.add(
             "ok",
-            "JavaScript presentation helpers use child_process.spawnSync, and the iOS bridge can route those calls to sandbox-provided commands such as python3",
-            [
-                *js_spawn_evidence,
-                str(REPO_ROOT / "Sources/JustBashJavaScript/Bridges/ChildProcessBridge.swift"),
-                line_for(REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift", 'AnyBashCommand(name: "python3"'),
-            ],
-        )
+                "JavaScript presentation helpers use child_process.spawnSync, and the iOS bridge can route those calls to sandbox-provided commands such as python3",
+                [
+                    *js_spawn_evidence,
+                    str(REPO_ROOT / "Sources/JustBashJavaScript/Bridges/ChildProcessBridge.swift"),
+                    line_for(SANDBOX_SERVICE, 'AnyBashCommand(name: "python3"'),
+                ],
+            )
     python_subprocess_evidence = presentation_python_subprocess_evidence(skill_dir)
     if python_subprocess_evidence:
         python_support = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/PythonSupport.swift"
@@ -756,20 +755,20 @@ def check_presentations(
             )
     native_graphics_evidence = presentation_native_graphics_evidence(skill_dir)
     if native_graphics_evidence:
-        if "sharpPackageJSON" in sandbox_text and "sharpCompatModule" in sandbox_text:
+        if "sharpPackageJSON" in runtime_text and "sharpCompatModule" in runtime_text:
             report.add(
                 "ok",
                 "iOS host stages a pure-JS sharp compatibility package for the presentation Lucide SVG-to-PNG helper path",
                 [
                     *native_graphics_evidence,
-                    line_for(sandbox_service, "sharpPackageJSON"),
-                    line_for(sandbox_service, "sharpCompatModule"),
+                    line_for(RUNTIME_SUPPORT, "sharpPackageJSON"),
+                    line_for(RUNTIME_SUPPORT, "sharpCompatModule"),
                 ],
             )
             report.add(
                 "warning",
                 "sharp compatibility is bounded to SVG icon PNG output; native sharp/skia-canvas rendering remains unavailable on iOS",
-                [line_for(sandbox_service, "sharpCompatModule")],
+                [line_for(RUNTIME_SUPPORT, "sharpCompatModule")],
             )
         else:
             report.add(
@@ -819,16 +818,15 @@ def check_spreadsheets(
         "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a broad compatibility package, but full-fidelity native inspection/render behavior is not ported",
         artifact_tool_root,
     )
-    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
-    sandbox_text = read_text(sandbox_service)
-    if all(marker in sandbox_text for marker in ("evaluateFormula", "inspectFormulaErrors", "traceCell")):
+    runtime_text = read_text(RUNTIME_SUPPORT)
+    if all(marker in runtime_text for marker in ("evaluateFormula", "inspectFormulaErrors", "traceCell")):
         report.add(
             "ok",
             "iOS artifact-tool compatibility computes common arithmetic/range formulas, scans formula errors, and returns dependency trace trees",
             [
-                line_for(sandbox_service, "function evaluateFormula"),
-                line_for(sandbox_service, "function inspectFormulaErrors"),
-                line_for(sandbox_service, "function traceCell"),
+                line_for(RUNTIME_SUPPORT, "function evaluateFormula"),
+                line_for(RUNTIME_SUPPORT, "function inspectFormulaErrors"),
+                line_for(RUNTIME_SUPPORT, "function traceCell"),
             ],
         )
         report.add(
@@ -849,14 +847,14 @@ def check_spreadsheets(
             "Swift JavaScriptCore test covers spreadsheet skill core authoring with formulas, inspect, trace, chart export, PNG render, and XLSX round-trip through the staged iOS compatibility package",
             [str(spreadsheet_jscore_test)],
         )
-    if all(marker in sandbox_text for marker in ("function chartXml", "function drawingXml", "function renderChart")):
+    if all(marker in runtime_text for marker in ("function chartXml", "function drawingXml", "function renderChart")):
         report.add(
             "ok",
             "iOS artifact-tool compatibility exports native XLSX chart parts for bounded source-range charts and renders basic chart previews in worksheet PNG output",
             [
-                line_for(sandbox_service, "function chartXml"),
-                line_for(sandbox_service, "function drawingXml"),
-                line_for(sandbox_service, "function renderChart"),
+                line_for(RUNTIME_SUPPORT, "function chartXml"),
+                line_for(RUNTIME_SUPPORT, "function drawingXml"),
+                line_for(RUNTIME_SUPPORT, "function renderChart"),
             ],
         )
         report.add(
