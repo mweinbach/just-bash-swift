@@ -302,14 +302,30 @@ def check_artifact_tool_runtime(
             [line_for(sandbox_service, "SpreadsheetFile.importXlsx")],
         )
 
-    if "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text or "unsupportedArtifactToolFeature(\"Workbook.render\")" in sandbox_text:
+    if "pngImage" in sandbox_text and "drawText" in sandbox_text and "async render(options)" in sandbox_text:
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility can render basic worksheet ranges to PNG without native renderer dependencies",
+            [
+                line_for(sandbox_service, "pngImage"),
+                line_for(sandbox_service, "drawText"),
+                line_for(sandbox_service, "async render(options)"),
+            ],
+        )
+    elif "unsupportedArtifactToolFeature(\"Workbook.render\")" in sandbox_text:
         report.add(
             "blocked",
-            "iOS artifact-tool compatibility explicitly rejects render APIs required by these skills instead of returning fake visual verification",
+            "Workbook.render is not implemented for the iOS artifact-tool compatibility package",
+            [line_for(sandbox_service, "Workbook.render")],
+        )
+
+    if "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text:
+        report.add(
+            "blocked",
+            "iOS artifact-tool compatibility explicitly rejects presentation PNG export required by the presentation skill instead of returning fake visual verification",
             [
                 line_for(sandbox_service, "unsupportedArtifactToolFeature"),
                 line_for(sandbox_service, "Presentation.export"),
-                line_for(sandbox_service, "Workbook.render"),
             ],
         )
 
@@ -550,7 +566,7 @@ def check_spreadsheets(
     check_artifact_tool_runtime(
         report,
         skill_md,
-        "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render/import behavior is not ported",
+        "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render behavior is not ported",
         artifact_tool_root,
     )
     report.add(

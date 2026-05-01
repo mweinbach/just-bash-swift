@@ -395,6 +395,10 @@ actor SandboxService {
       return Uint8Array.from([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]);
     }
 
+    function u32be(value) {
+      return Uint8Array.from([(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]);
+    }
+
     const CRC_TABLE = (() => {
       const table = [];
       for (let n = 0; n < 256; n += 1) {
@@ -449,6 +453,57 @@ actor SandboxService {
       return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
     }
 
+    function adler32(data) {
+      let a = 1;
+      let b = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        a = (a + data[i]) % 65521;
+        b = (b + a) % 65521;
+      }
+      return ((b << 16) | a) >>> 0;
+    }
+
+    function zlibStored(data) {
+      const chunks = [Uint8Array.from([0x78, 0x01])];
+      let offset = 0;
+      while (offset < data.length) {
+        const size = Math.min(65535, data.length - offset);
+        const final = offset + size >= data.length ? 1 : 0;
+        chunks.push(Uint8Array.from([final, size & 255, (size >>> 8) & 255, (~size) & 255, ((~size) >>> 8) & 255]));
+        chunks.push(data.slice(offset, offset + size));
+        offset += size;
+      }
+      chunks.push(u32be(adler32(data)));
+      return concat(chunks);
+    }
+
+    function pngChunk(type, data) {
+      const typeBytes = strBytes(type);
+      const payload = bytes(data);
+      const crc = crc32(concat([typeBytes, payload]));
+      return concat([u32be(payload.length), typeBytes, payload, u32be(crc)]);
+    }
+
+    function pngImage(width, height, rgba) {
+      const stride = width * 4;
+      const rows = new Uint8Array((stride + 1) * height);
+      for (let y = 0; y < height; y += 1) {
+        rows[y * (stride + 1)] = 0;
+        rows.set(rgba.slice(y * stride, y * stride + stride), y * (stride + 1) + 1);
+      }
+      const header = concat([
+        u32be(width),
+        u32be(height),
+        Uint8Array.from([8, 6, 0, 0, 0])
+      ]);
+      return concat([
+        Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        pngChunk("IHDR", header),
+        pngChunk("IDAT", zlibStored(rows)),
+        pngChunk("IEND", new Uint8Array())
+      ]);
+    }
+
     function unzipStored(filesBlob) {
       const data = bytes(filesBlob);
       const files = {};
@@ -479,6 +534,77 @@ actor SandboxService {
         offset = dataStart + compressedSize;
       }
       return files;
+    }
+
+    const FONT_3X5 = {
+      "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"],
+      "2": ["111", "001", "111", "100", "111"], "3": ["111", "001", "111", "001", "111"],
+      "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "111", "001", "111"],
+      "6": ["111", "100", "111", "101", "111"], "7": ["111", "001", "010", "010", "010"],
+      "8": ["111", "101", "111", "101", "111"], "9": ["111", "101", "111", "001", "111"],
+      "A": ["010", "101", "111", "101", "101"], "B": ["110", "101", "110", "101", "110"],
+      "C": ["111", "100", "100", "100", "111"], "D": ["110", "101", "101", "101", "110"],
+      "E": ["111", "100", "110", "100", "111"], "F": ["111", "100", "110", "100", "100"],
+      "G": ["111", "100", "101", "101", "111"], "H": ["101", "101", "111", "101", "101"],
+      "I": ["111", "010", "010", "010", "111"], "J": ["001", "001", "001", "101", "111"],
+      "K": ["101", "101", "110", "101", "101"], "L": ["100", "100", "100", "100", "111"],
+      "M": ["101", "111", "111", "101", "101"], "N": ["101", "111", "111", "111", "101"],
+      "O": ["111", "101", "101", "101", "111"], "P": ["111", "101", "111", "100", "100"],
+      "Q": ["111", "101", "101", "111", "001"], "R": ["111", "101", "111", "110", "101"],
+      "S": ["111", "100", "111", "001", "111"], "T": ["111", "010", "010", "010", "010"],
+      "U": ["101", "101", "101", "101", "111"], "V": ["101", "101", "101", "101", "010"],
+      "W": ["101", "101", "111", "111", "101"], "X": ["101", "101", "010", "101", "101"],
+      "Y": ["101", "101", "010", "010", "010"], "Z": ["111", "001", "010", "100", "111"],
+      ".": ["000", "000", "000", "000", "010"], "-": ["000", "000", "111", "000", "000"],
+      "_": ["000", "000", "000", "000", "111"], "/": ["001", "001", "010", "100", "100"],
+      ":": ["000", "010", "000", "010", "000"], "=": ["000", "111", "000", "111", "000"],
+      "#": ["101", "111", "101", "111", "101"], "%": ["101", "001", "010", "100", "101"],
+      "$": ["111", "110", "111", "011", "111"], " ": ["000", "000", "000", "000", "000"]
+    };
+
+    function makeCanvas(width, height, color) {
+      const rgba = new Uint8Array(width * height * 4);
+      for (let i = 0; i < rgba.length; i += 4) {
+        rgba[i] = color[0]; rgba[i + 1] = color[1]; rgba[i + 2] = color[2]; rgba[i + 3] = color[3];
+      }
+      return { width, height, rgba };
+    }
+
+    function setPixel(canvas, x, y, color) {
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
+      const index = (y * canvas.width + x) * 4;
+      canvas.rgba[index] = color[0];
+      canvas.rgba[index + 1] = color[1];
+      canvas.rgba[index + 2] = color[2];
+      canvas.rgba[index + 3] = color[3];
+    }
+
+    function fillRect(canvas, x, y, width, height, color) {
+      for (let yy = Math.max(0, y); yy < Math.min(canvas.height, y + height); yy += 1) {
+        for (let xx = Math.max(0, x); xx < Math.min(canvas.width, x + width); xx += 1) setPixel(canvas, xx, yy, color);
+      }
+    }
+
+    function strokeRect(canvas, x, y, width, height, color) {
+      fillRect(canvas, x, y, width, 1, color);
+      fillRect(canvas, x, y + height - 1, width, 1, color);
+      fillRect(canvas, x, y, 1, height, color);
+      fillRect(canvas, x + width - 1, y, 1, height, color);
+    }
+
+    function drawText(canvas, text, x, y, maxWidth, color) {
+      const scale = 2;
+      let cursor = x;
+      const value = String(text == null ? "" : text).toUpperCase();
+      for (let i = 0; i < value.length && cursor + 3 * scale <= x + maxWidth; i += 1) {
+        const glyph = FONT_3X5[value[i]] || FONT_3X5["#"];
+        glyph.forEach((row, gy) => {
+          for (let gx = 0; gx < row.length; gx += 1) {
+            if (row[gx] === "1") fillRect(canvas, cursor + gx * scale, y + gy * scale, scale, scale, color);
+          }
+        });
+        cursor += 4 * scale;
+      }
     }
 
     function xml(value) {
@@ -838,8 +964,32 @@ actor SandboxService {
       getActiveWorksheet() {
         return this.worksheets.items[0] || this.worksheets.add("Sheet1");
       }
-      async render() {
-        unsupportedArtifactToolFeature("Workbook.render");
+      async render(options) {
+        const opts = options || {};
+        const format = opts.format || "png";
+        if (format !== "png") unsupportedArtifactToolFeature(`Workbook.render(${format})`);
+        const sheet = (opts.sheetName && this.worksheets.getItem(opts.sheetName)) || this.getActiveWorksheet();
+        const range = opts.range ? sheet.getRange(opts.range) : sheet.getUsedRange();
+        const cellWidth = Math.max(48, Math.min(220, Math.round((opts.cellWidth || 112) * (opts.scale || 1))));
+        const cellHeight = Math.max(22, Math.min(72, Math.round((opts.cellHeight || 28) * (opts.scale || 1))));
+        const rows = Math.min(range.bounds.rows, Math.max(1, Math.floor(1800 / cellHeight)));
+        const cols = Math.min(range.bounds.cols, Math.max(1, Math.floor(1800 / cellWidth)));
+        const width = cols * cellWidth + 1;
+        const height = rows * cellHeight + 1;
+        const canvas = makeCanvas(width, height, [255, 255, 255, 255]);
+        const grid = [209, 213, 219, 255];
+        const text = [17, 24, 39, 255];
+        for (let r = 0; r < rows; r += 1) {
+          for (let c = 0; c < cols; c += 1) {
+            const x = c * cellWidth;
+            const y = r * cellHeight;
+            const record = sheet.cells[`${range.bounds.row + r},${range.bounds.col + c}`] || {};
+            const value = record.formula || record.value;
+            strokeRect(canvas, x, y, cellWidth + 1, cellHeight + 1, grid);
+            drawText(canvas, value == null ? "" : value, x + 6, y + 8, cellWidth - 12, text);
+          }
+        }
+        return new FileBlob(pngImage(width, height, canvas.rgba), MIME.png);
       }
       inspect(options) {
         return { ndjson: JSON.stringify({ kind: "workbook", sheets: this.worksheets.items.map((s) => s.name), options: options || {} }) + "\n" };
@@ -1198,7 +1348,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:D4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -1219,7 +1369,7 @@ actor SandboxService {
                 )
             }
             let unsupportedFullApiResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, Presentation } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Workbook.render", () => Workbook.create().render({ sheetName: "Sheet1" })); await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
+                #"js-exec -m -c 'import { Presentation } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
             )
 
             let report = Self.primaryRuntimeSkillReportJSON(
@@ -1281,8 +1431,7 @@ actor SandboxService {
             skill: "spreadsheets",
             fallback: [
                 "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
-                "limited uncompressed .xlsx import/export is staged; full artifact-tool inspection/render/import behavior is not ported to iOS",
-                "render APIs fail explicitly instead of returning fake visual verification",
+                "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
                 "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
                 "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
                 "missing optional spreadsheet Python modules: pandas, docx",

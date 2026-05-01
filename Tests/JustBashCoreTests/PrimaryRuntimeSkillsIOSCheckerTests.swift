@@ -94,7 +94,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
 
         XCTAssertEqual(presentations["status"] as? String, "blocked")
         XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
-        XCTAssertContainsFinding(in: presentations, containing: "explicitly rejects render APIs")
+        XCTAssertContainsFinding(in: presentations, containing: "explicitly rejects presentation PNG export")
         XCTAssertContainsFinding(in: presentations, containing: "spawn host Python/Node subprocesses")
         XCTAssertContainsFinding(in: presentations, containing: "sharp or skia-canvas native graphics packages")
         XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
@@ -103,8 +103,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertEqual(spreadsheets["status"] as? String, "blocked")
         XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
         XCTAssertContainsFinding(in: spreadsheets, containing: "import uncompressed XLSX")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "render basic worksheet ranges to PNG")
         XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "explicitly rejects render APIs")
         XCTAssertContainsFinding(in: spreadsheets, containing: "require formula computation")
         XCTAssertContainsFinding(in: spreadsheets, containing: "require native Excel charts")
         XCTAssertContainsFinding(in: spreadsheets, containing: "skia-canvas")
