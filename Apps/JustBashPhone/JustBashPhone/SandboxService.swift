@@ -881,6 +881,34 @@ actor SandboxService {
         let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
         let esmStatus = esmResult?.exitCode == 0 ? "available" : "blocked"
         let packageExportsStatus = packageExportsResult?.exitCode == 0 ? "available" : "blocked"
+        let documentBlockers = pythonSkillBlockers(
+            from: pythonResult,
+            skill: "documents",
+            fallback: [
+                "requires soffice/LibreOffice render QA",
+                "uses subprocess-based document rendering",
+                "missing required Python modules: docx, lxml",
+            ]
+        )
+        let spreadsheetBlockers = pythonSkillBlockers(
+            from: pythonResult,
+            skill: "spreadsheets",
+            fallback: [
+                "limited pure-JS @oai/artifact-tool workbook export compatibility is staged",
+                "full artifact-tool inspection/render/import behavior is not ported to iOS",
+                "missing optional spreadsheet Python modules: pandas, docx",
+            ]
+        )
+        let documentBlockersJSON = jsonStringArray(
+            documentBlockers,
+            itemIndent: "                ",
+            closingIndent: "              "
+        )
+        let spreadsheetBlockersJSON = jsonStringArray(
+            spreadsheetBlockers,
+            itemIndent: "                ",
+            closingIndent: "              "
+        )
         return """
         {
           "platform": "ios",
@@ -923,11 +951,7 @@ actor SandboxService {
           "skills": {
             "documents": {
               "status": "blocked",
-              "blockers": [
-                "requires soffice/LibreOffice render QA",
-                "uses subprocess-based document rendering",
-                "requires Python packages not staged in the default iOS bundle"
-              ]
+              "blockers": \(documentBlockersJSON)
             },
             "presentations": {
               "status": "blocked",
@@ -938,16 +962,41 @@ actor SandboxService {
             },
             "spreadsheets": {
               "status": "blocked",
-              "blockers": [
-                "limited pure-JS @oai/artifact-tool workbook export compatibility is staged",
-                "full artifact-tool inspection/render/import behavior is not ported to iOS"
-              ]
+              "blockers": \(spreadsheetBlockersJSON)
             }
           },
           "reportPath": "/workspace/primary-runtime-skills-ios-report.json"
         }
 
         """
+    }
+
+    private static func pythonSkillBlockers(
+        from pythonResult: PythonExecResult,
+        skill: String,
+        fallback: [String]
+    ) -> [String] {
+        guard pythonResult.exitCode == 0,
+              let data = pythonResult.stdout.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let skills = payload["skills"] as? [String: Any],
+              let skillPayload = skills[skill] as? [String: Any],
+              let blockers = skillPayload["blockers"] as? [String] else {
+            return fallback
+        }
+        return blockers
+    }
+
+    private static func jsonStringArray(
+        _ values: [String],
+        itemIndent: String,
+        closingIndent: String
+    ) -> String {
+        guard !values.isEmpty else { return "[]" }
+        let items = values
+            .map { "\(itemIndent)\"\(jsonEscaped($0))\"" }
+            .joined(separator: ",\n")
+        return "[\n\(items)\n\(closingIndent)]"
     }
 
     private static func stageArtifactToolPackageProbe(in ctx: CommandContext) throws {
