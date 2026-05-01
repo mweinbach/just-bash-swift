@@ -143,6 +143,21 @@ actor SandboxService {
         try? shellSmokeOutput.write(toFile: shellSmokePath, atomically: true, encoding: .utf8)
     }
 
+    func runPrimaryRuntimeSkillsSmokeIfRequested() async {
+        guard ProcessInfo.processInfo.environment["JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS"] == "1" else {
+            return
+        }
+
+        let result = await run("primary-runtime-skills-check")
+        let smokePath = Self.workspaceDirectoryPath() + "/primary-runtime-skills-smoke-result.txt"
+        let output = """
+        exitCode=\(result.exitCode)
+        stdout=\(result.stdout)
+        stderr=\(result.stderr)
+        """
+        try? output.write(toFile: smokePath, atomically: true, encoding: .utf8)
+    }
+
     func writeFile(_ path: String, contents: String) async throws {
         let fs = await bash.fs
         let normalized = fs.normalizePath(path, relativeTo: "/workspace")
@@ -295,10 +310,10 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -c 'try { require("@oai/artifact-tool"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exitCode = 1; }'"#
+                #"js-exec -c 'try { require("@oai/artifact-tool"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
-                #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exitCode = 1; }'"#
+                #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
             )
             let esmResult = await ctx.executeSubshell?(
                 #"js-exec -m -c 'import fs from "node:fs/promises"; await fs.writeFile("/tmp/primary-runtime-esm.txt", "available"); console.log(await fs.readFile("/tmp/primary-runtime-esm.txt", "utf8"));'"#

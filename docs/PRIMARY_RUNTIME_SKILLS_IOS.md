@@ -21,7 +21,10 @@ filesystem, and optional embedded runtimes.
   Node-compatible shims including `node:*` builtin aliases, sandbox filesystem
   access, `fetch`, host-provided addon modules, and a small ESM compatibility
   layer for `.mjs` entrypoints, relative imports, dynamic `import()`, and
-  sandboxed `node_modules` packages with `package.json` exports.
+  sandboxed `node_modules` packages with `package.json` exports. The loader also
+  handles bundled/minified ESM package shapes where imports and `export{...}`
+  lists appear mid-line without whitespace, plus nested export conditions such as
+  `exports.node.import`.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -81,13 +84,19 @@ Required pieces found in the skill:
 iOS blockers:
 
 - JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
-  `node:*` builtin aliases, ESM compatibility, and sandboxed package
-  resolution, but it does not provide native Node packages.
+  `node:*` builtin aliases, ESM compatibility for minified package output, and
+  sandboxed package resolution, but it does not provide native Node packages.
 - `@oai/artifact-tool` is not currently bundled as an iOS-compatible
   JavaScriptCore addon module or Swift framework in this repository. The local
   Codex runtime cache has the Node package, but that cache is not part of the
   iOS app bundle and includes bundled runtime assets such as `skia-canvas` and
   `@oai/walnut` WASM that need an explicit iOS packaging and execution path.
+- `skia-canvas` includes a native Node addon (`lib/skia.node`), and the browser
+  fallback assumes DOM canvas APIs that are not available in this JavaScriptCore
+  runtime.
+- `@oai/walnut` uses a .NET WASM payload plus `dotnet.js`/`blazor.boot.json`
+  resource loading for Office import/export paths; those resources are not
+  packaged or bridged for iOS JavaScriptCore today.
 - Native rendering dependencies such as `sharp`/`skia-canvas` are not staged for
   iOS.
 
@@ -121,6 +130,10 @@ iOS blockers:
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.
+- The JavaScript loader can parse the package's minified ESM import/export shape,
+  so the remaining blocker is not syntax loading; it is the unbundled and
+  unadapted artifact-tool runtime dependencies, especially `skia-canvas` native
+  rendering and `@oai/walnut` WASM resources.
 - The optional Python analysis stack includes packages that are not currently
   bundled for BeeWare iOS (`pandas`, `pypdf`, `python-docx`, `reportlab`; only
   `numpy` is tracked as an optional native iOS probe today).

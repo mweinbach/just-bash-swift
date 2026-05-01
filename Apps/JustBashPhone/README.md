@@ -183,6 +183,16 @@ SIMCTL_CHILD_JUSTBASH_SMOKE_PYTHON=1 \
   xcrun simctl launch <booted-simulator-udid> com.mweinbach.JustBashPhone
 ```
 
+Primary runtime skill readiness smoke lane:
+
+```bash
+SIMCTL_CHILD_JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS=1 \
+  xcrun simctl launch <booted-simulator-udid> com.mweinbach.JustBashPhone
+```
+
+This writes `primary-runtime-skills-ios-report.json` and
+`primary-runtime-skills-smoke-result.txt` into the app workspace.
+
 ## Physical iPhone Note
 
 The iPhone host is now verified on a real device as well:

@@ -157,6 +157,7 @@ final class ShellRunnerModel {
 
     func loadInitialState() async {
         await SandboxService.shared.runPythonSmokeIfRequested()
+        await SandboxService.shared.runPrimaryRuntimeSkillsSmokeIfRequested()
         pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
         pythonAvailable = await SandboxService.shared.isPythonAvailable()
         await refreshFileSections()

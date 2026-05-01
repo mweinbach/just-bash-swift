@@ -180,8 +180,8 @@ downloaded executable code is not the model we want for this host.
 For the OpenAI primary-runtime Documents, Presentations, and Spreadsheets skill
 bundles, see [Primary Runtime Skills On iOS](PRIMARY_RUNTIME_SKILLS_IOS.md).
 Those skills are not iOS-runnable unchanged today because their upstream
-contracts depend on desktop/container runtimes such as LibreOffice, Node module
-resolution, and `@oai/artifact-tool`.
+contracts depend on desktop/container runtimes such as LibreOffice, native Node
+packages, and a bundled/adapted `@oai/artifact-tool`.
 
 ## Native Package Status
 

@@ -109,11 +109,55 @@ def artifact_tool_evidence() -> list[str]:
     evidence = [str(DEFAULT_ARTIFACT_TOOL / "package.json")]
     if (DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs").exists():
         evidence.append(str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs"))
-    if (DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas").exists():
-        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "package.json"))
-    if (DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm").exists():
-        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"))
+    skia = DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas"
+    if skia.exists():
+        evidence.append(str(skia / "package.json"))
+        if (skia / "lib" / "skia.node").exists():
+            evidence.append(str(skia / "lib" / "skia.node"))
+    walnut_wasm = DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"
+    if walnut_wasm.exists():
+        evidence.append(str(walnut_wasm))
+        if (walnut_wasm / "dotnet.js").exists():
+            evidence.append(str(walnut_wasm / "dotnet.js"))
+        if (walnut_wasm / "blazor.boot.json").exists():
+            evidence.append(str(walnut_wasm / "blazor.boot.json"))
     return evidence
+
+
+def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: str) -> None:
+    if "@oai/artifact-tool" not in read_text(skill_md):
+        return
+
+    require_resolver = REPO_ROOT / "Sources/JustBashJavaScript/Bridges/RequireResolver.swift"
+    resolver_text = read_text(require_resolver)
+    if "transformTopLevelModuleSyntax" in resolver_text and "pickPackageExport" in resolver_text:
+        report.add(
+            "ok",
+            "js-exec handles artifact-tool's bundled/minified ESM shape and nested package export conditions",
+            [str(require_resolver), str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs")],
+        )
+
+    report.add(
+        "blocked",
+        message,
+        [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
+    )
+
+    skia_node = DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "lib" / "skia.node"
+    if skia_node.exists():
+        report.add(
+            "blocked",
+            "artifact-tool bundles skia-canvas with a native Node addon; iOS needs a signed in-process renderer or Swift/CoreGraphics adapter",
+            [str(skia_node), str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "package.json")],
+        )
+
+    walnut_wasm = DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"
+    if walnut_wasm.exists():
+        report.add(
+            "blocked",
+            "artifact-tool's Walnut document import/export path uses a .NET WASM payload and dotnet.js resource loader that are not packaged or bridged for JavaScriptCore on iOS",
+            [str(walnut_wasm / "dotnet.js"), str(walnut_wasm / "blazor.boot.json")],
+        )
 
 
 def validate_plugin(report: SkillReport, plugin_name: str) -> Path | None:
@@ -249,12 +293,11 @@ def check_presentations(cache_root: Path) -> SkillReport:
                 [str(require_resolver), str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
             )
     skill_md = skill_dir / "SKILL.md"
-    if "@oai/artifact-tool" in read_text(skill_md):
-        report.add(
-            "blocked",
-            "@oai/artifact-tool is required; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
-            [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
-        )
+    check_artifact_tool_runtime(
+        report,
+        skill_md,
+        "@oai/artifact-tool is required; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
+    )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
             "ok",
@@ -287,12 +330,11 @@ def check_spreadsheets(cache_root: Path) -> SkillReport:
             "spreadsheet authoring needs package.json/node_modules package resolution for artifact-tool subpaths",
             [str(require_resolver), str(skill_md)],
         )
-    if "@oai/artifact-tool" in text:
-        report.add(
-            "blocked",
-            "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
-            [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
-        )
+    check_artifact_tool_runtime(
+        report,
+        skill_md,
+        "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
+    )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
     native_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt")
