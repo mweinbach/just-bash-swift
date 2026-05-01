@@ -34,6 +34,36 @@ print(result.stdout)  // Hello, Agent!\nProcessing: input.txt\n1 /data/input.txt
 print(result.exitCode) // 0
 ```
 
+For a persistent coding-agent workspace with a mac-like filesystem:
+
+```swift
+import JustBash
+import JustBashJavaScript
+
+let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("AgentWorkspace", isDirectory: true)
+
+let bash = Bash(options: try .codingAgentWorkspace(
+    rootURL: root,
+    username: "coder",
+    embeddedRuntimes: [JavaScriptRuntime()]
+))
+
+let result = await bash.exec("""
+    printf 'hello from the agent\\n' > ~/Documents/note.txt
+    cp ~/Documents/note.txt ~/Downloads/
+    ls ~/Documents ~/Downloads
+""")
+```
+
+`BashOptions.codingAgentWorkspace(...)` uses `UserWorkspaceFileSystem`, a
+disk-backed package filesystem that seeds `/Users/<name>`, `~/Documents`,
+`~/Downloads`, `~/Desktop`, `~/Pictures`, `~/Library`, `/Applications`, `/tmp`,
+and related mac-style directories. Host apps can call
+`UserWorkspaceFileSystem.importItem(...)`, `exportItem(...)`, and
+`url(forVirtualPath:)` to connect document pickers, sharing, and file previews
+to the same files the shell and coding agent see.
+
 ## Architecture
 
 Four modules, zero dependencies beyond Foundation:
@@ -63,6 +93,8 @@ Four modules, zero dependencies beyond Foundation:
 - Fully in-process execution through the Swift parser, interpreter, builtins, and virtual commands
 - Shared in-memory filesystem across `exec()` calls, with fresh shell state per call
 - Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
+- Disk-backed `UserWorkspaceFileSystem` for coding-agent apps that need
+  persistent `~/Documents`, `~/Downloads`, import/export, and user-visible files
 - Portable in-process `git` command support on the same virtual filesystem used by iPhone/iPadOS hosts
 - Optional embedded language runtimes via the `EmbeddedRuntime` protocol (see [Optional Products](#optional-products))
 - Selective, test-driven parity with upstream `just-bash`, not line-for-line feature parity yet
@@ -76,11 +108,12 @@ core `JustBash` library. They are not loaded unless you reference them.
 
 This repo now includes a minimal SwiftUI iPhone/iPad host app in
 [Apps/JustBashPhone](/Users/mweinbach/Projects/just-bash-swift/Apps/JustBashPhone/README.md).
-It links the local package, seeds the virtual filesystem with sample files, and
+It links the local package, seeds a persistent mac-like user workspace, and
 lets you run shell scripts on-device with stdout, stderr, exit code, and a
-small sandbox file browser. The Python-linked variant embeds BeeWare CPython,
+small sandbox file browser with save, move, delete, and share/export actions.
+The Python-linked variant embeds BeeWare CPython,
 adds `py-exec`/`python`/`python3` commands to the host's virtual bash, and can
-run Python code against the same persistent `/workspace` mount. It also exposes
+run Python code against the same persistent `~/Documents` workspace. It also exposes
 App Shortcuts for running shell scripts, running Python code, reading/writing
 workspace files, and resetting the sandbox. The host app targets iOS 26+ so it
 can use the current App Intents API surface directly.
@@ -102,12 +135,11 @@ virtual filesystem.
 The cached OpenAI primary-runtime artifact skills for Documents, Presentations,
 and Spreadsheets are tracked separately in
 [Primary Runtime Skills On iOS](docs/PRIMARY_RUNTIME_SKILLS_IOS.md). The current
-result is intentionally marked blocked for unchanged iOS execution: they require
-desktop/container capabilities such as LibreOffice, missing iOS Python wheels,
-and the full native `@oai/artifact-tool` render/import stack. The iPhone host
-does stage JavaScript package-resolution shims plus a limited pure-JS
-artifact-tool compatibility package for basic import and Office-export smoke
-checks.
+result is a staged iOS-compatible path for the cached helper surface: desktop
+renderer pieces such as native `skia-canvas` and Walnut/.NET-WASM are still not
+ported, but the iPhone host stages JavaScript package-resolution shims plus a
+broad pure-JS artifact-tool compatibility package for common import/export,
+render-smoke, and model-facing facade paths.
 
 Verified build lane:
 

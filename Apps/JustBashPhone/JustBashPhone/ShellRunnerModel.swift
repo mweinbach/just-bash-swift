@@ -29,11 +29,13 @@ final class ShellRunnerModel {
         let id: String
         let path: String
         let contents: String
+        let fileURL: URL
 
-        init(path: String, contents: String) {
+        init(path: String, contents: String, fileURL: URL) {
             self.id = path
             self.path = path
             self.contents = contents
+            self.fileURL = fileURL
         }
     }
 
@@ -44,10 +46,10 @@ final class ShellRunnerModel {
             description: "Run ordinary shell commands against a seeded file.",
             script: """
             echo "Input preview:"
-            cat /data/input.txt
+            cat ~/Downloads/input.txt
             echo
             echo "Word count:"
-            wc -w /data/input.txt
+            wc -w ~/Downloads/input.txt
             """
         ),
         .init(
@@ -55,22 +57,22 @@ final class ShellRunnerModel {
             title: "Transform",
             description: "Write output into the virtual filesystem and inspect it.",
             script: """
-            cat /data/log.txt | grep ERROR | sed 's/ERROR/[error]/' > /tmp/errors.txt
+            cat ~/Documents/log.txt | grep ERROR | sed 's/ERROR/[error]/' > ~/Documents/errors.txt
             echo "Saved:"
-            cat /tmp/errors.txt
+            cat ~/Documents/errors.txt
             """
         ),
         .init(
             id: "workspace",
-            title: "Persistent Workspace",
-            description: "Write a file into /workspace so it survives app relaunches.",
+            title: "Persistent Documents",
+            description: "Write a file into ~/Documents so it survives app relaunches.",
             script: """
-            date > /workspace/last-run.txt
-            echo "Workspace files:"
-            ls -la /workspace
+            date > ~/Documents/last-run.txt
+            echo "Documents files:"
+            ls -la ~/Documents
             echo
             echo "last-run.txt:"
-            cat /workspace/last-run.txt
+            cat ~/Documents/last-run.txt
             """
         ),
         .init(
@@ -78,7 +80,7 @@ final class ShellRunnerModel {
             title: "JS Runtime",
             description: "Exercise the embedded JavaScript runtime on-device.",
             script: #"""
-            js-exec -c 'const fs = require("fs"); const text = fs.readFileSync("/data/input.txt", "utf8"); console.log(text.toUpperCase())'
+            js-exec -c 'const fs = require("fs"); const text = fs.readFileSync(process.env.HOME + "/Downloads/input.txt", "utf8"); console.log(text.toUpperCase())'
             """#
         ),
         .init(
@@ -122,7 +124,7 @@ final class ShellRunnerModel {
             description: "Inspect the persistent workspace directory from Python.",
             code: """
             from pathlib import Path
-            for path in sorted(Path("/workspace").iterdir()):
+            for path in sorted(Path.cwd().iterdir()):
                 kind = "dir" if path.is_dir() else "file"
                 print(f"{kind}: {path.name}")
             """
@@ -145,6 +147,8 @@ final class ShellRunnerModel {
     var pythonExitCode: Int?
     var fileSections: [FileSection] = []
     var filePreview: FilePreview?
+    var newFileName = "note.txt"
+    var newFileContents = "Saved from Just Bash on iOS.\n"
 
     init() {
         let sample = Self.samples[0]
@@ -231,19 +235,46 @@ final class ShellRunnerModel {
 
         Task {
             let contents = (try? await SandboxService.shared.readFile(entry.path)) ?? "<binary or unreadable>"
+            let fileURL = await SandboxService.shared.fileURL(forVirtualPath: entry.path)
             await MainActor.run {
-                filePreview = FilePreview(path: entry.path, contents: contents)
+                filePreview = FilePreview(path: entry.path, contents: contents, fileURL: fileURL)
             }
+        }
+    }
+
+    func saveNewFile() {
+        let name = newFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            try? await SandboxService.shared.writeFile(name, contents: newFileContents)
+            await refreshFileSections()
+        }
+    }
+
+    func move(_ entry: VirtualDirectoryEntry, toDirectory destinationDirectory: String) {
+        guard !entry.isDirectory else { return }
+        Task {
+            _ = await SandboxService.shared.moveFile(from: entry.path, toDirectory: destinationDirectory)
+            await refreshFileSections()
+        }
+    }
+
+    func delete(_ entry: VirtualDirectoryEntry) {
+        Task {
+            _ = await SandboxService.shared.deleteFile(entry.path)
+            await refreshFileSections()
         }
     }
 
     private func refreshFileSections() async {
         let directories: [(path: String, title: String)] = [
             ("/", "Root"),
-            ("/data", "Data"),
-            ("/workspace", "Workspace"),
+            ("/Users/coder", "Home"),
+            ("/Users/coder/Documents", "Documents"),
+            ("/Users/coder/Downloads", "Downloads"),
+            ("/Users/coder/Desktop", "Desktop"),
             ("/tmp", "Temp"),
-            ("/home/user", "Home"),
+            ("/workspace", "Workspace"),
         ]
 
         var sections: [FileSection] = []

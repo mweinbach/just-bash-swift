@@ -8,9 +8,12 @@ Deployment target: iOS 26+.
 
 - links the local `JustBash` and `JustBashJavaScript` package products
 - runs bash scripts entirely in-process on iOS
-- seeds a virtual filesystem with sample files under `/data`
-- mounts `/workspace` to the app's sandboxed Documents directory for persistent files
-- shows stdout, stderr, exit code, and a small sandbox file browser
+- uses the package-level `BashOptions.codingAgentWorkspace(...)` setup
+- seeds a persistent mac-like filesystem with `/Users/coder`, `~/Documents`,
+  `~/Downloads`, `~/Desktop`, `~/Pictures`, `~/Library`, `/Applications`, and `/tmp`
+- keeps `/workspace` available for existing agent-script compatibility
+- shows stdout, stderr, exit code, and a small sandbox file browser with save,
+  move, delete, and share/export actions
 - shows whether BeeWare Python support is linked into the current build
 - runs Python code on-device with captured stdout/stderr when the BeeWare-linked build is used
 - adds `py-exec`, `python`, and `python3` commands to the virtual bash when the iPhone host is running
@@ -80,35 +83,36 @@ Not included by default:
 - access from CPython to the full JustBash virtual filesystem
 
 The interpreter starts with its current directory set to the app's persistent
-workspace. Files that Python writes relative to `Path.cwd()` are visible to bash
-under `/workspace`.
+Documents directory. Files that Python writes relative to `Path.cwd()` are
+visible to bash under `~/Documents`.
 
 Run inline Python from the virtual bash:
 
 ```bash
 py-exec -c 'import sys; print(sys.version)'
 python -c 'from pathlib import Path; Path("from-python.txt").write_text("hello\n")'
-cat /workspace/from-python.txt
+cat ~/Documents/from-python.txt
 ```
 
 Run a script stored in the virtual filesystem:
 
 ```bash
-cat > /workspace/hello.py <<'PY'
+cat > ~/Documents/hello.py <<'PY'
 from pathlib import Path
 Path("python-output.txt").write_text("created by embedded Python\n")
 print("wrote python-output.txt")
 PY
 
-python /workspace/hello.py
-cat /workspace/python-output.txt
+python ~/Documents/hello.py
+cat ~/Documents/python-output.txt
 ```
 
 Important filesystem detail: `py-exec` can read a script file from the virtual
-filesystem, including `/workspace/script.py`, but CPython itself is not chrooted
+filesystem, including `~/Documents/script.py`, but CPython itself is not chrooted
 into the virtual filesystem. Use relative paths, `Path.cwd()`, or the
 `JUSTBASH_WORKSPACE` environment variable for persistent files. Do not expect
-`open("/data/input.txt")` inside Python to read JustBash's in-memory `/data`.
+arbitrary virtual absolute paths inside Python to map unless the host exposes
+the corresponding real directory.
 
 ### Adding Python Modules
 

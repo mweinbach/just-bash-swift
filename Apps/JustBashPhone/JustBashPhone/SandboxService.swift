@@ -6,20 +6,29 @@ import JustBashJavaScript
 actor SandboxService {
     static let shared = SandboxService()
 
+    private static let workspaceUsername = "coder"
+    private static let workspaceHomePath = "/Users/coder"
+    private static let workspaceDocumentsPath = "/Users/coder/Documents"
+
     static let seedFiles: [String: String] = [
-        "/data/input.txt": """
+        "/Users/coder/Downloads/input.txt": """
         Codex can run locally inside a virtual shell on iPhone.
-        This file lives in the in-memory sandbox.
+        This file lives in the persistent Downloads folder.
         """,
-        "/data/log.txt": """
+        "/Users/coder/Documents/log.txt": """
         INFO Boot complete
         ERROR Missing token cache
         INFO Retrying request
         ERROR Request failed
         """,
-        "/workspace/README.txt": """
-        This directory is mounted to the app's sandboxed Documents folder.
+        "/Users/coder/Documents/README.txt": """
+        This is the coding-agent workspace home.
+        It mimics a normal mac-style filesystem with ~/Documents, ~/Downloads,
+        ~/Desktop, ~/Pictures, ~/Library, and other familiar directories.
         Files written here persist across launches of Just Bash on iPhone/iPad.
+        """,
+        "/workspace/README.txt": """
+        /workspace remains available for compatibility with existing agent scripts.
         """,
     ]
 
@@ -46,7 +55,7 @@ actor SandboxService {
     }
 
     func runPython(_ code: String) async -> PythonExecResult {
-        PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
+        PythonSupport.run(code: code, workspacePath: Self.workspaceDocumentsDirectoryPath())
     }
 
     func runPythonSmokeIfRequested() async {
@@ -99,7 +108,7 @@ actor SandboxService {
         """
 
         try? "before run\n".write(toFile: beforeRunPath, atomically: true, encoding: .utf8)
-        let result = PythonSupport.run(code: code, workspacePath: Self.workspaceDirectoryPath())
+        let result = PythonSupport.run(code: code, workspacePath: Self.workspaceDocumentsDirectoryPath())
         try? "after run\n".write(toFile: afterRunPath, atomically: true, encoding: .utf8)
         if result.exitCode != 0 {
             try? FileManager.default.createDirectory(
@@ -125,7 +134,7 @@ actor SandboxService {
 
         Path("python-shell-smoke.txt").write_text("\\n".join(lines) + "\\n")
         PY
-        cat /workspace/python-shell-smoke.txt
+        cat ~/Documents/python-shell-smoke.txt
         py-exec - <<'PY'
         try:
             import numpy
@@ -160,7 +169,7 @@ actor SandboxService {
 
     func writeFile(_ path: String, contents: String) async throws {
         let fs = await bash.fs
-        let normalized = fs.normalizePath(path, relativeTo: "/workspace")
+        let normalized = fs.normalizePath(path, relativeTo: Self.workspaceDocumentsPath)
         let parent = String(normalized.split(separator: "/").dropLast().joined(separator: "/"))
         let parentPath = parent.isEmpty ? "/" : "/" + parent
         if parentPath != "/" {
@@ -173,6 +182,18 @@ actor SandboxService {
         try await bash.listDirectory(path)
     }
 
+    func fileURL(forVirtualPath path: String) -> URL {
+        URL(fileURLWithPath: Self.hostPath(forVirtualPath: path))
+    }
+
+    func moveFile(from source: String, toDirectory destinationDirectory: String) async -> ExecResult {
+        await run("mv \(Self.shellQuoted(source)) \(Self.shellQuoted(destinationDirectory))")
+    }
+
+    func deleteFile(_ path: String) async -> ExecResult {
+        await run("rm -rf \(Self.shellQuoted(path))")
+    }
+
     private static func makeBash() -> Bash {
         let workspaceBase = workspaceDirectoryPath()
         try? FileManager.default.createDirectory(
@@ -180,23 +201,36 @@ actor SandboxService {
             withIntermediateDirectories: true
         )
 
-        let root = VirtualFileSystem()
-        let mountable = MountableFileSystem(root: root)
-        mountable.mount(ReadWriteFileSystem(base: workspaceBase), at: "/workspace")
-
         var files = seedFiles
         files.merge(primaryRuntimeArtifactToolFiles(), uniquingKeysWith: { _, new in new })
 
-        return Bash(options: .init(
-            files: files,
-            customCommands: Self.pythonCommands() + Self.primaryRuntimeSkillCommands(),
-            filesystem: mountable,
-            embeddedRuntimes: [
-                JavaScriptRuntime(options: .init(
-                    bootstrap: "globalThis.APP_NAME = 'JustBashPhone';"
-                ))
-            ]
-        ))
+        let options: BashOptions
+        do {
+            options = try .codingAgentWorkspace(
+                rootURL: URL(fileURLWithPath: workspaceBase, isDirectory: true),
+                username: workspaceUsername,
+                cwd: workspaceDocumentsPath,
+                files: files,
+                customCommands: Self.pythonCommands() + Self.primaryRuntimeSkillCommands(),
+                embeddedRuntimes: [
+                    JavaScriptRuntime(options: .init(
+                        bootstrap: "globalThis.APP_NAME = 'JustBashPhone';"
+                    ))
+                ]
+            )
+        } catch {
+            options = .init(
+                files: files,
+                cwd: workspaceDocumentsPath,
+                customCommands: Self.pythonCommands() + Self.primaryRuntimeSkillCommands(),
+                embeddedRuntimes: [
+                    JavaScriptRuntime(options: .init(
+                        bootstrap: "globalThis.APP_NAME = 'JustBashPhone';"
+                    ))
+                ]
+            )
+        }
+        return Bash(options: options)
     }
 
     private static func pythonCommands() -> [AnyBashCommand] {
@@ -222,13 +256,13 @@ actor SandboxService {
 
                     Python starts with its current directory set to the persistent
                     workspace. Files written by Python to the current directory are
-                    visible to bash under /workspace.
+                    visible to bash under ~/Documents.
 
                     """)
                 case "-V", "--version":
                     let result = PythonSupport.run(
                         code: "import sys; print(sys.version)",
-                        workspacePath: Self.workspaceDirectoryPath(),
+                        workspacePath: Self.workspaceDocumentsDirectoryPath(),
                         scriptName: "<justbash-python-version>"
                     )
                     if result.exitCode == 0 {
@@ -279,7 +313,7 @@ actor SandboxService {
 
             let result = PythonSupport.run(
                 code: source,
-                workspacePath: Self.workspaceDirectoryPath(),
+                workspacePath: Self.workspaceDocumentsDirectoryPath(),
                 arguments: scriptArgs,
                 scriptName: displayName,
                 scriptPath: scriptPath
@@ -297,6 +331,7 @@ actor SandboxService {
     private static func primaryRuntimeArtifactToolFiles() -> [String: String] {
         let artifactToolRoots = [
             "/node_modules/@oai/artifact-tool",
+            "/Users/coder/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
             "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
         ]
         var files = artifactToolRoots.reduce(into: [String: String]()) { files, packageRoot in
@@ -308,6 +343,7 @@ actor SandboxService {
         }
         let lucideRoots = [
             "/node_modules/lucide",
+            "/Users/coder/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/lucide",
             "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/lucide",
         ]
         for packageRoot in lucideRoots {
@@ -316,6 +352,7 @@ actor SandboxService {
         }
         let sharpRoots = [
             "/node_modules/sharp",
+            "/Users/coder/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/sharp",
             "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/sharp",
         ]
         for packageRoot in sharpRoots {
@@ -2998,5 +3035,21 @@ actor SandboxService {
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         return base.appendingPathComponent("JustBashWorkspace", isDirectory: true).path
+    }
+
+    private static func workspaceDocumentsDirectoryPath() -> String {
+        hostPath(forVirtualPath: workspaceDocumentsPath)
+    }
+
+    private static func hostPath(forVirtualPath path: String) -> String {
+        let normalized = VirtualPath.normalize(path, relativeTo: workspaceDocumentsPath)
+        if normalized == "/" {
+            return workspaceDirectoryPath()
+        }
+        return (workspaceDirectoryPath() as NSString).appendingPathComponent(String(normalized.dropFirst()))
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

@@ -67,6 +67,23 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Save File") {
+                    TextField("File name", text: $model.newFileName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    TextEditor(text: $model.newFileContents)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 120)
+
+                    Button {
+                        model.saveNewFile()
+                    } label: {
+                        Label("Save to Documents", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
                 Section("Python") {
                     Text(model.pythonStatus)
                         .font(.footnote)
@@ -144,6 +161,53 @@ struct ContentView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(entry.isDirectory)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    model.delete(entry)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .disabled(entry.isDirectory)
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button {
+                                    model.move(entry, toDirectory: "/Users/coder/Downloads")
+                                } label: {
+                                    Label("Downloads", systemImage: "tray.and.arrow.down")
+                                }
+                                .tint(.blue)
+                                .disabled(entry.isDirectory)
+
+                                Button {
+                                    model.move(entry, toDirectory: "/Users/coder/Documents")
+                                } label: {
+                                    Label("Documents", systemImage: "doc")
+                                }
+                                .tint(.green)
+                                .disabled(entry.isDirectory)
+                            }
+                            .contextMenu {
+                                Button {
+                                    model.move(entry, toDirectory: "/Users/coder/Documents")
+                                } label: {
+                                    Label("Move to Documents", systemImage: "doc")
+                                }
+                                .disabled(entry.isDirectory)
+
+                                Button {
+                                    model.move(entry, toDirectory: "/Users/coder/Downloads")
+                                } label: {
+                                    Label("Move to Downloads", systemImage: "tray.and.arrow.down")
+                                }
+                                .disabled(entry.isDirectory)
+
+                                Button(role: .destructive) {
+                                    model.delete(entry)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .disabled(entry.isDirectory)
+                            }
                         }
                     }
                 }
@@ -162,6 +226,11 @@ struct ContentView: View {
                     }
                     .navigationTitle(preview.path)
                     .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ShareLink(item: preview.fileURL) {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                    }
                 }
             }
         }

@@ -93,7 +93,7 @@ struct RunPythonCodeIntent: AppIntent {
 struct ReadWorkspaceFileIntent: AppIntent {
     static var title: LocalizedStringResource { "Read Workspace File" }
     static var description: IntentDescription {
-        IntentDescription("Read a text file from the persistent Just Bash workspace.")
+        IntentDescription("Read a text file from the persistent Just Bash Documents workspace.")
     }
     static let supportedModes: IntentModes = [.background]
 
@@ -127,7 +127,7 @@ struct ReadWorkspaceFileIntent: AppIntent {
 struct WriteWorkspaceFileIntent: AppIntent {
     static var title: LocalizedStringResource { "Write Workspace File" }
     static var description: IntentDescription {
-        IntentDescription("Create or replace a text file in the persistent Just Bash workspace.")
+        IntentDescription("Create or replace a text file in the persistent Just Bash Documents workspace.")
     }
     static let supportedModes: IntentModes = [.background]
 
@@ -208,9 +208,15 @@ struct JustBashShortcuts: AppShortcutsProvider {
 }
 
 private func normalizeWorkspacePath(_ rawPath: String) -> String {
-    if rawPath.hasPrefix("/workspace/") || rawPath == "/workspace" {
+    if rawPath == "~" {
+        return "/Users/coder"
+    }
+    if rawPath.hasPrefix("~/") {
+        return "/Users/coder/" + String(rawPath.dropFirst(2))
+    }
+    if rawPath.hasPrefix("/") {
         return rawPath
     }
     let trimmed = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    return trimmed.isEmpty ? "/workspace" : "/workspace/\(trimmed)"
+    return trimmed.isEmpty ? "/Users/coder/Documents" : "/Users/coder/Documents/\(trimmed)"
 }
