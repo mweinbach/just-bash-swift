@@ -159,6 +159,24 @@ def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
     return evidence
 
 
+def presentation_subprocess_evidence(skill_dir: Path) -> list[str]:
+    scripts = skill_dir / "scripts"
+    candidates = [
+        (scripts / "build_artifact_deck.mjs", ["spawnSync"]),
+        (scripts / "run_prompt_battle.mjs", ["spawnSync"]),
+        (scripts / "create_reference_slides.py", ["subprocess.run"]),
+    ]
+    return [line_for_any(path, needles) for path, needles in candidates if path.exists()]
+
+
+def presentation_native_graphics_evidence(skill_dir: Path) -> list[str]:
+    render_lucide = skill_dir / "scripts" / "render_lucide_icon.mjs"
+    return [
+        line_for(render_lucide, 'requireAvailable("sharp")'),
+        line_for(render_lucide, 'requireAvailable("skia-canvas")'),
+    ]
+
+
 def artifact_tool_evidence(artifact_tool_root: Path) -> list[str]:
     evidence = [str(artifact_tool_root / "package.json")]
     if (artifact_tool_root / "dist" / "artifact_tool.mjs").exists():
@@ -436,6 +454,20 @@ def check_presentations(
         "@oai/artifact-tool is required; the iOS host has a limited compatibility package, but the full native rendering/import stack is not ported",
         artifact_tool_root,
     )
+    subprocess_evidence = presentation_subprocess_evidence(skill_dir)
+    if subprocess_evidence:
+        report.add(
+            "blocked",
+            "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides; iOS needs in-process wrappers or sandbox-provided commands",
+            subprocess_evidence,
+        )
+    native_graphics_evidence = presentation_native_graphics_evidence(skill_dir)
+    if native_graphics_evidence:
+        report.add(
+            "blocked",
+            "presentation icon rendering helper requires sharp or skia-canvas native graphics packages that are not staged for iOS",
+            native_graphics_evidence,
+        )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
             "ok",

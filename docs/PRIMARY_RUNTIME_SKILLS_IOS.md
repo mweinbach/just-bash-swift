@@ -106,6 +106,11 @@ iOS blockers:
   does not provide full upstream rendering or Office import behavior.
 - Presentation visual export fails explicitly in the iOS compatibility package
   until a real renderer is ported.
+- The deck-building helper scripts spawn host Python/Node subprocesses for
+  contact sheets and reference slide generation. Those paths need in-process
+  wrappers or explicit sandbox-provided commands on iOS.
+- The Lucide icon renderer requires `sharp` or `skia-canvas` for PNG output;
+  neither native graphics stack is staged for iOS.
 - The local Codex runtime cache has the full Node package, but that cache is not
   part of the iOS app bundle and includes bundled runtime assets such as
   `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and

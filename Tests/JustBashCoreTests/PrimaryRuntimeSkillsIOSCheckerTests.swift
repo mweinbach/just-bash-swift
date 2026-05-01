@@ -95,6 +95,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertEqual(presentations["status"] as? String, "blocked")
         XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: presentations, containing: "explicitly rejects full render/import APIs")
+        XCTAssertContainsFinding(in: presentations, containing: "spawn host Python/Node subprocesses")
+        XCTAssertContainsFinding(in: presentations, containing: "sharp or skia-canvas native graphics packages")
         XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
         XCTAssertContainsFinding(in: presentations, containing: "Walnut")
 
