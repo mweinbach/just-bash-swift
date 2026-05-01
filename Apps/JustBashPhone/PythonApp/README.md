@@ -28,4 +28,11 @@ helpers. `lxml`, `pandas`, and `scipy` are tracked in
 `requirements-native-ios.txt`, but are intentionally left commented until
 compatible iOS wheels resolve.
 
+The primary-runtime Documents skill currently remains blocked on iOS because
+its helpers use real `lxml`/`python-docx` OOXML behavior: namespace-aware XPath,
+parent/sibling mutation, parser options, and low-level Word XML constructors. A
+minimal import shim would not be enough. The viable paths are compatible iOS
+wheels/ports for those packages or a native in-process OOXML adapter that covers
+the same behavior, plus a replacement for `soffice`/Poppler-based rendering.
+
 Runtime `pip install` is not the supported path on iPhone.

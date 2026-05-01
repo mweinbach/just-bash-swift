@@ -62,6 +62,14 @@ def line_for(path: Path, needle: str) -> str:
     return str(path)
 
 
+def line_for_any(path: Path, needles: Iterable[str]) -> str:
+    for needle in needles:
+        location = line_for(path, needle)
+        if location != str(path):
+            return location
+    return str(path)
+
+
 def load_requirements(path: Path) -> set[str]:
     packages: set[str] = set()
     if not path.exists():
@@ -103,6 +111,22 @@ def js_import_specs(root: Path) -> set[str]:
         for esm, cjs in pattern.findall(text):
             specs.add(esm or cjs)
     return specs
+
+
+def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
+    """Return representative uses that need real lxml/python-docx behavior."""
+
+    candidates = [
+        (skill_dir / "scripts" / "docx_ooxml_patch.py", ["etree.XMLParser", ".addnext(", "OxmlElement"]),
+        (skill_dir / "scripts" / "content_controls.py", ['xpath("string(', ".xpath(", "etree.XMLParser"]),
+        (skill_dir / "scripts" / "table_geometry.py", ["OxmlElement"]),
+        (skill_dir / "scripts" / "xlsx_to_docx_table.py", ["Document()", "OxmlElement"]),
+    ]
+    evidence: list[str] = []
+    for path, needles in candidates:
+        if path.exists():
+            evidence.append(line_for_any(path, needles))
+    return evidence
 
 
 def artifact_tool_evidence() -> list[str]:
@@ -231,6 +255,12 @@ def check_documents(cache_root: Path) -> SkillReport:
                 str(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt"),
             ],
         )
+        if "lxml" in {pkg.lower() for pkg in missing} or "python-docx" in {pkg.lower() for pkg in missing}:
+            report.add(
+                "blocked",
+                "Documents helpers require real lxml/python-docx OOXML behavior; a shallow import shim is not sufficient",
+                documents_ooxml_evidence(skill_dir),
+            )
     else:
         report.add("ok", "all detected Python packages are declared for iOS staging")
 
