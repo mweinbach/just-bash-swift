@@ -106,6 +106,9 @@ iOS blockers:
   part of the iOS app bundle and includes bundled runtime assets such as
   `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and
   execution path.
+- The cached `@oai/artifact-tool` package exposes only its bundled dist
+  entrypoints; it does not provide a `browser`, `ios`, or `react-native` export
+  condition for JavaScriptCore to select.
 - `skia-canvas` includes a native Node addon (`lib/skia.node`), and the browser
   fallback assumes DOM canvas APIs that are not available in this JavaScriptCore
   runtime.

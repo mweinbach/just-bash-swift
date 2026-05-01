@@ -93,10 +93,12 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         )
 
         XCTAssertEqual(presentations["status"] as? String, "blocked")
+        XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
         XCTAssertContainsFinding(in: presentations, containing: "Walnut")
 
         XCTAssertEqual(spreadsheets["status"] as? String, "blocked")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: spreadsheets, containing: "skia-canvas")
         XCTAssertContainsFinding(
             in: spreadsheets,

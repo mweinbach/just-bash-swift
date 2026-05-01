@@ -188,6 +188,19 @@ def artifact_tool_compat_evidence() -> list[str]:
     return evidence
 
 
+def artifact_tool_package_shape(artifact_tool_root: Path) -> tuple[dict | None, list[str]]:
+    package_json = artifact_tool_root / "package.json"
+    evidence = [str(package_json)]
+    try:
+        package = json.loads(read_text(package_json))
+    except Exception:
+        return None, evidence
+    exports = package.get("exports")
+    if exports is not None:
+        evidence.append(f"{package_json}:exports")
+    return package, evidence
+
+
 def check_artifact_tool_runtime(
     report: SkillReport,
     skill_md: Path,
@@ -218,6 +231,18 @@ def check_artifact_tool_runtime(
             "iOS host stages a limited pure-JS @oai/artifact-tool compatibility package for direct imports, presentation-jsx, and basic xlsx/pptx export smoke checks",
             artifact_tool_compat_evidence(),
         )
+
+    package, package_evidence = artifact_tool_package_shape(artifact_tool_root)
+    if package is not None:
+        export_text = json.dumps(package.get("exports", {}), sort_keys=True)
+        supported_conditions = ("browser", "ios", "react-native")
+        if not any(condition in export_text for condition in supported_conditions):
+            version = package.get("version", "unknown")
+            report.add(
+                "blocked",
+                f"artifact-tool {version} exposes no browser/iOS export condition; the iOS host must use the limited compatibility package or a native-backed port",
+                package_evidence,
+            )
 
     report.add(
         "blocked",
