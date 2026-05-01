@@ -13,8 +13,10 @@
 #   iPhoneOS via PyPI + BeeWare's secondary wheel index. A pure-Python
 #   lxml.etree compatibility package is staged in the app package root for
 #   tested cached Documents helper behavior.
-# - python-docx does not currently resolve for CPython 3.14 iPhoneOS because
-#   its lxml dependency is unavailable for this target.
+# - upstream python-docx does not currently resolve for CPython 3.14 iPhoneOS
+#   because its upstream lxml dependency is unavailable for this target. A
+#   pure-Python python-docx compatibility package is staged in the app package
+#   root for tested cached Documents helper behavior.
 numpy==2.3.5.post1
 pillow==12.2.0
 pdf2image==1.17.0

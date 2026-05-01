@@ -366,6 +366,10 @@ def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str
     input_docx = workdir / "documents-in.docx"
     protected_docx = workdir / "documents-protected.docx"
     stripped_docx = workdir / "documents-stripped.docx"
+    xlsx_path = workdir / "documents-table.xlsx"
+    table_docx = workdir / "documents-table.docx"
+    patched_table_docx = workdir / "documents-table-patched.docx"
+    table_csv = workdir / "documents-table.csv"
     write_minimal_docx(input_docx)
 
     python_env = env.copy()
@@ -423,12 +427,100 @@ def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str
     if "documentProtection" not in settings or "readOnly" not in settings:
         raise RuntimeError("set_protection did not create readOnly settings.xml")
 
+    write_text(
+        workdir / "make-table-xlsx.py",
+        """
+from openpyxl import Workbook
+from pathlib import Path
+import sys
+
+out = Path(sys.argv[1])
+wb = Workbook()
+ws = wb.active
+ws.title = "Data"
+ws.append(["name", "value"])
+ws.append(["alpha", 2])
+ws.append(["beta", 3])
+wb.save(out)
+""".lstrip(),
+    )
+    make_xlsx = run_command(
+        [sys.executable, str(workdir / "make-table-xlsx.py"), str(xlsx_path)],
+        cwd=workdir,
+        env=python_env,
+        label="documents make xlsx fixture",
+    )
+    require_success(make_xlsx)
+    xlsx_to_docx = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "scripts/xlsx_to_docx_table.py"),
+            str(xlsx_path),
+            "--out",
+            str(table_docx),
+            "--title",
+            "Smoke Table",
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents xlsx_to_docx_table",
+    )
+    require_success(xlsx_to_docx)
+    docx_to_csv = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "scripts/docx_table_to_csv.py"),
+            str(table_docx),
+            "--out",
+            str(table_csv),
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents docx_table_to_csv",
+    )
+    require_success(docx_to_csv)
+    csv_text = table_csv.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if csv_text.strip() != "name,value\nalpha,2\nbeta,3":
+        raise RuntimeError(f"table DOCX round-trip CSV did not match expected content: {csv_text!r}")
+    patch_docx = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "scripts/docx_ooxml_patch.py"),
+            str(table_docx),
+            "--out",
+            str(patched_table_docx),
+            "--header-date",
+            "May 1, 2026",
+            "--add-page-numbers",
+            "--hyperlink-first",
+            "https://example.com",
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents docx_ooxml_patch python-docx path",
+    )
+    require_success(patch_docx)
+    with zipfile.ZipFile(patched_table_docx) as zf:
+        patched_names = set(zf.namelist())
+        patched_doc = zf.read("word/document.xml").decode("utf-8")
+        patched_rels = zf.read("word/_rels/document.xml.rels").decode("utf-8")
+    if not {"word/header1.xml", "word/footer1.xml"}.issubset(patched_names):
+        raise RuntimeError("docx_ooxml_patch did not materialize header/footer parts")
+    if "w:hyperlink" not in patched_doc or "https://example.com" not in patched_rels:
+        raise RuntimeError("docx_ooxml_patch did not create the expected external hyperlink")
+
     return {
         "result": protection,
         "secondResult": strip,
+        "thirdResult": xlsx_to_docx,
+        "fourthResult": docx_to_csv,
+        "fifthResult": patch_docx,
         "artifacts": {
             "protected": {"path": str(protected_docx), "bytes": protected_docx.stat().st_size},
             "stripped": {"path": str(stripped_docx), "bytes": stripped_docx.stat().st_size},
+            "tableDocx": {"path": str(table_docx), "bytes": table_docx.stat().st_size},
+            "patchedTableDocx": {"path": str(patched_table_docx), "bytes": patched_table_docx.stat().st_size},
+            "tableCsv": {"path": str(table_csv), "bytes": table_csv.stat().st_size},
         },
     }
 
@@ -452,7 +544,7 @@ def build_report(workdir: Path) -> dict[str, object]:
 
     checks: list[dict[str, object]] = []
     for label, fn in [
-        ("documents.lxml_ooxml_helpers", smoke_documents_lxml_helpers),
+        ("documents.ooxml_docx_helpers", smoke_documents_lxml_helpers),
         ("presentations.build_artifact_deck", smoke_presentation_helper),
         ("presentations.render_lucide_icon", smoke_lucide_renderer),
         ("spreadsheets.artifact_tool_api", smoke_spreadsheet_api),

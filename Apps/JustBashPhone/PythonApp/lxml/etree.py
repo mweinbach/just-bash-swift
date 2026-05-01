@@ -166,6 +166,23 @@ class _Element:
             return [child for child in self._children if child.tag == raw]
         return [item for item in _select_path(self, path, namespaces or {}) if isinstance(item, _Element)]
 
+    def index(self, child: _ElementLike) -> int:
+        return self._children.index(_coerce_element(child))
+
+    def get_or_add_trPr(self) -> "_Element":
+        return _get_or_add_child(self, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}trPr")
+
+    def get_or_add_tcPr(self) -> "_Element":
+        return _get_or_add_child(self, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcPr")
+
+    @property
+    def tblPr(self) -> "_Element":
+        return _get_or_add_child(self, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tblPr")
+
+    @property
+    def tblGrid(self) -> "_Element":
+        return _get_or_add_child(self, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tblGrid")
+
     def iter(self, tag: str | None = None) -> Iterator["_Element"]:
         if tag is None or tag == "*" or self.tag == tag:
             yield self
@@ -330,6 +347,15 @@ def _detach(element: _Element) -> None:
     parent = element._parent
     if parent is not None:
         parent.remove(element)
+
+
+def _get_or_add_child(parent: _Element, tag: str) -> _Element:
+    for child in parent:
+        if child.tag == tag:
+            return child
+    child = Element(tag)
+    parent.insert(0 if tag.endswith("Pr") else len(parent), child)
+    return child
 
 
 def _register_nsmap(nsmap: dict[str | None, str] | None) -> None:

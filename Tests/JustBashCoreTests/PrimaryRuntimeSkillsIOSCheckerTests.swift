@@ -66,7 +66,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             XCTFail("Missing smoke checks in payload: \(payload)")
             return
         }
-        XCTAssertContainsCheck(named: "documents.lxml_ooxml_helpers", in: checks)
+        XCTAssertContainsCheck(named: "documents.ooxml_docx_helpers", in: checks)
         XCTAssertContainsCheck(named: "presentations.build_artifact_deck", in: checks)
         XCTAssertContainsCheck(named: "presentations.render_lucide_icon", in: checks)
         XCTAssertContainsCheck(named: "spreadsheets.artifact_tool_api", in: checks)
@@ -156,12 +156,9 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: documents, containing: "skill manifest is complete")
         XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(in: documents, containing: "Documents Python dependency scan inspected all helper scripts")
-        XCTAssertContainsFinding(in: documents, containing: "python-docx")
         XCTAssertContainsFinding(in: documents, containing: "pure-Python lxml.etree compatibility")
-        XCTAssertContainsFinding(
-            in: documents,
-            containing: "Word document model and low-level OOXML constructors"
-        )
+        XCTAssertContainsFinding(in: documents, containing: "pure-Python python-docx compatibility")
+        XCTAssertContainsFinding(in: documents, containing: "all detected Documents Python imports")
         XCTAssertContainsFinding(
             in: documents,
             containing: "soffice/LibreOffice"

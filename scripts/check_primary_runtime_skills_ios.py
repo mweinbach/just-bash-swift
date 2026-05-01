@@ -88,7 +88,7 @@ def load_requirements(path: Path) -> set[str]:
 def staged_ios_python_package(package_name: str) -> Path | None:
     package_paths = {
         "lxml": IOS_PYTHON_APP / "lxml" / "etree.py",
-        "python-docx": IOS_PYTHON_APP / "site-packages/docx/__init__.py",
+        "python-docx": IOS_PYTHON_APP / "docx" / "__init__.py",
     }
     path = package_paths.get(package_name.lower())
     if path is not None and path.exists():
@@ -529,6 +529,12 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
             "pure-Python lxml.etree compatibility is staged for tested OOXML helper behavior",
             [str(staged_compat[next(pkg for pkg in staged_compat if pkg.lower() == "lxml")])],
         )
+    if "python-docx" in {pkg.lower() for pkg in staged_compat}:
+        report.add(
+            "ok",
+            "pure-Python python-docx compatibility is staged for tested DOCX table/header/OOXML helper behavior",
+            [str(staged_compat[next(pkg for pkg in staged_compat if pkg.lower() == "python-docx")])],
+        )
     missing = sorted(
         pkg
         for pkg in required
@@ -552,7 +558,7 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
                 documents_ooxml_evidence(skill_dir),
             )
     else:
-        report.add("ok", "all detected Python packages are declared or compat-staged for iOS")
+        report.add("ok", "all detected Documents Python imports are declared or compat-staged for iOS")
 
     render_text = read_text(render_py)
     if "soffice" in render_text:
@@ -830,7 +836,11 @@ def check_spreadsheets(
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
     native_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt")
     staged = default_reqs | native_reqs
-    missing = sorted(pkg for pkg in optional_py if pkg.lower() not in staged)
+    missing = sorted(
+        pkg
+        for pkg in optional_py
+        if pkg.lower() not in staged and staged_ios_python_package(pkg) is None
+    )
     if missing:
         report.add(
             "warning",
