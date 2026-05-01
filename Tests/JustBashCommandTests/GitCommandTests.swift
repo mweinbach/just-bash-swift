@@ -1,3 +1,7 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import XCTest
 @testable import JustBash
 
@@ -99,4 +103,134 @@ final class GitCommandTests: XCTestCase {
         XCTAssertTrue(filled.stdout.contains("username=octocat"), filled.stdout)
         XCTAssertTrue(filled.stdout.contains("password=ghp_example"), filled.stdout)
     }
+
+    func testGitPushToGitHubUsesPortableRestFlow() async {
+        MockGitHubURLProtocol.reset()
+        _ = URLProtocol.registerClass(MockGitHubURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(MockGitHubURLProtocol.self)
+            MockGitHubURLProtocol.reset()
+        }
+
+        MockGitHubURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            let requestBody = MockGitHubURLProtocol.bodyData(for: request)
+            MockGitHubURLProtocol.seen.append((request.httpMethod ?? "GET", path, requestBody))
+
+            switch (request.httpMethod ?? "GET", path) {
+            case ("GET", "/repos/octocat/Hello-World/git/ref/heads/master"):
+                return MockGitHubURLProtocol.response(status: 200, json: #"{"ref":"refs/heads/master","object":{"sha":"1111111111111111111111111111111111111111"}}"#)
+            case ("GET", "/repos/octocat/Hello-World/git/commits/1111111111111111111111111111111111111111"):
+                return MockGitHubURLProtocol.response(status: 200, json: #"{"sha":"1111111111111111111111111111111111111111","tree":{"sha":"2222222222222222222222222222222222222222"}}"#)
+            case ("POST", "/repos/octocat/Hello-World/git/trees"):
+                let body = String(data: requestBody, encoding: .utf8) ?? ""
+                XCTAssertTrue(body.contains(#""base_tree":"2222222222222222222222222222222222222222""#), body)
+                XCTAssertTrue(body.contains(#""path":"note.txt""#), body)
+                XCTAssertTrue(body.contains(#""content":"hello from phone\n""#), body)
+                return MockGitHubURLProtocol.response(status: 201, json: #"{"sha":"3333333333333333333333333333333333333333"}"#)
+            case ("POST", "/repos/octocat/Hello-World/git/commits"):
+                let body = String(data: requestBody, encoding: .utf8) ?? ""
+                XCTAssertTrue(body.contains(#""message":"publish from phone""#), body)
+                XCTAssertTrue(body.contains(#""tree":"3333333333333333333333333333333333333333""#), body)
+                XCTAssertTrue(body.contains(#""parents":["1111111111111111111111111111111111111111"]"#), body)
+                return MockGitHubURLProtocol.response(status: 201, json: #"{"sha":"4444444444444444444444444444444444444444"}"#)
+            case ("PATCH", "/repos/octocat/Hello-World/git/refs/heads/master"):
+                let body = String(data: requestBody, encoding: .utf8) ?? ""
+                XCTAssertTrue(body.contains(#""sha":"4444444444444444444444444444444444444444""#), body)
+                XCTAssertTrue(body.contains(#""force":false"#), body)
+                return MockGitHubURLProtocol.response(status: 200, json: #"{"ref":"refs/heads/master","object":{"sha":"4444444444444444444444444444444444444444"}}"#)
+            default:
+                return MockGitHubURLProtocol.response(status: 404, json: #"{"message":"unexpected request"}"#)
+            }
+        }
+
+        let bash = makeGitBash(env: [
+            "HOME": "/home/tester",
+            "GIT_TERMINAL_PROMPT": "0",
+        ])
+        let push = await bash.exec("""
+        mkdir -p /home/tester /workspace
+        printf 'https://octocat:ghp_example@github.com\\n' > /home/tester/.git-credentials
+        cd /workspace
+        git init
+        printf 'hello from phone\\n' > note.txt
+        git add note.txt
+        git commit -m 'publish from phone'
+        git push https://github.com/octocat/Hello-World.git HEAD:refs/heads/master
+        """)
+
+        XCTAssertEqual(push.exitCode, 0, push.stderr)
+        XCTAssertTrue(push.stdout.contains("To https://github.com/octocat/Hello-World.git"), push.stdout)
+        XCTAssertEqual(MockGitHubURLProtocol.seen.map(\.0), ["GET", "GET", "POST", "POST", "PATCH"])
+        XCTAssertTrue(MockGitHubURLProtocol.seen.allSatisfy { $0.1.hasPrefix("/repos/octocat/Hello-World") })
+    }
+}
+
+private final class MockGitHubURLProtocol: URLProtocol {
+    typealias Response = (HTTPURLResponse, Data)
+
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> Response)?
+    nonisolated(unsafe) static var seen: [(String, String, Data?)] = []
+
+    static func reset() {
+        handler = nil
+        seen = []
+    }
+
+    static func response(status: Int, json: String) -> Response {
+        let url = URL(string: "https://api.github.com")!
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (response, Data(json.utf8))
+    }
+
+    static func bodyData(for request: URLRequest) -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else {
+            return Data()
+        }
+
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "api.github.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

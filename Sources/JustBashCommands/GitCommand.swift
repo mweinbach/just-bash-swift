@@ -40,7 +40,7 @@ private struct PortableGit {
         case "clone":
             return await clone(rest)
         case "push":
-            return push(rest, gitDirOverride: parsed.gitDir)
+            return await push(rest, gitDirOverride: parsed.gitDir)
         case "ls-remote":
             return await lsRemote(rest)
         case "credential":
@@ -269,10 +269,15 @@ private struct PortableGit {
         let sourceGitDir = ctx.fileSystem.isDirectory(path: join(sourcePath, ".git"), relativeTo: "/") ? join(sourcePath, ".git") : sourcePath
         do {
             let commits = try readCommits(sourceGitDir)
-            let sourceRepo = PortableRepo(gitDir: sourceGitDir, workTree: sourcePath, isBare: !ctx.fileSystem.isDirectory(path: join(sourcePath, ".git"), relativeTo: "/"))
+            let sourceRepo = PortableRepo(
+                gitDir: sourceGitDir,
+                workTree: sourcePath,
+                isBare: !ctx.fileSystem.isDirectory(path: join(sourcePath, ".git"), relativeTo: "/"),
+                headBranchName: readHeadBranchName(sourceGitDir) ?? "master"
+            )
             let head = try readHeadCommit(sourceRepo)
             try ensureDirectory(destPath)
-            try initClonedMetadata(at: destPath, commits: commits, head: head)
+            try initClonedMetadata(at: destPath, commits: commits, head: head, branch: sourceRepo.headBranchName)
             if let head, let commit = commits.first(where: { $0.id == head }) {
                 for (path, content) in commit.snapshot {
                     let out = join(destPath, path)
@@ -286,7 +291,7 @@ private struct PortableGit {
         }
     }
 
-    private func push(_ args: [String], gitDirOverride: String?) -> ExecResult {
+    private func push(_ args: [String], gitDirOverride: String?) async -> ExecResult {
         guard let repo = locateRepository(gitDirOverride: gitDirOverride) else {
             return .failure("fatal: not a git repository (or any of the parent directories): .git", exitCode: 128)
         }
@@ -294,13 +299,14 @@ private struct PortableGit {
         guard let remoteArg = positional.first else {
             return .failure("fatal: remote required")
         }
-        guard !remoteArg.contains("://") else {
-            return .failure("fatal: portable git remote push requires a libgit2-backed transport; local repository push is available in-process")
+        let remote = remoteArg == "origin" ? readOrigin(repo) ?? remoteArg : remoteArg
+        if remote.contains("://") {
+            return await pushGitHub(remote: remote, args: args, repo: repo)
         }
         let refspec = positional.dropFirst().first ?? "HEAD:refs/heads/\(repo.headBranchName)"
         let parts = refspec.split(separator: ":", maxSplits: 1).map(String.init)
         let dstRef = parts.count == 2 ? parts[1] : "refs/heads/\(repo.headBranchName)"
-        let remotePath = ctx.fileSystem.normalizePath(remoteArg == "origin" ? readOrigin(repo) ?? remoteArg : remoteArg, relativeTo: ctx.cwd)
+        let remotePath = ctx.fileSystem.normalizePath(remote, relativeTo: ctx.cwd)
         let remoteGitDir = ctx.fileSystem.isDirectory(path: join(remotePath, ".git"), relativeTo: "/") ? join(remotePath, ".git") : remotePath
 
         do {
@@ -379,6 +385,7 @@ private struct PortableGit {
                 return .failure("fatal: unable to access '\(source)': \(httpStatus(repoResponse))")
             }
             let repository = try JSONDecoder().decode(GitHubRepository.self, from: repoData)
+            let remoteHead = try await fetchGitHubRef(github, ref: "heads/\(repository.defaultBranch)")
 
             var treeRequest = URLRequest(url: github.apiURL(path: "git/trees/\(repository.defaultBranch)", queryItems: [
                 URLQueryItem(name: "recursive", value: "1")
@@ -410,7 +417,7 @@ private struct PortableGit {
                 }
             }
 
-            try initClonedMetadata(at: destPath, commits: [], head: nil)
+            try initClonedMetadata(at: destPath, commits: [], head: nil, branch: repository.defaultBranch)
             let gitDir = join(destPath, ".git")
             try writeText("[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = \(source)\n", to: join(gitDir, "config"))
             let message = "Clone \(github.owner)/\(github.repo)"
@@ -422,10 +429,11 @@ private struct PortableGit {
                 authorName: "GitHub",
                 authorEmail: "noreply@github.com",
                 timestamp: Date().timeIntervalSince1970,
-                snapshot: snapshot
+                snapshot: snapshot,
+                remoteSHA: remoteHead.object.sha
             )
             try writeJSON([commit], to: join(gitDir, "justbash/commits.json"))
-            try writeText(id + "\n", to: join(gitDir, "refs/heads/master"))
+            try writeText(id + "\n", to: join(gitDir, "refs/heads/\(repository.defaultBranch)"))
 
             return .success("Cloning into '\(destination)'...\n")
         } catch {
@@ -433,22 +441,185 @@ private struct PortableGit {
         }
     }
 
+    private func pushGitHub(remote: String, args: [String], repo: PortableRepo) async -> ExecResult {
+        guard let github = parseGitHubRemote(remote) else {
+            return .failure("fatal: portable git remote push currently supports GitHub HTTPS remotes")
+        }
+
+        do {
+            var commits = try readCommits(repo.gitDir)
+            guard let head = try readHeadCommit(repo), let headIndex = commits.firstIndex(where: { $0.id == head }) else {
+                return .failure("fatal: the current branch \(repo.headBranchName) has no commits yet", exitCode: 128)
+            }
+
+            let remoteRef = pushDestinationRef(from: args, repo: repo)
+            let branchPath = remoteRef.hasPrefix("refs/heads/") ? String(remoteRef.dropFirst("refs/".count)) : remoteRef
+            let force = args.contains("--force") || args.contains("-f")
+
+            let remoteHead = try await fetchGitHubRef(github, ref: branchPath)
+            let remoteCommit = try await fetchGitHubCommit(github, sha: remoteHead.object.sha)
+
+            if let knownRemoteIndex = commits.lastIndex(where: { $0.remoteSHA != nil }) {
+                let knownRemoteSHA = commits[knownRemoteIndex].remoteSHA
+                if knownRemoteSHA != remoteHead.object.sha && !force {
+                    return .failure(
+                        "fatal: remote contains work that is not in the portable local history; pull first or use --force",
+                        exitCode: 1
+                    )
+                }
+            }
+
+            let startIndex = commits.lastIndex(where: { $0.remoteSHA == remoteHead.object.sha }).map { $0 + 1 } ?? 0
+            guard startIndex <= headIndex else {
+                return .success("Everything up-to-date\n")
+            }
+
+            var parentSHA = remoteHead.object.sha
+            var baseTreeSHA = remoteCommit.tree.sha
+            var previousSnapshot = startIndex > 0 ? commits[startIndex - 1].snapshot : [:]
+            var pushedCount = 0
+
+            for index in startIndex...headIndex {
+                let localCommit = commits[index]
+                let treeEntries = changedTreeEntries(
+                    from: previousSnapshot,
+                    to: localCommit.snapshot,
+                    includeDeletions: startIndex > 0 || index > startIndex
+                )
+                previousSnapshot = localCommit.snapshot
+                guard !treeEntries.isEmpty else {
+                    commits[index] = localCommit.withRemoteSHA(parentSHA)
+                    continue
+                }
+
+                let tree = try await createGitHubTree(github, baseTree: baseTreeSHA, entries: treeEntries)
+                let remoteCommit = try await createGitHubCommit(github, localCommit: localCommit, parentSHA: parentSHA, treeSHA: tree.sha)
+                parentSHA = remoteCommit.sha
+                baseTreeSHA = tree.sha
+                commits[index] = localCommit.withRemoteSHA(remoteCommit.sha)
+                pushedCount += 1
+            }
+
+            guard pushedCount > 0 else {
+                try writeJSON(commits, to: join(repo.gitDir, "justbash/commits.json"))
+                return .success("Everything up-to-date\n")
+            }
+
+            _ = try await updateGitHubRef(github, ref: branchPath, sha: parentSHA, force: force)
+            try writeJSON(commits, to: join(repo.gitDir, "justbash/commits.json"))
+            return .success("To \(remote)\n   \(String(remoteHead.object.sha.prefix(7)))..\(String(parentSHA.prefix(7)))  \(remoteRef) -> \(remoteRef)\n")
+        } catch let error as GitHubAPIError {
+            return .failure("fatal: unable to push to '\(remote)': \(error.message)", exitCode: error.exitCode)
+        } catch {
+            return .failure("fatal: unable to push to '\(remote)': \(error.localizedDescription)")
+        }
+    }
+
+    private func pushDestinationRef(from args: [String], repo: PortableRepo) -> String {
+        let positional = args.filter { !$0.hasPrefix("-") }
+        let refspec = positional.dropFirst().first ?? "HEAD:refs/heads/\(repo.headBranchName)"
+        let parts = refspec.split(separator: ":", maxSplits: 1).map(String.init)
+        let destination = parts.count == 2 ? parts[1] : parts[0]
+        if destination == "HEAD" {
+            return "refs/heads/\(repo.headBranchName)"
+        }
+        if destination.hasPrefix("refs/") {
+            return destination
+        }
+        return "refs/heads/\(destination)"
+    }
+
+    private func changedTreeEntries(from base: [String: String], to snapshot: [String: String], includeDeletions: Bool) -> [GitHubTreeWriteEntry] {
+        var entries: [GitHubTreeWriteEntry] = []
+        let paths = Set(base.keys).union(snapshot.keys).sorted()
+        for path in paths {
+            if let content = snapshot[path] {
+                if base[path] != content {
+                    entries.append(GitHubTreeWriteEntry(path: path, mode: "100644", type: "blob", content: content, sha: nil))
+                }
+            } else if includeDeletions, base[path] != nil {
+                entries.append(GitHubTreeWriteEntry(path: path, mode: "100644", type: "blob", content: nil, sha: nil))
+            }
+        }
+        return entries
+    }
+
+    private func fetchGitHubRef(_ github: GitHubRemote, ref: String) async throws -> GitHubRef {
+        try await sendGitHubRequest(github, method: "GET", path: "git/ref/\(ref)", body: Optional<EmptyGitHubBody>.none)
+    }
+
+    private func fetchGitHubCommit(_ github: GitHubRemote, sha: String) async throws -> GitHubCommitResponse {
+        try await sendGitHubRequest(github, method: "GET", path: "git/commits/\(sha)", body: Optional<EmptyGitHubBody>.none)
+    }
+
+    private func createGitHubTree(_ github: GitHubRemote, baseTree: String, entries: [GitHubTreeWriteEntry]) async throws -> GitHubTreeCreateResponse {
+        try await sendGitHubRequest(github, method: "POST", path: "git/trees", body: GitHubCreateTreeRequest(baseTree: baseTree, tree: entries))
+    }
+
+    private func createGitHubCommit(_ github: GitHubRemote, localCommit: PortableCommit, parentSHA: String, treeSHA: String) async throws -> GitHubCreateCommitResponse {
+        let author = GitHubCommitIdentity(
+            name: localCommit.authorName,
+            email: localCommit.authorEmail,
+            date: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: localCommit.timestamp))
+        )
+        let body = GitHubCreateCommitRequest(
+            message: localCommit.message,
+            tree: treeSHA,
+            parents: [parentSHA],
+            author: author,
+            committer: author
+        )
+        return try await sendGitHubRequest(github, method: "POST", path: "git/commits", body: body)
+    }
+
+    private func updateGitHubRef(_ github: GitHubRemote, ref: String, sha: String, force: Bool) async throws -> GitHubRef {
+        try await sendGitHubRequest(github, method: "PATCH", path: "git/refs/\(ref)", body: GitHubUpdateRefRequest(sha: sha, force: force))
+    }
+
+    private func sendGitHubRequest<Response: Decodable, Body: Encodable>(
+        _ github: GitHubRemote,
+        method: String,
+        path: String,
+        body: Body?
+    ) async throws -> Response {
+        var request = URLRequest(url: github.apiURL(path: path))
+        request.httpMethod = method
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("JustBash", forHTTPHeaderField: "User-Agent")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        applyGitHubAuth(to: &request, host: "github.com")
+        if let body {
+            request.httpBody = try JSONEncoder().encode(body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GitHubAPIError(message: "non-HTTP response", exitCode: 1)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(GitHubErrorResponse.self, from: data).message) ?? "HTTP \(http.statusCode)"
+            throw GitHubAPIError(message: "\(message) (HTTP \(http.statusCode))", exitCode: http.statusCode == 409 ? 1 : 128)
+        }
+        return try JSONDecoder().decode(Response.self, from: data)
+    }
+
     // MARK: - Repository helpers
 
     private func locateRepository(gitDirOverride: String?) -> PortableRepo? {
         if let gitDirOverride {
             let gitDir = ctx.fileSystem.normalizePath(gitDirOverride, relativeTo: ctx.cwd)
-            return PortableRepo(gitDir: gitDir, workTree: dirname(gitDir), isBare: isBareGitDir(gitDir))
+            return PortableRepo(gitDir: gitDir, workTree: dirname(gitDir), isBare: isBareGitDir(gitDir), headBranchName: readHeadBranchName(gitDir) ?? "master")
         }
 
         var current = ctx.fileSystem.normalizePath(".", relativeTo: ctx.cwd)
         while true {
             let dotGit = join(current, ".git")
             if ctx.fileSystem.isDirectory(path: dotGit, relativeTo: "/") {
-                return PortableRepo(gitDir: dotGit, workTree: current, isBare: false)
+                return PortableRepo(gitDir: dotGit, workTree: current, isBare: false, headBranchName: readHeadBranchName(dotGit) ?? "master")
             }
             if isBareGitDir(current) {
-                return PortableRepo(gitDir: current, workTree: dirname(current), isBare: true)
+                return PortableRepo(gitDir: current, workTree: dirname(current), isBare: true, headBranchName: readHeadBranchName(current) ?? "master")
             }
             if current == "/" { return nil }
             current = dirname(current)
@@ -484,19 +655,28 @@ private struct PortableGit {
         try readJSON([PortableCommit].self, from: join(gitDir, "justbash/commits.json")) ?? []
     }
 
-    private func initClonedMetadata(at workTree: String, commits: [PortableCommit], head: String?) throws {
+    private func initClonedMetadata(at workTree: String, commits: [PortableCommit], head: String?, branch: String = "master") throws {
         let gitDir = join(workTree, ".git")
         try ensureDirectory(gitDir)
         try ensureDirectory(join(gitDir, "refs/heads"))
         try ensureDirectory(join(gitDir, "objects"))
         try ensureDirectory(join(gitDir, "justbash"))
-        try writeText("ref: refs/heads/master\n", to: join(gitDir, "HEAD"))
+        try writeText("ref: refs/heads/\(branch)\n", to: join(gitDir, "HEAD"))
         try writeText("[core]\n\trepositoryformatversion = 0\n\tbare = false\n", to: join(gitDir, "config"))
         try writeJSON([String](), to: join(gitDir, "justbash/index.json"))
         try writeJSON(commits, to: join(gitDir, "justbash/commits.json"))
         if let head {
-            try writeText(head + "\n", to: join(gitDir, "refs/heads/master"))
+            try writeText(head + "\n", to: join(gitDir, "refs/heads/\(branch)"))
         }
+    }
+
+    private func readHeadBranchName(_ gitDir: String) -> String? {
+        guard let head = try? readText(join(gitDir, "HEAD")).trimmingCharacters(in: .whitespacesAndNewlines),
+              head.hasPrefix("ref: refs/heads/")
+        else {
+            return nil
+        }
+        return String(head.dropFirst("ref: refs/heads/".count))
     }
 
     private func readOrigin(_ repo: PortableRepo) -> String? {
@@ -690,6 +870,10 @@ private struct GitHubTreeResponse: Decodable {
     let tree: [GitHubTreeItem]
 }
 
+private struct GitHubTreeCreateResponse: Decodable {
+    let sha: String
+}
+
 private struct GitHubTreeItem: Decodable {
     let path: String
     let type: String
@@ -709,13 +893,97 @@ private struct GitHubRefObject: Decodable {
     let sha: String
 }
 
+private struct GitHubCommitResponse: Decodable {
+    let sha: String
+    let tree: GitHubCommitTree
+}
+
+private struct GitHubCreateCommitResponse: Decodable {
+    let sha: String
+}
+
+private struct GitHubCommitTree: Decodable {
+    let sha: String
+}
+
+private struct GitHubCreateTreeRequest: Encodable {
+    let baseTree: String
+    let tree: [GitHubTreeWriteEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case baseTree = "base_tree"
+        case tree
+    }
+}
+
+private struct GitHubTreeWriteEntry: Encodable {
+    let path: String
+    let mode: String
+    let type: String
+    let content: String?
+    let sha: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case mode
+        case type
+        case content
+        case sha
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(type, forKey: .type)
+        if let content {
+            try container.encode(content, forKey: .content)
+        } else {
+            try container.encodeNil(forKey: .sha)
+        }
+        if let sha {
+            try container.encode(sha, forKey: .sha)
+        }
+    }
+}
+
+private struct GitHubCreateCommitRequest: Encodable {
+    let message: String
+    let tree: String
+    let parents: [String]
+    let author: GitHubCommitIdentity
+    let committer: GitHubCommitIdentity
+}
+
+private struct GitHubCommitIdentity: Encodable {
+    let name: String
+    let email: String
+    let date: String
+}
+
+private struct GitHubUpdateRefRequest: Encodable {
+    let sha: String
+    let force: Bool
+}
+
+private struct GitHubErrorResponse: Decodable {
+    let message: String
+}
+
+private struct EmptyGitHubBody: Encodable {}
+
+private struct GitHubAPIError: Error {
+    let message: String
+    let exitCode: Int
+}
+
 private struct PortableRepo {
     let gitDir: String
     let workTree: String
     let isBare: Bool
+    let headBranchName: String
 
-    var headBranchName: String { "master" }
-    var headRefPath: String { gitDir + "/refs/heads/master" }
+    var headRefPath: String { gitDir + "/refs/heads/\(headBranchName)" }
 }
 
 private struct PortableCommit: Codable {
@@ -726,4 +994,38 @@ private struct PortableCommit: Codable {
     let authorEmail: String
     let timestamp: TimeInterval
     let snapshot: [String: String]
+    let remoteSHA: String?
+
+    init(
+        id: String,
+        message: String,
+        parent: String?,
+        authorName: String,
+        authorEmail: String,
+        timestamp: TimeInterval,
+        snapshot: [String: String],
+        remoteSHA: String? = nil
+    ) {
+        self.id = id
+        self.message = message
+        self.parent = parent
+        self.authorName = authorName
+        self.authorEmail = authorEmail
+        self.timestamp = timestamp
+        self.snapshot = snapshot
+        self.remoteSHA = remoteSHA
+    }
+
+    func withRemoteSHA(_ remoteSHA: String) -> PortableCommit {
+        PortableCommit(
+            id: id,
+            message: message,
+            parent: parent,
+            authorName: authorName,
+            authorEmail: authorEmail,
+            timestamp: timestamp,
+            snapshot: snapshot,
+            remoteSHA: remoteSHA
+        )
+    }
 }

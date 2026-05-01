@@ -210,9 +210,10 @@ For complex command substitutions, shell functions are recommended over aliases.
 `git` is implemented in-process against the active `BashFilesystem`, so it works
 on iPhone/iPadOS hosts where `Process`/`NSTask` is unavailable. The current
 portable command surface covers repository creation, staging, commits, status,
-log, revision lookup, local clone/push, GitHub HTTPS `ls-remote`/clone through
-`URLSession`, and credential-store lookups using the same command syntax shape
-as git for those operations.
+log, revision lookup, local clone/push, GitHub HTTPS `ls-remote`/clone/push
+through `URLSession`, and credential-store lookups using the same command syntax
+shape as git for those operations. GitHub HTTPS push maps portable commits to
+GitHub Git Database API trees, commits, and branch-ref updates.
 
 ### Execution Limits
 
@@ -362,7 +363,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-377 tests covering: 60+ commands, control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, portable in-process git support, gzip-family and zip compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, custom filesystem abstraction, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
+378 tests covering: 60+ commands, control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, portable in-process git support, gzip-family and zip compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, custom filesystem abstraction, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
 
 ## License
 
