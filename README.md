@@ -99,6 +99,13 @@ includes by default, how to vendor extra pure-Python modules into
 `numpy`, and the filesystem caveat for Python running beside the JustBash
 virtual filesystem.
 
+The cached OpenAI primary-runtime artifact skills for Documents, Presentations,
+and Spreadsheets are tracked separately in
+[Primary Runtime Skills On iOS](docs/PRIMARY_RUNTIME_SKILLS_IOS.md). The current
+result is intentionally marked blocked for unchanged iOS execution: they require
+desktop/container capabilities such as LibreOffice, Node package resolution, and
+`@oai/artifact-tool` that are not bundled into this iOS runtime.
+
 Verified build lane:
 
 ```bash

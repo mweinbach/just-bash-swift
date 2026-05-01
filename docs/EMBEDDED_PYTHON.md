@@ -177,6 +177,12 @@ time. On-device runtime installation of native wheels is not the supported path:
 the app has no compiler toolchain, native code must be signed with the app, and
 downloaded executable code is not the model we want for this host.
 
+For the OpenAI primary-runtime Documents, Presentations, and Spreadsheets skill
+bundles, see [Primary Runtime Skills On iOS](PRIMARY_RUNTIME_SKILLS_IOS.md).
+Those skills are not iOS-runnable unchanged today because their upstream
+contracts depend on desktop/container runtimes such as LibreOffice, Node module
+resolution, and `@oai/artifact-tool`.
+
 ## Native Package Status
 
 Use this probe to check whether native packages resolve for CPython 3.14 iOS
