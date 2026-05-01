@@ -645,6 +645,21 @@ actor SandboxService {
       fillRect(canvas, x + width - 1, y, 1, height, color);
     }
 
+    function drawLine(canvas, x0, y0, x1, y1, color) {
+      let dx = Math.abs(x1 - x0);
+      let sx = x0 < x1 ? 1 : -1;
+      let dy = -Math.abs(y1 - y0);
+      let sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      while (true) {
+        fillRect(canvas, x0 - 1, y0 - 1, 3, 3, color);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
     function drawText(canvas, text, x, y, maxWidth, color) {
       const scale = 2;
       let cursor = x;
@@ -958,6 +973,90 @@ actor SandboxService {
           .map((dep) => traceCell(dep.sheet, dep.row, dep.col, activeSeen));
       }
       return node;
+    }
+
+    function chartBounds(chart) {
+      const start = typeof chart.position === "string" ? parseCell(chart.position) : null;
+      const end = typeof chart.endPosition === "string" ? parseCell(chart.endPosition) : null;
+      if (start && end) {
+        return {
+          row: Math.min(start.row, end.row),
+          col: Math.min(start.col, end.col),
+          rows: Math.max(6, Math.abs(end.row - start.row) + 1),
+          cols: Math.max(4, Math.abs(end.col - start.col) + 1)
+        };
+      }
+      if (start) return { row: start.row, col: start.col, rows: 12, cols: 6 };
+      return { row: 0, col: 6, rows: 12, cols: 6 };
+    }
+
+    function chartSourceValues(chart) {
+      const range = chart.sourceRange || chart.options.sourceRange;
+      if (!range || !range.values) return { headers: [], categories: [], series: [] };
+      const values = range.values;
+      const headers = (values[0] || []).map((value) => String(value == null ? "" : value));
+      const categories = values.slice(1).map((row) => String((row || [])[0] == null ? "" : (row || [])[0]));
+      const series = [];
+      for (let c = 1; c < Math.max(2, headers.length); c += 1) {
+        series.push({
+          name: headers[c] || `Series ${c}`,
+          values: values.slice(1).map((row) => asNumber((row || [])[c]))
+        });
+      }
+      return { headers, categories, series };
+    }
+
+    function renderChart(canvas, chart, frame) {
+      const border = [75, 85, 99, 255];
+      const grid = [229, 231, 235, 255];
+      const text = [17, 24, 39, 255];
+      const colors = [[37, 99, 235, 255], [5, 150, 105, 255], [220, 38, 38, 255], [124, 58, 237, 255]];
+      fillRect(canvas, frame.left, frame.top, frame.width, frame.height, [255, 255, 255, 255]);
+      strokeRect(canvas, frame.left, frame.top, frame.width, frame.height, border);
+      const title = typeof chart.title === "string" ? chart.title : (chart.name || "Chart");
+      drawText(canvas, title, frame.left + 8, frame.top + 8, Math.max(24, frame.width - 16), text);
+      const data = chartSourceValues(chart);
+      if (!data.series.length || !data.categories.length) {
+        drawText(canvas, "NO DATA", frame.left + 8, frame.top + 28, frame.width - 16, text);
+        return;
+      }
+      const plot = {
+        left: frame.left + 32,
+        top: frame.top + 30,
+        width: Math.max(20, frame.width - 44),
+        height: Math.max(20, frame.height - 58)
+      };
+      strokeRect(canvas, plot.left, plot.top, plot.width, plot.height, grid);
+      const values = data.series.flatMap((series) => series.values);
+      const maxValue = Math.max(1, ...values.map(asNumber));
+      const minValue = Math.min(0, ...values.map(asNumber));
+      const span = Math.max(1, maxValue - minValue);
+      const xFor = (index) => plot.left + Math.round((plot.width - 10) * (data.categories.length === 1 ? 0.5 : index / (data.categories.length - 1))) + 5;
+      const yFor = (value) => plot.top + plot.height - 4 - Math.round(((asNumber(value) - minValue) / span) * (plot.height - 8));
+      const kind = String(chart.type || "").toLowerCase();
+      if (kind.includes("bar") || kind.includes("column")) {
+        const groupWidth = Math.max(4, Math.floor((plot.width - 10) / Math.max(1, data.categories.length)));
+        const barWidth = Math.max(2, Math.floor(groupWidth / Math.max(1, data.series.length + 1)));
+        data.series.forEach((series, seriesIndex) => {
+          series.values.forEach((value, index) => {
+            const x = plot.left + 5 + index * groupWidth + seriesIndex * barWidth;
+            const y = yFor(value);
+            fillRect(canvas, x, y, barWidth - 1, plot.top + plot.height - 4 - y, colors[seriesIndex % colors.length]);
+          });
+        });
+      } else {
+        data.series.forEach((series, seriesIndex) => {
+          let previous = null;
+          series.values.forEach((value, index) => {
+            const point = { x: xFor(index), y: yFor(value) };
+            if (previous) drawLine(canvas, previous.x, previous.y, point.x, point.y, colors[seriesIndex % colors.length]);
+            fillRect(canvas, point.x - 2, point.y - 2, 5, 5, colors[seriesIndex % colors.length]);
+            previous = point;
+          });
+        });
+      }
+      drawText(canvas, data.categories[0] || "", plot.left, plot.top + plot.height + 8, Math.floor(plot.width / 2), text);
+      drawText(canvas, data.categories[data.categories.length - 1] || "", plot.left + Math.floor(plot.width / 2), plot.top + plot.height + 8, Math.floor(plot.width / 2), text);
     }
 
     function parseSharedStrings(xmlText) {
@@ -1366,6 +1465,18 @@ actor SandboxService {
             drawText(canvas, value == null ? "" : value, x + 6, y + 8, cellWidth - 12, text);
           }
         }
+        sheet.charts.items.forEach((chart) => {
+          const bounds = chartBounds(chart);
+          const frame = {
+            left: (bounds.col - range.bounds.col) * cellWidth,
+            top: (bounds.row - range.bounds.row) * cellHeight,
+            width: bounds.cols * cellWidth,
+            height: bounds.rows * cellHeight
+          };
+          if (frame.left + frame.width > 0 && frame.top + frame.height > 0 && frame.left < width && frame.top < height) {
+            renderChart(canvas, chart, frame);
+          }
+        });
         return new FileBlob(pngImage(width, height, canvas.rgba), MIME.png);
       }
       calculate() {
@@ -1410,8 +1521,9 @@ actor SandboxService {
           legend: {},
           axes: {},
           series: new LooseCollection((seriesOptions) => ({ options: seriesOptions || {} })),
-          setPosition(anchor) {
+          setPosition(anchor, endAnchor) {
             this.position = anchor;
+            this.endPosition = endAnchor;
             return this;
           },
           delete() {
@@ -1682,7 +1794,70 @@ actor SandboxService {
       fillRight() {}
     }
 
-    function sheetXml(sheet) {
+    function xlsxRangeRef(sheet, bounds) {
+      const sheetName = "'" + String(sheet.name).replace(/'/g, "''") + "'";
+      const start = `$${colName(bounds.col)}$${bounds.row + 1}`;
+      const end = `$${colName(bounds.col + bounds.cols - 1)}$${bounds.row + bounds.rows}`;
+      return `${sheetName}!${start}:${end}`;
+    }
+
+    function xlsxCellRef(sheet, row, col) {
+      const sheetName = "'" + String(sheet.name).replace(/'/g, "''") + "'";
+      return `${sheetName}!$${colName(col)}$${row + 1}`;
+    }
+
+    function chartSeriesXml(chart) {
+      const range = chart.sourceRange || chart.options.sourceRange;
+      if (!range || range.bounds.rows < 2 || range.bounds.cols < 2) return "";
+      const sheet = range.sheet;
+      const categoryRef = xlsxRangeRef(sheet, {
+        row: range.bounds.row + 1,
+        col: range.bounds.col,
+        rows: range.bounds.rows - 1,
+        cols: 1
+      });
+      const series = [];
+      for (let colOffset = 1; colOffset < range.bounds.cols; colOffset += 1) {
+        const index = colOffset - 1;
+        const valueRef = xlsxRangeRef(sheet, {
+          row: range.bounds.row + 1,
+          col: range.bounds.col + colOffset,
+          rows: range.bounds.rows - 1,
+          cols: 1
+        });
+        const titleRef = xlsxCellRef(sheet, range.bounds.row, range.bounds.col + colOffset);
+        series.push(`<c:ser><c:idx val="${index}"/><c:order val="${index}"/><c:tx><c:strRef><c:f>${xml(titleRef)}</c:f></c:strRef></c:tx><c:cat><c:strRef><c:f>${xml(categoryRef)}</c:f></c:strRef></c:cat><c:val><c:numRef><c:f>${xml(valueRef)}</c:f></c:numRef></c:val></c:ser>`);
+      }
+      return series.join("");
+    }
+
+    function chartXml(chart, index) {
+      const kind = String(chart.type || "column").toLowerCase();
+      const title = typeof chart.title === "string" ? chart.title : chart.name || `Chart ${index}`;
+      const series = chartSeriesXml(chart);
+      const chartBody = (kind.includes("bar") || kind.includes("column"))
+        ? `<c:barChart><c:barDir val="${kind.includes("bar") ? "bar" : "col"}"/><c:grouping val="clustered"/>${series}<c:axId val="10"/><c:axId val="20"/></c:barChart>`
+        : `<c:lineChart><c:grouping val="standard"/>${series}<c:axId val="10"/><c:axId val="20"/></c:lineChart>`;
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${xml(title)}</a:t></a:r></a:p></c:rich></c:tx></c:title><c:plotArea><c:layout/>${chartBody}<c:catAx><c:axId val="10"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="20"/><c:crosses val="autoZero"/></c:catAx><c:valAx><c:axId val="20"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:majorGridlines/><c:numFmt formatCode="General" sourceLinked="1"/><c:tickLblPos val="nextTo"/><c:crossAx val="10"/><c:crosses val="autoZero"/></c:valAx></c:plotArea><c:legend><c:legendPos val="r"/><c:layout/></c:legend><c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
+    }
+
+    function drawingXml(charts) {
+      const anchors = charts.map(({ chart, chartIndex }, index) => {
+        const bounds = chartBounds(chart);
+        return `<xdr:twoCellAnchor><xdr:from><xdr:col>${bounds.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${bounds.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${bounds.col + bounds.cols}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${bounds.row + bounds.rows}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${index + 2}" name="${xml(chart.name || `Chart ${chartIndex}`)}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${index + 1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`;
+      }).join("");
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${anchors}</xdr:wsDr>`;
+    }
+
+    function drawingRelsXml(charts) {
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${charts.map(({ chartIndex }, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${chartIndex}.xml"/>`).join("")}</Relationships>`;
+    }
+
+    function sheetRelsXml(drawingIndex) {
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingIndex}.xml"/></Relationships>`;
+    }
+
+    function sheetXml(sheet, drawingIndex) {
       const rows = {};
       Object.keys(sheet.cells).forEach((key) => {
         const parts = key.split(",").map((n) => Number(n));
@@ -1697,7 +1872,8 @@ actor SandboxService {
         else rows[r].push(`<c r="${ref}" t="inlineStr"><is><t>${xml(cell.value == null ? "" : cell.value)}</t></is></c>`);
       });
       const body = Object.keys(rows).sort((a, b) => Number(a) - Number(b)).map((r) => `<row r="${Number(r) + 1}">${rows[r].join("")}</row>`).join("");
-      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+      const drawing = drawingIndex ? `<drawing r:id="rId1"/>` : "";
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>${body}</sheetData>${drawing}</worksheet>`;
     }
 
     export class SpreadsheetFile {
@@ -1717,13 +1893,34 @@ actor SandboxService {
       }
       static async exportXlsx(workbook) {
         const sheets = workbook.worksheets.items.length ? workbook.worksheets.items : [workbook.worksheets.add("Sheet1")];
+        const chartSheets = [];
+        let chartIndex = 1;
+        sheets.forEach((sheet, sheetIndex) => {
+          const charts = sheet.charts.items.map((chart) => ({ sheet, sheetIndex, chart, chartIndex: chartIndex++ }));
+          if (charts.length) chartSheets.push({ sheet, sheetIndex, drawingIndex: chartSheets.length + 1, charts });
+        });
+        const contentChartOverrides = chartSheets.flatMap((entry) => [
+          `<Override PartName="/xl/drawings/drawing${entry.drawingIndex}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
+          ...entry.charts.map(({ chartIndex }) => `<Override PartName="/xl/charts/chart${chartIndex}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`)
+        ]).join("");
         const files = {
-          "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`,
+          "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}${contentChartOverrides}</Types>`,
           "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
           "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, i) => `<sheet name="${xml(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`,
           "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}</Relationships>`
         };
-        sheets.forEach((sheet, i) => { files[`xl/worksheets/sheet${i + 1}.xml`] = sheetXml(sheet); });
+        sheets.forEach((sheet, i) => {
+          const chartSheet = chartSheets.find((entry) => entry.sheet === sheet);
+          files[`xl/worksheets/sheet${i + 1}.xml`] = sheetXml(sheet, chartSheet && chartSheet.drawingIndex);
+        });
+        chartSheets.forEach((entry) => {
+          files[`xl/worksheets/_rels/sheet${entry.sheetIndex + 1}.xml.rels`] = sheetRelsXml(entry.drawingIndex);
+          files[`xl/drawings/drawing${entry.drawingIndex}.xml`] = drawingXml(entry.charts);
+          files[`xl/drawings/_rels/drawing${entry.drawingIndex}.xml.rels`] = drawingRelsXml(entry.charts);
+          entry.charts.forEach(({ chart, chartIndex }) => {
+            files[`xl/charts/chart${chartIndex}.xml`] = chartXml(chart, chartIndex);
+          });
+        });
         return new FileBlob(zip(files), MIME.xlsx);
       }
     }
@@ -1748,7 +1945,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], [2, 3]]; ws.getRange("E1:E3").formulas = [["=SUM(A2:B2)"], ["=AVERAGE(A2:B2)"], ["=E1*2"]]; if (ws.getRange("E1:E3").values[0][0] !== 5 || ws.getRange("E1:E3").values[2][0] !== 10) throw new Error("formula compatibility failed"); if ((await wb.inspect({ kind: "formula" })).errors.length) throw new Error("formula error scan failed"); if (!JSON.parse(wb.trace("Smoke!E3").ndjson).dependencies.length) throw new Error("trace dependencies unavailable"); await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:E4", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ name: "title", position: { left: 40, top: 40, width: 400, height: 80 }, fill: "rgb(239,246,255)", line: { fill: "rgb(37,99,235)", width: 2 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const slidePreview = await deck.export({ slide, format: "png", scale: 0.5 }); if (slidePreview.mime !== "image/png" || (await slidePreview.arrayBuffer()).length < 100) throw new Error("presentation render compatibility failed"); await slidePreview.save("/tmp/primary-runtime-slide.png"); const layout = JSON.parse(await (await deck.export({ slide, format: "layout" })).text()); if (!layout.elements || layout.elements[0].name !== "title") throw new Error("presentation layout compatibility failed"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], [2, 3]]; ws.getRange("E1:E3").formulas = [["=SUM(A2:B2)"], ["=AVERAGE(A2:B2)"], ["=E1*2"]]; if (ws.getRange("E1:E3").values[0][0] !== 5 || ws.getRange("E1:E3").values[2][0] !== 10) throw new Error("formula compatibility failed"); if ((await wb.inspect({ kind: "formula" })).errors.length) throw new Error("formula error scan failed"); if (!JSON.parse(wb.trace("Smoke!E3").ndjson).dependencies.length) throw new Error("trace dependencies unavailable"); await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); chart.setPosition("G1", "M12"); chart.title = "Runtime Chart"; if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const preview = await wb.render({ sheetName: "Smoke", range: "A1:M12", scale: 1 }); if (preview.mime !== "image/png" || (await preview.arrayBuffer()).length < 100) throw new Error("workbook render compatibility failed"); await preview.save("/tmp/primary-runtime-smoke.png"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const xlsxText = Buffer.from(await xlsx.arrayBuffer()).toString("latin1"); if (!xlsxText.includes("xl/charts/chart1.xml") || !xlsxText.includes("xl/drawings/drawing1.xml")) throw new Error("xlsx chart export compatibility failed"); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ name: "title", position: { left: 40, top: 40, width: 400, height: 80 }, fill: "rgb(239,246,255)", line: { fill: "rgb(37,99,235)", width: 2 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const slidePreview = await deck.export({ slide, format: "png", scale: 0.5 }); if (slidePreview.mime !== "image/png" || (await slidePreview.arrayBuffer()).length < 100) throw new Error("presentation render compatibility failed"); await slidePreview.save("/tmp/primary-runtime-slide.png"); const layout = JSON.parse(await (await deck.export({ slide, format: "layout" })).text()); if (!layout.elements || layout.elements[0].name !== "title") throw new Error("presentation layout compatibility failed"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -1839,7 +2036,8 @@ actor SandboxService {
                 "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
                 "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
                 "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
-                "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
+                "bounded native XLSX chart parts and basic chart PNG previews are staged for common source-range charts",
+                "full Excel chart semantics still require the native artifact-tool runtime or a broader iOS chart engine",
                 "missing optional spreadsheet Python modules: pandas, docx",
             ]
         )

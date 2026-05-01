@@ -181,9 +181,10 @@ iOS blockers:
   scans formula errors, and returns `workbook.trace(...)` dependency trees. This
   is still a bounded compatibility evaluator, not Excel's full calculation
   engine.
-- Chart and dashboard workflows require native Excel chart export plus rendered
-  visual verification. The iOS compatibility package exposes only placeholder
-  chart objects and does not export or render real charts.
+- Common source-range line/bar/column charts now export native XLSX chart and
+  drawing parts, and `Workbook.render(...)` draws basic chart previews in the
+  worksheet PNG. This is bounded chart compatibility, not Excel's full chart
+  engine.
 - The optional Python analysis stack is partially staged: `numpy`, `pypdf`, and
   `reportlab` are available in the current package lane, while `pandas` and
   `python-docx` remain unavailable for this iOS target because of unresolved
@@ -247,7 +248,8 @@ wrote `/workspace/primary-runtime-skills-ios-report.json` with:
   Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
 - Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
   compatibility is staged, including basic slide PNG/layout previews, Lucide
-  SVG icon data URLs, and common structural spreadsheet helpers, but full
-  render/import behavior remains unported
+  SVG icon data URLs, common structural spreadsheet helpers, formulas, and
+  bounded chart export/previews, but full render/import behavior remains
+  unported
 - Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
   `reportlab` import; `docx`, `lxml`, and `pandas` do not

@@ -95,7 +95,8 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                     "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
                     "bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged for common arithmetic/range formulas",
                     "full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine",
-                    "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
+                    "bounded native XLSX chart parts and basic chart PNG previews are staged for common source-range charts",
+                    "full Excel chart semantics still require the native artifact-tool runtime or a broader iOS chart engine",
                     (
                         "missing optional spreadsheet Python modules: " + ", ".join(spreadsheet_missing)
                         if spreadsheet_missing

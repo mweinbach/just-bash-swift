@@ -643,11 +643,27 @@ def check_spreadsheets(
             "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
             spreadsheet_calculation_evidence(skill_md),
         )
-    report.add(
-        "blocked",
-        "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
-        spreadsheet_chart_evidence(skill_md),
-    )
+    if all(marker in sandbox_text for marker in ("function chartXml", "function drawingXml", "function renderChart")):
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility exports native XLSX chart parts for bounded source-range charts and renders basic chart previews in worksheet PNG output",
+            [
+                line_for(sandbox_service, "function chartXml"),
+                line_for(sandbox_service, "function drawingXml"),
+                line_for(sandbox_service, "function renderChart"),
+            ],
+        )
+        report.add(
+            "warning",
+            "spreadsheet chart support is bounded to common source-range line/bar/column charts, not the full Excel chart engine",
+            spreadsheet_chart_evidence(skill_md),
+        )
+    else:
+        report.add(
+            "blocked",
+            "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
+            spreadsheet_chart_evidence(skill_md),
+        )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
     native_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-native-ios.txt")
