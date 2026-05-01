@@ -1,4 +1,5 @@
 import XCTest
+import JustBash
 @testable import JustBashFS
 
 // MARK: - OverlayFileSystem Tests
@@ -191,6 +192,68 @@ final class ReadWriteFileSystemTests: XCTestCase {
         try fs.deleteFile(path: "/nope", relativeTo: "/", recursive: false, force: true)
     }
 
+}
+
+// MARK: - UserWorkspaceFileSystem Tests
+
+final class UserWorkspaceFileSystemTests: XCTestCase {
+
+    private var tempDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("UserWorkspaceFSTest-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tempDir)
+        super.tearDown()
+    }
+
+    func testSeedsMacLikeUserDirectories() throws {
+        let fs = try UserWorkspaceFileSystem(rootURL: tempDir)
+
+        XCTAssertTrue(fs.isDirectory(path: "/Users/coder/Documents", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/Users/coder/Downloads", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/Users/coder/Desktop", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/Applications", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/workspace", relativeTo: "/"))
+    }
+
+    func testImportAndExportRoundTrip() throws {
+        let fs = try UserWorkspaceFileSystem(rootURL: tempDir)
+        let sourceURL = tempDir.appendingPathComponent("outside.txt")
+        try "outside\n".write(to: sourceURL, atomically: true, encoding: .utf8)
+
+        let importedPath = try fs.importItem(from: sourceURL)
+        XCTAssertEqual(importedPath, "/Users/coder/Downloads/outside.txt")
+        XCTAssertEqual(try fs.readFile(importedPath), "outside\n")
+
+        let exportDirectory = tempDir.appendingPathComponent("Exported", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+        let exportedURL = try fs.exportItem(importedPath, to: exportDirectory)
+        XCTAssertEqual(exportedURL.lastPathComponent, "outside.txt")
+        XCTAssertEqual(try String(contentsOf: exportedURL, encoding: .utf8), "outside\n")
+    }
+
+    func testBashCodingAgentWorkspaceUsesMacLikeHomeAndDiskBackedMoves() async throws {
+        let options = try BashOptions.codingAgentWorkspace(rootURL: tempDir)
+        let bash = Bash(options: options)
+
+        let result = await bash.exec("""
+        printf 'hello' > ~/Documents/a.txt
+        cp ~/Documents/a.txt ~/Downloads/
+        mv ~/Downloads/a.txt ~/Desktop/
+        pwd
+        cat ~/Desktop/a.txt
+        """)
+
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains("/Users/coder/Documents"))
+        XCTAssertTrue(result.stdout.contains("hello"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("Users/coder/Desktop/a.txt").path))
+    }
 }
 
 // MARK: - MountableFileSystem Tests

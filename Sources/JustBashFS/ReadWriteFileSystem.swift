@@ -41,6 +41,21 @@ public final class ReadWriteFileSystem: @unchecked Sendable {
         if normalized == "/" { return basePath }
         return (basePath as NSString).appendingPathComponent(String(normalized.dropFirst()))
     }
+
+    /// Maps a virtual path to a host filesystem URL rooted inside `basePath`.
+    ///
+    /// The returned URL is always confined to the backend root.
+    public func url(for path: String, relativeTo: String = "/") throws -> URL {
+        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
+        let url = URL(fileURLWithPath: realPath(for: normalized)).standardizedFileURL
+        let base = URL(fileURLWithPath: basePath, isDirectory: true).standardizedFileURL
+        let path = url.path
+        let basePath = base.path
+        guard path == basePath || path.hasPrefix(basePath + "/") else {
+            throw FilesystemError.permissionDenied(normalized)
+        }
+        return url
+    }
 }
 
 // MARK: - BashFilesystem
@@ -178,6 +193,25 @@ extension ReadWriteFileSystem: BashFilesystem {
         let type = attrs?[.type] as? FileAttributeType
         let kind: FileNodeKind = type == .typeSymbolicLink ? .symlink : .file
         return FileInfo(path: normalized, kind: kind, size: size)
+    }
+
+    public func createSymlink(_ target: String, at path: String, relativeTo: String) throws {
+        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
+        let real = realPath(for: normalized)
+        do {
+            try fileManager.createSymbolicLink(atPath: real, withDestinationPath: target)
+        } catch {
+            throw FilesystemError.ioError("cannot create symlink \(normalized): \(error.localizedDescription)")
+        }
+    }
+
+    public func readlink(_ path: String, relativeTo: String) throws -> String {
+        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
+        do {
+            return try fileManager.destinationOfSymbolicLink(atPath: realPath(for: normalized))
+        } catch {
+            throw FilesystemError.ioError("cannot readlink \(normalized): \(error.localizedDescription)")
+        }
     }
 
     public func walk(path: String, relativeTo: String) throws -> [String] {

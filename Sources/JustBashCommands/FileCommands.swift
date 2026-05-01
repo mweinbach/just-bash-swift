@@ -140,10 +140,12 @@ func rmdir() -> AnyBashCommand {
 
 func cp() -> AnyBashCommand {
     AnyBashCommand(name: "cp") { args, ctx in
+        var recursive = false
         var noOverwrite = false
         let filtered = args.filter { arg in
             if arg.hasPrefix("-") {
                 for ch in arg.dropFirst() {
+                    if ch == "r" || ch == "R" { recursive = true }
                     if ch == "n" { noOverwrite = true }
                 }
                 return false
@@ -154,12 +156,25 @@ func cp() -> AnyBashCommand {
         let dest = filtered.last!
         let sources = filtered.dropLast()
         do {
+            if sources.count > 1 && !ctx.fileSystem.isDirectory(path: dest, relativeTo: ctx.cwd) {
+                return ExecResult.failure("cp: target '\(dest)' is not a directory")
+            }
             for source in sources {
+                let info = try ctx.fileSystem.fileInfo(path: source, relativeTo: ctx.cwd)
+                if info.kind == .directory && !recursive {
+                    return ExecResult.failure("cp: -r not specified; omitting directory '\(source)'")
+                }
+                let destination = fileCommandDestination(
+                    source: source,
+                    destination: dest,
+                    destinationIsDirectory: ctx.fileSystem.isDirectory(path: dest, relativeTo: ctx.cwd),
+                    cwd: ctx.cwd
+                )
                 if noOverwrite {
-                    let destPath = VirtualPath.normalize(dest, relativeTo: ctx.cwd)
+                    let destPath = VirtualPath.normalize(destination, relativeTo: ctx.cwd)
                     if ctx.fileSystem.exists(destPath) { continue }
                 }
-                try ctx.fileSystem.copyItem(from: source, to: dest, relativeTo: ctx.cwd)
+                try ctx.fileSystem.copyItem(from: source, to: destination, relativeTo: ctx.cwd)
             }
             return ExecResult.success()
         } catch {
@@ -175,14 +190,33 @@ func mv() -> AnyBashCommand {
         let dest = filtered.last!
         let sources = filtered.dropLast()
         do {
+            if sources.count > 1 && !ctx.fileSystem.isDirectory(path: dest, relativeTo: ctx.cwd) {
+                return ExecResult.failure("mv: target '\(dest)' is not a directory")
+            }
             for source in sources {
-                try ctx.fileSystem.moveItem(from: source, to: dest, relativeTo: ctx.cwd)
+                let destination = fileCommandDestination(
+                    source: source,
+                    destination: dest,
+                    destinationIsDirectory: ctx.fileSystem.isDirectory(path: dest, relativeTo: ctx.cwd),
+                    cwd: ctx.cwd
+                )
+                try ctx.fileSystem.moveItem(from: source, to: destination, relativeTo: ctx.cwd)
             }
             return ExecResult.success()
         } catch {
             return ExecResult.failure("mv: \(error.localizedDescription)")
         }
     }
+}
+
+private func fileCommandDestination(source: String, destination: String, destinationIsDirectory: Bool, cwd: String) -> String {
+    guard destinationIsDirectory else {
+        return destination
+    }
+    let sourcePath = VirtualPath.normalize(source, relativeTo: cwd)
+    let destinationPath = VirtualPath.normalize(destination, relativeTo: cwd)
+    let basename = VirtualPath.basename(sourcePath)
+    return destinationPath == "/" ? "/\(basename)" : "\(destinationPath)/\(basename)"
 }
 
 func ln() -> AnyBashCommand {

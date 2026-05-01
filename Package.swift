@@ -23,6 +23,7 @@ let package = Package(
                 "OverlayFileSystem.swift",
                 "ReadWriteFileSystem.swift",
                 "MountableFileSystem.swift",
+                "UserWorkspaceFileSystem.swift",
             ]
         ),
         .target(
@@ -39,7 +40,7 @@ let package = Package(
             name: "JustBash",
             dependencies: ["JustBashCore", "JustBashFS", "JustBashCommands"],
             path: "Sources/JustBash",
-            sources: ["Bash.swift"]
+            sources: ["Bash.swift", "WorkspaceOptions.swift"]
         ),
         .target(
             name: "JustBashJavaScript",

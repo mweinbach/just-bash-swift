@@ -531,27 +531,47 @@ extension BashFilesystem {
     }
     
     /// Copies an item from source to destination (legacy API).
-    /// Default implementation throws `notSupported`; VirtualFileSystem provides the full implementation.
+    /// The default implementation works for any backend that supports the core
+    /// read/write/list APIs, including cross-mount copies in composed filesystems.
     ///
     /// - Parameters:
     ///   - source: The source path
     ///   - destination: The destination path
     ///   - relativeTo: The working directory for resolving relative paths
-    /// - Throws: `FilesystemError.notSupported` by default
     public func copyItem(from source: String, to destination: String, relativeTo: String = "/") throws {
-        throw FilesystemError.notSupported("copyItem")
+        let sourcePath = normalizePath(source, relativeTo: relativeTo)
+        let destinationPath = normalizePath(destination, relativeTo: relativeTo)
+        let info = try fileInfo(path: sourcePath, relativeTo: "/")
+
+        switch info.kind {
+        case .file, .symlink:
+            let data = try readFile(path: sourcePath, relativeTo: "/")
+            let parent = VirtualPath.dirname(destinationPath)
+            if parent != "/" {
+                try createDirectory(path: parent, relativeTo: "/", recursive: true)
+            }
+            try writeFile(path: destinationPath, content: data, relativeTo: "/")
+        case .directory:
+            try createDirectory(path: destinationPath, relativeTo: "/", recursive: true)
+            let entries = try listDirectory(path: sourcePath, relativeTo: "/")
+            for entry in entries {
+                let childSource = sourcePath == "/" ? "/\(entry)" : "\(sourcePath)/\(entry)"
+                let childDestination = destinationPath == "/" ? "/\(entry)" : "\(destinationPath)/\(entry)"
+                try copyItem(from: childSource, to: childDestination, relativeTo: "/")
+            }
+        }
     }
     
     /// Moves an item from source to destination (legacy API).
-    /// Default implementation throws `notSupported`; VirtualFileSystem provides the full implementation.
+    /// The default implementation copies the item and then removes the source.
     ///
     /// - Parameters:
     ///   - source: The source path
     ///   - destination: The destination path
     ///   - relativeTo: The working directory for resolving relative paths
-    /// - Throws: `FilesystemError.notSupported` by default
     public func moveItem(from source: String, to destination: String, relativeTo: String = "/") throws {
-        throw FilesystemError.notSupported("moveItem")
+        try copyItem(from: source, to: destination, relativeTo: relativeTo)
+        try deleteFile(path: source, relativeTo: relativeTo, recursive: true, force: false)
     }
     
     /// Creates a symbolic link (legacy API).
