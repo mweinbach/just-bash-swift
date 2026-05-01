@@ -594,10 +594,32 @@ actor SandboxService {
         this.fill = this.options.fill;
         this.line = this.options.line;
         this.geometry = this.options.geometry || "rect";
-        this.text = "";
+        this._text = new TextFrame("");
+      }
+      get text() {
+        return this._text;
+      }
+      set text(value) {
+        this._text = value instanceof TextFrame ? value : new TextFrame(value);
       }
       toJSON() {
-        return { position: this.position, geometry: this.geometry, text: this.text };
+        return { position: this.position, geometry: this.geometry, text: this.text.plain };
+      }
+    }
+
+    export class TextFrame {
+      constructor(value) {
+        this.plain = String(value == null ? "" : value);
+        this.fontSize = 24;
+        this.color = "#111827";
+        this.bold = false;
+        this.typeface = "Aptos";
+        this.alignment = "left";
+        this.verticalAlignment = "top";
+        this.insets = { left: 0, right: 0, top: 0, bottom: 0 };
+      }
+      toString() {
+        return this.plain;
       }
     }
 
@@ -613,7 +635,7 @@ actor SandboxService {
 
     function slideXml(slide) {
       const shapes = slide.shapes.items.map((shape, index) => {
-        const text = typeof shape.text === "string" ? shape.text : String(shape.text || "");
+        const text = shape.text && typeof shape.text.plain === "string" ? shape.text.plain : String(shape.text || "");
         return `<p:sp><p:nvSpPr><p:cNvPr id="${index + 2}" name="Text ${index + 1}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="700000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>${xml(text)}</a:t></a:r></a:p></p:txBody></p:sp>`;
       }).join("");
       return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
@@ -797,7 +819,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
