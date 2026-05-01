@@ -22,9 +22,10 @@ per device/simulator architecture:
 ./scripts/install_python_native_packages.sh
 ```
 
-The native installer currently targets `numpy` because compatible CPython 3.14
-iOS wheels are available from BeeWare's secondary wheel index. `pandas` and
-`scipy` are tracked in `requirements-native-ios.txt`, but are intentionally left
-commented until compatible iOS wheels resolve.
+The native installer currently targets packages with compatible CPython 3.14
+iOS wheels: `numpy`, `pillow`, and the Pillow-backed `pdf2image`/`reportlab`
+helpers. `lxml`, `pandas`, and `scipy` are tracked in
+`requirements-native-ios.txt`, but are intentionally left commented until
+compatible iOS wheels resolve.
 
 Runtime `pip install` is not the supported path on iPhone.

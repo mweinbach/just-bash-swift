@@ -24,6 +24,10 @@ def _module_status(import_name: str) -> dict[str, object]:
     }
 
 
+def _missing_modules(statuses: list[dict[str, object]]) -> list[str]:
+    return [str(item["name"]) for item in statuses if not item["available"]]
+
+
 def build_report(workspace: str | None = None) -> dict[str, object]:
     workspace_path = Path(workspace or Path.cwd()).resolve()
     python = {
@@ -35,6 +39,10 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
 
     documents_modules = ["docx", "lxml", "openpyxl", "PIL", "pdf2image"]
     spreadsheet_modules = ["pandas", "numpy", "pypdf", "docx", "reportlab"]
+    documents_module_statuses = [_module_status(name) for name in documents_modules]
+    spreadsheet_module_statuses = [_module_status(name) for name in spreadsheet_modules]
+    documents_missing = _missing_modules(documents_module_statuses)
+    spreadsheet_missing = _missing_modules(spreadsheet_module_statuses)
     soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
 
     return {
@@ -44,14 +52,18 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
         "skills": {
             "documents": {
                 "status": "blocked",
-                "python_modules": [_module_status(name) for name in documents_modules],
+                "python_modules": documents_module_statuses,
                 "external_binaries": {
                     "soffice_or_libreoffice": soffice_path,
                 },
                 "blockers": [
                     "render_docx.py requires soffice/LibreOffice through subprocess",
                     "pdf2image typically requires Poppler binaries",
-                    "required Python packages are not part of the default iOS bundle",
+                    (
+                        "missing required Python modules: " + ", ".join(documents_missing)
+                        if documents_missing
+                        else "all detected document Python modules are importable"
+                    ),
                 ],
             },
             "presentations": {
@@ -63,10 +75,15 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
             },
             "spreadsheets": {
                 "status": "blocked",
-                "python_modules": [_module_status(name) for name in spreadsheet_modules],
+                "python_modules": spreadsheet_module_statuses,
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool workbook export compatibility is staged by the iOS host",
                     "full artifact-tool inspection/render/import behavior is not ported to iOS",
+                    (
+                        "missing optional spreadsheet Python modules: " + ", ".join(spreadsheet_missing)
+                        if spreadsheet_missing
+                        else "all optional spreadsheet Python modules are importable"
+                    ),
                 ],
             },
         },
