@@ -134,6 +134,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         }
 
         XCTAssertEqual(documents["status"] as? String, "blocked")
+        XCTAssertContainsFinding(in: documents, containing: "skill manifest is complete")
+        XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(
             in: documents,
             containing: "real lxml/python-docx OOXML behavior"
@@ -144,6 +146,7 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         )
 
         XCTAssertEqual(presentations["status"] as? String, "blocked")
+        XCTAssertContainsFinding(in: presentations, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: presentations, containing: "render basic presentation slides to PNG")
         XCTAssertContainsFinding(in: presentations, containing: "cached helper CLI/runtime conventions")

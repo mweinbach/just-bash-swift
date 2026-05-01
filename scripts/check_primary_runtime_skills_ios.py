@@ -100,6 +100,16 @@ def python_import_roots(root: Path) -> set[str]:
     return imports
 
 
+def python_syntax_errors(root: Path) -> list[tuple[Path, SyntaxError]]:
+    errors: list[tuple[Path, SyntaxError]] = []
+    for path in sorted(root.rglob("*.py")):
+        try:
+            ast.parse(read_text(path), filename=str(path))
+        except SyntaxError as exc:
+            errors.append((path, exc))
+    return errors
+
+
 def js_import_specs(root: Path) -> set[str]:
     specs: set[str] = set()
     pattern = re.compile(
@@ -141,6 +151,53 @@ def resolve_cached_plugin_root(cache_root: Path, family: str, plugin_name: str) 
     if not candidates:
         return family_root / "missing"
     return sorted(candidates, key=version_key)[-1]
+
+
+def check_manifest(report: SkillReport, skill_dir: Path) -> None:
+    manifest = skill_dir / "manifest.txt"
+    if not manifest.exists():
+        report.add("info", "skill bundle does not include manifest.txt", [str(manifest)])
+        return
+
+    entries = [
+        line.strip()
+        for line in read_text(manifest).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    missing = [entry for entry in entries if not (skill_dir / entry).exists()]
+    if missing:
+        report.add(
+            "blocked",
+            "skill manifest references missing files: " + ", ".join(missing[:8]),
+            [str(manifest), *[str(skill_dir / entry) for entry in missing[:8]]],
+        )
+    else:
+        report.add(
+            "ok",
+            f"skill manifest is complete for {len(entries)} files",
+            [str(manifest)],
+        )
+
+
+def check_python_syntax(report: SkillReport, skill_dir: Path) -> None:
+    scripts = sorted(skill_dir.rglob("*.py"))
+    if not scripts:
+        return
+
+    errors = python_syntax_errors(skill_dir)
+    if errors:
+        report.add(
+            "blocked",
+            "Python helper scripts have syntax errors: "
+            + ", ".join(f"{path.name}:{exc.lineno}" for path, exc in errors[:8]),
+            [f"{path}:{exc.lineno or 1}" for path, exc in errors[:8]],
+        )
+    else:
+        report.add(
+            "ok",
+            f"Python helper scripts parse successfully ({len(scripts)} files)",
+            [str(scripts[0]), str(scripts[-1])],
+        )
 
 
 def documents_ooxml_evidence(skill_dir: Path) -> list[str]:
@@ -395,6 +452,8 @@ def validate_plugin(report: SkillReport, plugin_name: str) -> Path | None:
         report.add("blocked", "skill entrypoint is missing", [str(skill_md)])
         return None
     report.add("ok", "cached plugin and skill entrypoint are present", [str(plugin_json), str(skill_md)])
+    check_manifest(report, skill_dir)
+    check_python_syntax(report, skill_dir)
     return skill_dir
 
 

@@ -206,6 +206,9 @@ Minimum path to support:
 Use `scripts/check_primary_runtime_skills_ios.py` before attempting to register
 these skills in an iOS build. The checker verifies the cached skill bundles and
 reports the iOS blockers above from the actual files in the cache and this repo.
+For cached bundles that include `manifest.txt` or Python helpers, it also
+checks manifest completeness and Python syntax without importing unavailable
+iOS-only dependencies such as `lxml` or `python-docx`.
 It accepts the primary-runtime cache root by default, or explicit family/version
 paths matching the three skill directories:
 
