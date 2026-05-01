@@ -200,14 +200,27 @@ def check_presentations(cache_root: Path) -> SkillReport:
                 [str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
             )
     if list(skill_dir.rglob("*.mjs")):
-        report.add(
-            "blocked",
-            "presentation helpers are ESM .mjs files with static import/export; js-exec does not provide an ESM loader",
-            [
-                str(skill_dir / "scripts" / "build_artifact_deck.mjs"),
-                str(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift"),
-            ],
-        )
+        require_resolver = REPO_ROOT / "Sources/JustBashJavaScript/Bridges/RequireResolver.swift"
+        resolver_text = read_text(require_resolver)
+        engine_text = read_text(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift")
+        if "__jb_transpile_esm" in resolver_text and "__jb_dynamic_import" in resolver_text and "transpile.call" in engine_text:
+            report.add(
+                "ok",
+                "js-exec has ESM compatibility for .mjs entrypoints, relative imports, and dynamic import()",
+                [
+                    str(require_resolver),
+                    str(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift"),
+                ],
+            )
+        else:
+            report.add(
+                "blocked",
+                "presentation helpers are ESM .mjs files with static import/export; js-exec does not provide an ESM loader",
+                [
+                    str(skill_dir / "scripts" / "build_artifact_deck.mjs"),
+                    str(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift"),
+                ],
+            )
     skill_md = skill_dir / "SKILL.md"
     if "@oai/artifact-tool" in read_text(skill_md):
         report.add(

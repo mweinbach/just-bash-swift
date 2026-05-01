@@ -31,7 +31,7 @@ func makeJsExecCommand(engine: JSCEngine) -> AnyBashCommand {
                 js-exec — run JavaScript inside the bash sandbox
 
                   js-exec -c 'code'        execute inline code
-                  js-exec -m -c 'code'     execute as ES module (allows top-level await)
+                  js-exec -m -c 'code'     execute with ESM compatibility (static imports + top-level await)
                   js-exec script.js        execute a script file
                   js-exec - < script.js    read script from stdin
                   js-exec -V               print runtime version

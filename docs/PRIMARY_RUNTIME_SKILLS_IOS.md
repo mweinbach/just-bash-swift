@@ -19,7 +19,8 @@ filesystem, and optional embedded runtimes.
 - JavaScript is available through the `JustBashJavaScript` product. It is backed
   by JavaScriptCore and exposes `js-exec`, CommonJS-style `require`, selected
   Node-compatible shims including `node:*` builtin aliases, sandbox filesystem
-  access, `fetch`, and host-provided addon modules.
+  access, `fetch`, host-provided addon modules, and a small ESM compatibility
+  layer for `.mjs` entrypoints, relative imports, and dynamic `import()`.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -78,9 +79,9 @@ Required pieces found in the skill:
 
 iOS blockers:
 
-- JavaScriptCore is not Node. The current `js-exec` bridge has useful shims and
-  `node:*` builtin aliases, but it does not provide static ESM import/export
-  loading, npm package resolution, or native Node packages.
+- JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
+  `node:*` builtin aliases, and ESM compatibility, but it does not
+  provide npm package resolution or native Node packages.
 - `@oai/artifact-tool` is not currently bundled as an iOS-compatible
   JavaScriptCore addon module or Swift framework in this repository.
 - Native rendering dependencies such as `sharp`/`skia-canvas` are not staged for

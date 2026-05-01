@@ -90,11 +90,18 @@ public actor JSCEngine {
         let pollDeadline = Date().addingTimeInterval(Double(deadlineMs) / 1000.0)
 
         // Run user code.
+        let executableSource: String
+        if isModule, let transpile = context.objectForKeyedSubscript("__jb_transpile_esm"), !transpile.isUndefined,
+           let transformed = transpile.call(withArguments: [source, scriptPath ?? ""])?.toString() {
+            executableSource = transformed
+        } else {
+            executableSource = source
+        }
         let wrappedSource: String
         if isModule {
-            wrappedSource = "(async () => { \n\(source)\n })().then(_jb_done, _jb_fail);"
+            wrappedSource = "(async () => { \n\(executableSource)\n })().then(_jb_done, _jb_fail);"
         } else {
-            wrappedSource = source
+            wrappedSource = executableSource
         }
         let moduleState = ModuleAwaitState(initiallyResolved: !isModule)
         if isModule {

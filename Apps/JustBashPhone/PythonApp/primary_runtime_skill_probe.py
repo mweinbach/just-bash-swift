@@ -57,7 +57,6 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
             "presentations": {
                 "status": "blocked",
                 "blockers": [
-                    "cached scripts require static ESM import/export loading",
                     "cached scripts require @oai/artifact-tool/presentation-jsx",
                     "cached scripts depend on native/npm packages that are not bundled for iOS",
                 ],

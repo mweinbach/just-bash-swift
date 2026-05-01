@@ -300,11 +300,15 @@ actor SandboxService {
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exitCode = 1; }'"#
             )
+            let esmResult = await ctx.executeSubshell?(
+                #"js-exec -m -c 'import fs from "node:fs/promises"; await fs.writeFile("/tmp/primary-runtime-esm.txt", "available"); console.log(await fs.readFile("/tmp/primary-runtime-esm.txt", "utf8"));'"#
+            )
 
             let report = Self.primaryRuntimeSkillReportJSON(
                 pythonResult: pythonResult,
                 artifactToolResult: artifactToolResult,
-                nodeModuleResult: nodeModuleResult
+                nodeModuleResult: nodeModuleResult,
+                esmResult: esmResult
             )
 
             do {
@@ -331,11 +335,13 @@ actor SandboxService {
     private static func primaryRuntimeSkillReportJSON(
         pythonResult: PythonExecResult,
         artifactToolResult: ExecResult?,
-        nodeModuleResult: ExecResult?
+        nodeModuleResult: ExecResult?,
+        esmResult: ExecResult?
     ) -> String {
         let pythonStatus = pythonResult.exitCode == 0 ? "available" : "unavailable"
         let artifactToolStatus = artifactToolResult?.exitCode == 0 ? "available" : "blocked"
         let nodeModuleStatus = nodeModuleResult?.exitCode == 0 ? "available" : "blocked"
+        let esmStatus = esmResult?.exitCode == 0 ? "available" : "blocked"
         return """
         {
           "platform": "ios",
@@ -360,6 +366,12 @@ actor SandboxService {
                 "exitCode": \(nodeModuleResult?.exitCode ?? 127),
                 "stdout": "\(jsonEscaped(nodeModuleResult?.stdout ?? ""))",
                 "stderr": "\(jsonEscaped(nodeModuleResult?.stderr ?? ""))"
+              },
+              "esmCompatibility": {
+                "status": "\(esmStatus)",
+                "exitCode": \(esmResult?.exitCode ?? 127),
+                "stdout": "\(jsonEscaped(esmResult?.stdout ?? ""))",
+                "stderr": "\(jsonEscaped(esmResult?.stderr ?? ""))"
               }
             }
           },
@@ -375,7 +387,6 @@ actor SandboxService {
             "presentations": {
               "status": "blocked",
               "blockers": [
-                "requires static ESM import/export loading",
                 "requires @oai/artifact-tool/presentation-jsx",
                 "depends on native/npm packages that are not bundled for iOS"
               ]
