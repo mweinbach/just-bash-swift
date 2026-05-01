@@ -299,7 +299,7 @@ actor SandboxService {
             "/node_modules/@oai/artifact-tool",
             "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
         ]
-        var files = artifactToolRoots.reduce(into: [:]) { files, packageRoot in
+        var files = artifactToolRoots.reduce(into: [String: String]()) { files, packageRoot in
             files["\(packageRoot)/package.json"] = artifactToolPackageJSON
             files["\(packageRoot)/dist/artifact_tool.mjs"] = artifactToolCompatModule
             files["\(packageRoot)/dist/presentation-jsx/index.mjs"] = presentationJSXCompatModule
