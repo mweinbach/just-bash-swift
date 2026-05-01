@@ -183,10 +183,30 @@ def check_presentations(cache_root: Path) -> SkillReport:
     specs = js_import_specs(skill_dir)
     node_specs = sorted(s for s in specs if s.startswith("node:"))
     if node_specs:
+        require_resolver = REPO_ROOT / "Sources/JustBashJavaScript/Bridges/RequireResolver.swift"
+        resolver_text = read_text(require_resolver)
+        if "normalizeBuiltinName" in resolver_text and "fs/promises" in resolver_text:
+            report.add(
+                "ok",
+                "JavaScriptCore require() resolves Node builtin specifier aliases used by scripts: "
+                + ", ".join(node_specs),
+                [str(require_resolver)],
+            )
+        else:
+            report.add(
+                "blocked",
+                "presentation scripts import Node builtin specifiers that require() does not resolve: "
+                + ", ".join(node_specs),
+                [str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
+            )
+    if list(skill_dir.rglob("*.mjs")):
         report.add(
             "blocked",
-            "presentation scripts import Node-only modules: " + ", ".join(node_specs),
-            [str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
+            "presentation helpers are ESM .mjs files with static import/export; js-exec does not provide an ESM loader",
+            [
+                str(skill_dir / "scripts" / "build_artifact_deck.mjs"),
+                str(REPO_ROOT / "Sources/JustBashJavaScript/JSCEngine.swift"),
+            ],
         )
     skill_md = skill_dir / "SKILL.md"
     if "@oai/artifact-tool" in read_text(skill_md):
@@ -197,9 +217,9 @@ def check_presentations(cache_root: Path) -> SkillReport:
         )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
-            "blocked",
-            "presentation helpers use child process execution; iOS needs an in-process replacement",
-            [str(skill_dir / "scripts" / "build_artifact_deck.mjs")],
+            "ok",
+            "repo has a virtual child_process bridge; spawned programs are limited to sandbox commands provided by the host",
+            [str(REPO_ROOT / "Sources/JustBashJavaScript/Bridges/ChildProcessBridge.swift")],
         )
     return report
 

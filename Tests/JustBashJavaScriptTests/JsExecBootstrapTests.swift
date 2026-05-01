@@ -31,4 +31,14 @@ final class JsExecBootstrapTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
         XCTAssertEqual(result.stdout, "MODULE_NOT_FOUND\n")
     }
+
+    func testNodeBuiltinSpecifierAliasesResolve() async {
+        let bash = Bash(options: .init(
+            files: ["/data/greeting.txt": "hello node"],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+        let result = await bash.exec(#"js-exec -m -c 'const fs = require("node:fs"); const fsp = require("node:fs/promises"); const path = require("node:path"); const cp = require("node:child_process"); const module = require("node:module"); const req = module.createRequire("file:///workspace/package.json"); console.log(fs === require("fs")); console.log(await fsp.readFile("/data/greeting.txt", "utf8")); console.log(path.join("/a", "b")); console.log(typeof cp.spawnSync); console.log(req.resolve("node:fs"));'"#)
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "true\nhello node\n/a/b\nfunction\nnode:fs\n")
+    }
 }

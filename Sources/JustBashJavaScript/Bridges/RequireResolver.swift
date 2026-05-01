@@ -30,26 +30,48 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
     let resolverSetup = """
     (function() {
       var cache = {};
-      var builtinNames = new Set(['fs', 'path', 'child_process', 'process', 'os', 'url', 'assert', 'util', 'events', 'buffer', 'stream', 'string_decoder', 'querystring']);
+      var builtinNames = new Set(['fs', 'fs/promises', 'path', 'child_process', 'process', 'os', 'url', 'assert', 'util', 'events', 'buffer', 'stream', 'string_decoder', 'querystring', 'module']);
+      function normalizeBuiltinName(name) {
+        return (typeof name === 'string' && name.indexOf('node:') === 0) ? name.slice(5) : name;
+      }
       function tryBuiltin(name) {
-        if (name === 'fs') return globalThis.__jb_fs || globalThis.fs;
-        if (name === 'path') return globalThis.path;
-        if (name === 'child_process') return globalThis.child_process;
-        if (name === 'process') return globalThis.process;
-        if (name === 'os') return globalThis.__jb_os;
-        if (name === 'url') return globalThis.__jb_url;
-        if (name === 'assert') return globalThis.__jb_assert;
-        if (name === 'util') return globalThis.__jb_util;
-        if (name === 'events') return globalThis.__jb_events;
-        if (name === 'buffer') return { Buffer: globalThis.Buffer };
-        if (name === 'stream') return globalThis.__jb_stream;
-        if (name === 'string_decoder') return globalThis.__jb_string_decoder;
-        if (name === 'querystring') return globalThis.__jb_querystring;
+        var normalized = normalizeBuiltinName(name);
+        if (normalized === 'fs') return globalThis.__jb_fs || globalThis.fs;
+        if (normalized === 'fs/promises') return (globalThis.__jb_fs || globalThis.fs || {}).promises;
+        if (normalized === 'path') return globalThis.path;
+        if (normalized === 'child_process') return globalThis.child_process;
+        if (normalized === 'process') return globalThis.process;
+        if (normalized === 'os') return globalThis.__jb_os;
+        if (normalized === 'url') return globalThis.__jb_url;
+        if (normalized === 'assert') return globalThis.__jb_assert;
+        if (normalized === 'util') return globalThis.__jb_util;
+        if (normalized === 'events') return globalThis.__jb_events;
+        if (normalized === 'buffer') return { Buffer: globalThis.Buffer };
+        if (normalized === 'stream') return globalThis.__jb_stream;
+        if (normalized === 'string_decoder') return globalThis.__jb_string_decoder;
+        if (normalized === 'querystring') return globalThis.__jb_querystring;
+        if (normalized === 'module') return globalThis.__jb_module;
         return undefined;
       }
+      function createRequire(base) {
+        var req = function(name) { return globalThis.require(name); };
+        req.resolve = function(name) {
+          if (tryBuiltin(name) !== undefined) return name;
+          if (globalThis.__jb_addon_sources && typeof globalThis.__jb_addon_sources[name] === 'string') return name;
+          if (name.indexOf('/') !== -1 || name.indexOf('.') === 0) {
+            var src = globalThis.__jb_read_text(name);
+            if (typeof src === 'string') return name;
+          }
+          var err = new Error("Cannot find module '" + name + "'");
+          err.code = 'MODULE_NOT_FOUND';
+          throw err;
+        };
+        return req;
+      }
+      globalThis.__jb_module = { createRequire: createRequire };
       globalThis.require = function(name) {
         if (cache[name] !== undefined) return cache[name];
-        if (builtinNames.has(name)) {
+        if (builtinNames.has(normalizeBuiltinName(name))) {
           var b = tryBuiltin(name);
           if (b !== undefined) { cache[name] = b; return b; }
         }

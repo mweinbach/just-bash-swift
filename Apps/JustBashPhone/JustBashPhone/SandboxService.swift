@@ -375,9 +375,9 @@ actor SandboxService {
             "presentations": {
               "status": "blocked",
               "blockers": [
-                "requires Node node:* modules",
+                "requires static ESM import/export loading",
                 "requires @oai/artifact-tool/presentation-jsx",
-                "uses child-process helpers"
+                "depends on native/npm packages that are not bundled for iOS"
               ]
             },
             "spreadsheets": {

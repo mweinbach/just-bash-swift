@@ -136,8 +136,9 @@ cat /workspace/primary-runtime-skills-ios-report.json
 ```
 
 The expected result is currently `blocked`: the unchanged cached skills require
-desktop/container capabilities such as LibreOffice/`soffice`, Node `node:*`
-modules, child processes, and `@oai/artifact-tool`. See
+desktop/container capabilities such as LibreOffice/`soffice`, static ESM
+loading, npm package resolution, native Node packages, and `@oai/artifact-tool`.
+See
 `../../docs/PRIMARY_RUNTIME_SKILLS_IOS.md` for the full compatibility matrix.
 The command exits nonzero while the report is blocked so agents can use it as a
 readiness gate.
