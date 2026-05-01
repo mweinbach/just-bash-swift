@@ -153,8 +153,8 @@ iOS blockers:
 
 - The iPhone host exposes a limited pure-JS artifact-tool compatibility package
   for workbook creation, common structural spreadsheet helpers such as
-  worksheet lookup/range copy/write methods, and basic `.xlsx` export smoke
-  checks.
+  worksheet lookup/range copy/write methods, structural table/chart/comment/
+  sparkline objects, and basic `.xlsx` export smoke checks.
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.

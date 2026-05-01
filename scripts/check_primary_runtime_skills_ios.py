@@ -267,11 +267,21 @@ def check_artifact_tool_runtime(
             artifact_tool_compat_evidence(),
         )
 
-    spreadsheet_structural_methods = ("getOrAdd", "getUsedRange", "copyFrom", "copyTo", "trace(address)")
+    spreadsheet_structural_methods = (
+        "getOrAdd",
+        "getUsedRange",
+        "copyFrom",
+        "copyTo",
+        "trace(address)",
+        "class ChartCollection",
+        "class CommentCollection",
+        "this.tables = new LooseCollection",
+        "this.sparklines = new LooseCollection",
+    )
     if all(method in sandbox_text for method in spreadsheet_structural_methods):
         report.add(
             "ok",
-            "iOS artifact-tool compatibility covers common spreadsheet structural APIs such as worksheet getOrAdd/getUsedRange, range copy/write helpers, and workbook trace stubs",
+            "iOS artifact-tool compatibility covers common spreadsheet structural APIs such as worksheet getOrAdd/getUsedRange, range copy/write helpers, table/chart/comment/sparkline stubs, and workbook trace stubs",
             artifact_tool_compat_evidence(),
         )
 

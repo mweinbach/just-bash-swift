@@ -529,13 +529,16 @@ actor SandboxService {
         this.items = [];
         this.factory = factory || ((x) => x || {});
       }
-      add(options) {
-        const item = this.factory(options || {});
+      add(...args) {
+        const item = this.factory(...args);
         this.items.push(item);
         return item;
       }
       getItem(index) {
         return this.items[index];
+      }
+      deleteAll() {
+        this.items = [];
       }
       get count() {
         return this.items.length;
@@ -675,9 +678,33 @@ actor SandboxService {
       }
     }
 
+    class CommentCollection {
+      constructor() {
+        this.self = null;
+        this.threads = [];
+      }
+      setSelf(author) {
+        this.self = author || {};
+        return this.self;
+      }
+      addThread(target, text) {
+        const thread = {
+          target,
+          comments: [{ author: this.self, text: String(text == null ? "" : text) }],
+          addComment: (value) => {
+            thread.comments.push({ author: this.self, text: String(value == null ? "" : value) });
+            return thread.comments[thread.comments.length - 1];
+          }
+        };
+        this.threads.push(thread);
+        return thread;
+      }
+    }
+
     export class Workbook {
       constructor() {
         this.worksheets = new WorksheetCollection(this);
+        this.comments = new CommentCollection();
       }
       static create() {
         return new Workbook();
@@ -717,6 +744,51 @@ actor SandboxService {
       }
     }
 
+    class ChartCollection {
+      constructor(sheet) {
+        this.sheet = sheet;
+        this.items = [];
+      }
+      add(typeOrOptions, sourceRange) {
+        const options = typeof typeOrOptions === "string"
+          ? { type: typeOrOptions, sourceRange }
+          : (typeOrOptions || {});
+        const collection = this;
+        const chart = {
+          name: options.name || `Chart ${this.items.length + 1}`,
+          type: options.type || options.chartType || "column",
+          sourceRange: options.sourceRange || sourceRange || null,
+          options,
+          title: {},
+          legend: {},
+          axes: {},
+          series: new LooseCollection((seriesOptions) => ({ options: seriesOptions || {} })),
+          setPosition(anchor) {
+            this.position = anchor;
+            return this;
+          },
+          delete() {
+            collection.items = collection.items.filter((item) => item !== chart);
+          }
+        };
+        this.items.push(chart);
+        return chart;
+      }
+      getItem(indexOrName) {
+        if (typeof indexOrName === "number") return this.items[indexOrName];
+        return this.items.find((chart) => chart.name === indexOrName);
+      }
+      getItemOrNullObject(name) {
+        return this.getItem(name) || { isNullObject: true, name, delete() {} };
+      }
+      deleteAll() {
+        this.items = [];
+      }
+      get count() {
+        return this.items.length;
+      }
+    }
+
     class WorksheetCollection extends LooseCollection {
       constructor(workbook) {
         super((name) => new Worksheet(workbook, typeof name === "string" ? name : "Sheet" + (workbook.worksheets.count + 1)));
@@ -747,10 +819,15 @@ actor SandboxService {
         this.workbook = workbook;
         this.name = name;
         this.cells = {};
-        this.charts = new LooseCollection((options) => ({ options: options || {}, series: new LooseCollection(), title: {}, legend: {} }));
+        this.charts = new ChartCollection(this);
         this.shapes = new LooseCollection((options) => ({ options: options || {}, text: "", position: (options || {}).position || {} }));
         this.images = new LooseCollection((options) => ({ options: options || {}, position: (options || {}).position || {} }));
-        this.tables = new LooseCollection((options) => ({ options: options || {} }));
+        this.tables = new LooseCollection((rangeOrOptions, hasHeaders, name) => ({
+          range: typeof rangeOrOptions === "string" ? rangeOrOptions : (rangeOrOptions || {}).range,
+          hasHeaders: Boolean(hasHeaders),
+          name: name || (rangeOrOptions || {}).name || `Table ${this.tables.count + 1}`,
+          options: typeof rangeOrOptions === "object" ? (rangeOrOptions || {}) : {}
+        }));
         this.sparklineGroups = new LooseCollection((options) => ({ options: options || {} }));
         this.sparklines = this.sparklineGroups;
         this.dataTables = new LooseCollection((options) => ({ options: options || {} }));
@@ -799,6 +876,12 @@ actor SandboxService {
         this.format = rangeFormat();
         this.dataValidation = {};
         this.conditionalFormats = new LooseCollection();
+        this.sparklines = new LooseCollection((type, sourceRange, config) => ({
+          type,
+          sourceRange,
+          targetRange: this,
+          config: config || {}
+        }));
       }
       get values() {
         const out = [];
@@ -991,7 +1074,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -1073,7 +1156,7 @@ actor SandboxService {
             from: pythonResult,
             skill: "spreadsheets",
             fallback: [
-                "limited pure-JS @oai/artifact-tool workbook export and common structural spreadsheet API compatibility is staged",
+                "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
                 "full artifact-tool inspection/render/import behavior is not ported to iOS",
                 "full render/import APIs fail explicitly instead of returning fake visual verification",
                 "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
