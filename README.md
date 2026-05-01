@@ -103,8 +103,11 @@ The cached OpenAI primary-runtime artifact skills for Documents, Presentations,
 and Spreadsheets are tracked separately in
 [Primary Runtime Skills On iOS](docs/PRIMARY_RUNTIME_SKILLS_IOS.md). The current
 result is intentionally marked blocked for unchanged iOS execution: they require
-desktop/container capabilities such as LibreOffice, Node package resolution, and
-`@oai/artifact-tool` that are not bundled into this iOS runtime.
+desktop/container capabilities such as LibreOffice, missing iOS Python wheels,
+and the full native `@oai/artifact-tool` render/import stack. The iPhone host
+does stage JavaScript package-resolution shims plus a limited pure-JS
+artifact-tool compatibility package for basic import and Office-export smoke
+checks.
 
 Verified build lane:
 

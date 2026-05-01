@@ -160,14 +160,15 @@ Optional native package lane:
 
 ```bash
 cd /Users/mweinbach/Projects/just-bash-swift
-./scripts/probe_python_ios_wheels.sh numpy pandas scipy
+./scripts/probe_python_ios_wheels.sh numpy pillow pdf2image reportlab lxml pandas scipy
 ./scripts/install_python_native_packages.sh
 cd Apps/JustBashPhone
 ./generate_project.sh --with-python
 ```
 
-Today, `numpy==2.3.5.post1` resolves for CPython 3.14 iOS through BeeWare's
-secondary wheel index. `pandas` and `scipy` do not resolve yet for this target
+Today, `numpy==2.3.5.post1`, `Pillow`, `pdf2image`, and `reportlab` resolve for
+the current CPython 3.14 iOS staging lane. `lxml`, `pandas`, and `scipy` do not
+resolve yet for this target.
 set, so they stay documented/probed rather than bundled.
 
 Verified lane after installing BeeWare support:

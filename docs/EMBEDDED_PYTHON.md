@@ -191,7 +191,7 @@ Use this probe to check whether native packages resolve for CPython 3.14 iOS
 device and simulator wheel tags:
 
 ```bash
-./scripts/probe_python_ios_wheels.sh numpy pandas scipy
+./scripts/probe_python_ios_wheels.sh numpy pillow pdf2image reportlab lxml pandas scipy
 ```
 
 Current probe result:
@@ -199,13 +199,18 @@ Current probe result:
 - `numpy==2.3.5.post1` resolves from BeeWare's secondary wheel index for
   `ios_15_4_arm64_iphoneos`, `ios_15_4_arm64_iphonesimulator`, and
   `ios_13_0_x86_64_iphonesimulator`.
+- `Pillow`, `pdf2image`, and `reportlab` resolve for the current iOS staging
+  lane; `pdf2image` may still need an app-provided Poppler-compatible renderer
+  for real document rendering.
+- `lxml` does not currently resolve for CPython 3.14 iOS using PyPI plus
+  BeeWare's secondary wheel index.
 - `pandas` does not currently resolve for CPython 3.14 iOS using PyPI plus
   BeeWare's secondary wheel index.
 - `scipy` does not currently resolve for CPython 3.14 iOS using PyPI plus
   BeeWare's secondary wheel index.
 
-To install the optional native set, currently `numpy`, into architecture-specific
-staging directories:
+To install the optional native set, currently `numpy`, `Pillow`, `pdf2image`,
+and `reportlab`, into architecture-specific staging directories:
 
 ```bash
 ./scripts/install_python_native_packages.sh

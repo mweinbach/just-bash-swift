@@ -59,9 +59,14 @@ iOS blockers:
 - `soffice`/LibreOffice is not available as an app-bundled iOS renderer.
 - `subprocess` calls to external renderers are not compatible with the iOS host
   execution model.
-- Several Python dependencies are native-extension or external-binary heavy
-  (`lxml`, `Pillow`, `pdf2image`/Poppler). They are not part of the current
-  BeeWare iPhone package set.
+- The current iOS package set stages `openpyxl`, `Pillow`, and `pdf2image`, but
+  `lxml` has no matching CPython 3.14 iOS wheel through PyPI plus BeeWare's
+  wheel index, and `python-docx` depends on `lxml`.
+- The Documents helpers require real `lxml`/`python-docx` OOXML behavior,
+  including namespace-aware XPath, XML parser options, parent/sibling mutation,
+  and low-level Word XML constructors. A shallow import shim is not sufficient.
+- `pdf2image` is importable when staged, but its normal rendering path expects
+  Poppler binaries that are not provided by the iOS app.
 
 Minimum path to support:
 
@@ -71,6 +76,9 @@ Minimum path to support:
   render QA as unavailable with a product-level fallback.
 - Stage all Python dependencies as iOS-compatible wheels/frameworks at build
   time; do not rely on runtime `pip install`.
+- If `lxml`/`python-docx` remain unavailable as iOS wheels, replace the helper
+  calls with a native Swift or pure bundled OOXML adapter that implements the
+  same document-mutation behavior.
 
 ### Presentations
 
@@ -140,9 +148,10 @@ iOS blockers:
   so the remaining blocker is not syntax loading; it is the unported
   full-fidelity artifact-tool runtime dependencies, especially `skia-canvas`
   native rendering and `@oai/walnut` WASM resources.
-- The optional Python analysis stack includes packages that are not currently
-  bundled for BeeWare iOS (`pandas`, `pypdf`, `python-docx`, `reportlab`; only
-  `numpy` is tracked as an optional native iOS probe today).
+- The optional Python analysis stack is partially staged: `numpy`, `pypdf`, and
+  `reportlab` are available in the current package lane, while `pandas` and
+  `python-docx` remain unavailable for this iOS target because of unresolved
+  native dependencies.
 
 Minimum path to support:
 
