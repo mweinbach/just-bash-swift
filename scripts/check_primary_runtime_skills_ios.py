@@ -553,11 +553,24 @@ def check_presentations(
         )
     python_subprocess_evidence = presentation_python_subprocess_evidence(skill_dir)
     if python_subprocess_evidence:
-        report.add(
-            "blocked",
-            "presentation reference-slide helper uses Python subprocess fan-out; iOS needs an in-process wrapper or a sandbox command adapter for that path",
-            python_subprocess_evidence,
-        )
+        python_support = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/PythonSupport.swift"
+        if "_justbash_run_python_subprocess" in read_text(python_support):
+            report.add(
+                "ok",
+                "Python presentation fan-out through subprocess.run([sys.executable, script, ...]) is adapted to run staged helper scripts in-process on iOS",
+                [*python_subprocess_evidence, line_for(python_support, "_justbash_run_python_subprocess")],
+            )
+            report.add(
+                "warning",
+                "the Python subprocess adapter only handles same-interpreter script fan-out for app-visible script files; arbitrary process spawning remains unavailable on iOS",
+                [line_for(python_support, "_justbash_run_python_subprocess")],
+            )
+        else:
+            report.add(
+                "blocked",
+                "presentation reference-slide helper uses Python subprocess fan-out; iOS needs an in-process wrapper or a sandbox command adapter for that path",
+                python_subprocess_evidence,
+            )
     native_graphics_evidence = presentation_native_graphics_evidence(skill_dir)
     if native_graphics_evidence:
         report.add(

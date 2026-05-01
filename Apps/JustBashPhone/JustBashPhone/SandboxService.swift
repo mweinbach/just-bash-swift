@@ -1915,7 +1915,8 @@ actor SandboxService {
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
                 "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
-                "JavaScript helper scripts can invoke host-provided python3 through child_process; Python subprocess fan-out still needs an in-process iOS adapter",
+                "JavaScript helper scripts can invoke host-provided python3 through child_process",
+                "same-interpreter Python subprocess fan-out is adapted in-process for app-visible helper scripts",
                 "presentation icon rendering requires sharp or skia-canvas native graphics packages"
               ]
             },

@@ -68,9 +68,77 @@ enum PythonSupport {
         let wrappedCode = """
         import contextlib
         import io
+        import os
+        import runpy
+        import subprocess
         import sys
+        import threading
         import traceback
         from pathlib import Path
+
+        if not getattr(subprocess, "_justbash_ios_patched", False):
+            _justbash_real_subprocess_run = subprocess.run
+            _justbash_subprocess_lock = threading.RLock()
+
+            def _justbash_run_python_subprocess(cmd, *popenargs, **kwargs):
+                args = list(cmd) if isinstance(cmd, (list, tuple)) else [cmd]
+                if len(args) >= 2 and args[0] == sys.executable:
+                    script_path = Path(args[1])
+                    if script_path.exists():
+                        check = bool(kwargs.pop("check", False))
+                        cwd = kwargs.pop("cwd", None)
+                        env = kwargs.pop("env", None)
+                        capture_output = bool(kwargs.pop("capture_output", False))
+                        stdout_pipe = kwargs.get("stdout") == subprocess.PIPE
+                        stderr_pipe = kwargs.get("stderr") == subprocess.PIPE
+                        if kwargs:
+                            raise ValueError(f"Unsupported in-process Python subprocess options on iOS: {sorted(kwargs)}")
+
+                        stdout_buffer = io.StringIO() if capture_output or stdout_pipe else None
+                        stderr_buffer = io.StringIO() if capture_output or stderr_pipe else None
+                        old_argv = sys.argv[:]
+                        old_cwd = os.getcwd()
+                        old_env = os.environ.copy()
+                        status = 0
+                        with _justbash_subprocess_lock:
+                            try:
+                                sys.argv = [str(script_path), *[str(value) for value in args[2:]]]
+                                if cwd is not None:
+                                    os.chdir(cwd)
+                                if env is not None:
+                                    os.environ.clear()
+                                    os.environ.update({str(key): str(value) for key, value in env.items()})
+                                with contextlib.redirect_stdout(stdout_buffer or sys.stdout), contextlib.redirect_stderr(stderr_buffer or sys.stderr):
+                                    try:
+                                        runpy.run_path(str(script_path), run_name="__main__")
+                                    except SystemExit as exc:
+                                        status = exc.code if isinstance(exc.code, int) else 1
+                            except Exception:
+                                status = 1
+                                if stderr_buffer is not None:
+                                    traceback.print_exc(file=stderr_buffer)
+                                else:
+                                    traceback.print_exc()
+                            finally:
+                                sys.argv = old_argv
+                                os.chdir(old_cwd)
+                                os.environ.clear()
+                                os.environ.update(old_env)
+
+                        completed = subprocess.CompletedProcess(
+                            args,
+                            status,
+                            stdout=stdout_buffer.getvalue() if stdout_buffer is not None else None,
+                            stderr=stderr_buffer.getvalue() if stderr_buffer is not None else None,
+                        )
+                        if check and status:
+                            raise subprocess.CalledProcessError(status, args, output=completed.stdout, stderr=completed.stderr)
+                        return completed
+
+                return _justbash_real_subprocess_run(cmd, *popenargs, **kwargs)
+
+            subprocess.run = _justbash_run_python_subprocess
+            subprocess._justbash_ios_patched = True
 
         sys.argv = \(pythonListLiteral([scriptPath ?? scriptName] + arguments))
         _stdout_buffer = io.StringIO()

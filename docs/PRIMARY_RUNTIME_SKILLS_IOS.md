@@ -113,9 +113,11 @@ iOS blockers:
   iOS renderer.
 - JavaScript deck-building helpers use `child_process.spawnSync`; the iOS
   bridge can route those calls to sandbox-provided commands such as `python3`,
-  which covers the contact-sheet launch shape. Python helper code that calls
-  `subprocess.run` for reference slide fan-out still needs an in-process iOS
-  adapter.
+  which covers the contact-sheet launch shape.
+- Same-interpreter Python fan-out through
+  `subprocess.run([sys.executable, script, ...])` is adapted to run staged
+  helper scripts in-process. Arbitrary process spawning remains unavailable on
+  iOS.
 - `ctx.addLucideIcon(...)` can use the staged pure-JS `lucide` compatibility
   package to produce SVG data URLs. The standalone Lucide PNG renderer still
   requires `sharp` or `skia-canvas`; neither native graphics stack is staged for
