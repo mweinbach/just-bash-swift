@@ -67,6 +67,20 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsCheck(named: "spreadsheets.artifact_tool_api", in: checks)
     }
 
+    func testOnDeviceFallbackReportMatchesCurrentIOSCompatibilityClaims() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sandboxService = repoRoot.appendingPathComponent("Apps/JustBashPhone/JustBashPhone/SandboxService.swift")
+        let text = try String(contentsOf: sandboxService, encoding: .utf8)
+
+        XCTAssertTrue(text.contains("bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged"))
+        XCTAssertTrue(text.contains("full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine"))
+        XCTAssertTrue(text.contains("ctx.addLucideIcon can use the staged pure-JS lucide SVG package"))
+        XCTAssertFalse(text.contains("only stores formulas structurally"))
+    }
+
     private func runChecker(
         _ checker: URL,
         repoRoot: URL,

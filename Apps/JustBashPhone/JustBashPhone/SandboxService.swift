@@ -2176,7 +2176,8 @@ actor SandboxService {
             fallback: [
                 "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
                 "limited uncompressed .xlsx import/export and basic workbook PNG rendering are staged; full artifact-tool inspection/render behavior is not ported to iOS",
-                "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
+                "bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged for common arithmetic/range formulas",
+                "full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine",
                 "bounded native XLSX chart parts and basic chart PNG previews are staged for common source-range charts",
                 "full Excel chart semantics still require the native artifact-tool runtime or a broader iOS chart engine",
                 "missing optional spreadsheet Python modules: pandas, docx",
@@ -2256,6 +2257,7 @@ actor SandboxService {
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 "JavaScript helper scripts can invoke host-provided python3 through child_process",
                 "same-interpreter Python subprocess fan-out is adapted in-process for app-visible helper scripts",
+                "ctx.addLucideIcon can use the staged pure-JS lucide SVG package",
                 "standalone Lucide PNG icon rendering can use the staged pure-JS sharp SVG-to-PNG compatibility package",
                 "native sharp/skia-canvas rendering remains unavailable on iOS"
               ]
