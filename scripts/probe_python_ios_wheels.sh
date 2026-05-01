@@ -5,7 +5,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 BEEWARE_INDEX="${BEEWARE_IOS_WHEEL_INDEX:-https://pypi.anaconda.org/beeware/simple}"
 
 if [[ "$#" -eq 0 ]]; then
-  set -- numpy pandas scipy pillow lxml cryptography orjson pydantic-core duckdb pyarrow
+  set -- numpy pandas scipy pillow lxml python-docx cryptography orjson pydantic-core duckdb pyarrow
 fi
 
 PLATFORMS=(

@@ -11,6 +11,8 @@
 #   installed per architecture.
 # - lxml, pandas, and scipy do not currently resolve for CPython 3.14 iPhoneOS
 #   via PyPI + BeeWare's secondary wheel index.
+# - python-docx does not currently resolve for CPython 3.14 iPhoneOS because
+#   its lxml dependency is unavailable for this target.
 numpy==2.3.5.post1
 pillow==12.2.0
 pdf2image==1.17.0
@@ -18,5 +20,6 @@ reportlab==4.5.0
 
 # Keep probing these; do not enable until compatible iOS wheels exist.
 # lxml
+# python-docx
 # pandas
 # scipy

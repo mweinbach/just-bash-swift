@@ -191,7 +191,7 @@ Use this probe to check whether native packages resolve for CPython 3.14 iOS
 device and simulator wheel tags:
 
 ```bash
-./scripts/probe_python_ios_wheels.sh numpy pillow pdf2image reportlab lxml pandas scipy
+./scripts/probe_python_ios_wheels.sh numpy pillow pdf2image reportlab lxml python-docx pandas scipy
 ```
 
 Current probe result:
@@ -204,6 +204,8 @@ Current probe result:
   for real document rendering.
 - `lxml` does not currently resolve for CPython 3.14 iOS using PyPI plus
   BeeWare's secondary wheel index.
+- `python-docx` does not currently resolve for CPython 3.14 iOS because its
+  `lxml` dependency cannot be satisfied on this target.
 - `pandas` does not currently resolve for CPython 3.14 iOS using PyPI plus
   BeeWare's secondary wheel index.
 - `scipy` does not currently resolve for CPython 3.14 iOS using PyPI plus

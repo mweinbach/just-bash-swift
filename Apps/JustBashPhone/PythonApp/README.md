@@ -26,7 +26,8 @@ The native installer currently targets packages with compatible CPython 3.14
 iOS wheels: `numpy`, `pillow`, and the Pillow-backed `pdf2image`/`reportlab`
 helpers. `lxml`, `pandas`, and `scipy` are tracked in
 `requirements-native-ios.txt`, but are intentionally left commented until
-compatible iOS wheels resolve.
+compatible iOS wheels resolve. `python-docx` is also tracked there and remains
+disabled because its `lxml` dependency does not resolve for this iOS target.
 
 The primary-runtime Documents skill currently remains blocked on iOS because
 its helpers use real `lxml`/`python-docx` OOXML behavior: namespace-aware XPath,
