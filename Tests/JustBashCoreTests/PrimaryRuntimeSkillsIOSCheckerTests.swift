@@ -99,7 +99,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: presentations, containing: "child_process.spawnSync")
         XCTAssertContainsFinding(in: presentations, containing: "Python presentation fan-out")
         XCTAssertContainsFinding(in: presentations, containing: "arbitrary process spawning remains unavailable")
-        XCTAssertContainsFinding(in: presentations, containing: "sharp or skia-canvas native graphics packages")
+        XCTAssertContainsFinding(in: presentations, containing: "sharp compatibility package")
+        XCTAssertContainsFinding(in: presentations, containing: "native sharp/skia-canvas rendering remains unavailable")
         XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
         XCTAssertContainsFinding(in: presentations, containing: "Walnut")
 

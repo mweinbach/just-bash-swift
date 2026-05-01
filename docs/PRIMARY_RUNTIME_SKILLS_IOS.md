@@ -119,9 +119,9 @@ iOS blockers:
   helper scripts in-process. Arbitrary process spawning remains unavailable on
   iOS.
 - `ctx.addLucideIcon(...)` can use the staged pure-JS `lucide` compatibility
-  package to produce SVG data URLs. The standalone Lucide PNG renderer still
-  requires `sharp` or `skia-canvas`; neither native graphics stack is staged for
-  iOS.
+  package to produce SVG data URLs. The standalone Lucide PNG renderer can use
+  the staged pure-JS `sharp` compatibility package for SVG icon PNG output.
+  Native `sharp`/`skia-canvas` rendering remains unavailable on iOS.
 - The local Codex runtime cache has the full Node package, but that cache is not
   part of the iOS app bundle and includes bundled runtime assets such as
   `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and
@@ -248,8 +248,8 @@ wrote `/workspace/primary-runtime-skills-ios-report.json` with:
   Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
 - Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
   compatibility is staged, including basic slide PNG/layout previews, Lucide
-  SVG icon data URLs, common structural spreadsheet helpers, formulas, and
-  bounded chart export/previews, but full render/import behavior remains
-  unported
+  SVG icon data URLs, standalone Lucide PNG icons, common structural spreadsheet
+  helpers, formulas, and bounded chart export/previews, but full render/import
+  behavior remains unported
 - Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
   `reportlab` import; `docx`, `lxml`, and `pandas` do not

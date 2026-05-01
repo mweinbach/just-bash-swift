@@ -314,6 +314,14 @@ actor SandboxService {
             files["\(packageRoot)/package.json"] = lucidePackageJSON
             files["\(packageRoot)/dist/index.mjs"] = lucideCompatModule
         }
+        let sharpRoots = [
+            "/node_modules/sharp",
+            "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/sharp",
+        ]
+        for packageRoot in sharpRoots {
+            files["\(packageRoot)/package.json"] = sharpPackageJSON
+            files["\(packageRoot)/index.js"] = sharpCompatModule
+        }
         return files
     }
 
@@ -400,6 +408,139 @@ actor SandboxService {
     export const FileText = iconNode("FileText");
     export const ChartLine = iconNode("ChartLine");
     export const Table = iconNode("Table");
+    """#
+
+    private static let sharpPackageJSON = #"""
+    {
+      "name": "sharp",
+      "version": "0.0.0-justbash-ios",
+      "main": "./index.js"
+    }
+    """#
+
+    private static let sharpCompatModule = #"""
+    const fs = require("node:fs");
+    const path = require("node:path");
+
+    function crc32(bytes) {
+      let crc = 0xffffffff;
+      for (let i = 0; i < bytes.length; i += 1) {
+        crc ^= bytes[i];
+        for (let j = 0; j < 8; j += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+      }
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+
+    function adler32(bytes) {
+      let a = 1;
+      let b = 0;
+      for (let i = 0; i < bytes.length; i += 1) {
+        a = (a + bytes[i]) % 65521;
+        b = (b + a) % 65521;
+      }
+      return ((b << 16) | a) >>> 0;
+    }
+
+    function u32(value) {
+      return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255];
+    }
+
+    function chunk(type, payload) {
+      const typeBytes = Buffer.from(type, "ascii");
+      const body = Buffer.from(payload);
+      return Buffer.from([...u32(body.length), ...typeBytes, ...body, ...u32(crc32(Buffer.concat([typeBytes, body])))]);
+    }
+
+    function deflateStored(raw) {
+      const blocks = [0x78, 0x01];
+      for (let offset = 0; offset < raw.length; offset += 65535) {
+        const block = raw.slice(offset, offset + 65535);
+        const final = offset + 65535 >= raw.length ? 1 : 0;
+        blocks.push(final, block.length & 255, (block.length >>> 8) & 255, (~block.length) & 255, ((~block.length) >>> 8) & 255);
+        for (let i = 0; i < block.length; i += 1) blocks.push(block[i]);
+      }
+      blocks.push(...u32(adler32(raw)));
+      return Buffer.from(blocks);
+    }
+
+    function parseDimension(svg, name, fallback) {
+      const match = String(svg).match(new RegExp(name + '="([0-9.]+)'));
+      const value = match ? Number(match[1]) : fallback;
+      return Number.isFinite(value) && value > 0 ? Math.max(1, Math.min(1024, Math.round(value))) : fallback;
+    }
+
+    function setPixel(rgba, width, height, x, y, color) {
+      if (x < 0 || y < 0 || x >= width || y >= height) return;
+      const index = (y * width + x) * 4;
+      rgba[index] = color[0]; rgba[index + 1] = color[1]; rgba[index + 2] = color[2]; rgba[index + 3] = color[3];
+    }
+
+    function fillRect(rgba, width, height, x, y, w, h, color) {
+      for (let yy = Math.max(0, y); yy < Math.min(height, y + h); yy += 1) {
+        for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx += 1) setPixel(rgba, width, height, xx, yy, color);
+      }
+    }
+
+    function drawLine(rgba, width, height, x0, y0, x1, y1, color) {
+      let dx = Math.abs(x1 - x0);
+      let sx = x0 < x1 ? 1 : -1;
+      let dy = -Math.abs(y1 - y0);
+      let sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      while (true) {
+        fillRect(rgba, width, height, x0 - 1, y0 - 1, 3, 3, color);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
+    function pngFromSvg(input) {
+      const svg = Buffer.isBuffer(input) ? input.toString("utf8") : String(input || "");
+      const width = parseDimension(svg, "width", 128);
+      const height = parseDimension(svg, "height", width);
+      const rgba = Buffer.alloc(width * height * 4, 0);
+      const color = [17, 24, 39, 255];
+      const pad = Math.max(4, Math.round(Math.min(width, height) * 0.16));
+      fillRect(rgba, width, height, pad, pad, width - pad * 2, Math.max(2, Math.round(height * 0.05)), color);
+      fillRect(rgba, width, height, pad, height - pad, width - pad * 2, Math.max(2, Math.round(height * 0.05)), color);
+      fillRect(rgba, width, height, pad, pad, Math.max(2, Math.round(width * 0.05)), height - pad * 2, color);
+      fillRect(rgba, width, height, width - pad, pad, Math.max(2, Math.round(width * 0.05)), height - pad * 2, color);
+      drawLine(rgba, width, height, Math.round(width * 0.32), Math.round(height * 0.55), Math.round(width * 0.45), Math.round(height * 0.68), color);
+      drawLine(rgba, width, height, Math.round(width * 0.45), Math.round(height * 0.68), Math.round(width * 0.70), Math.round(height * 0.35), color);
+      const raw = Buffer.alloc((width * 4 + 1) * height);
+      for (let y = 0; y < height; y += 1) {
+        const rowStart = y * (width * 4 + 1);
+        raw[rowStart] = 0;
+        rgba.copy(raw, rowStart + 1, y * width * 4, (y + 1) * width * 4);
+      }
+      return Buffer.concat([
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        chunk("IHDR", Buffer.from([...u32(width), ...u32(height), 8, 6, 0, 0, 0])),
+        chunk("IDAT", deflateStored(raw)),
+        chunk("IEND", Buffer.alloc(0))
+      ]);
+    }
+
+    function sharp(input) {
+      return {
+        png() {
+          return this;
+        },
+        async toBuffer() {
+          return pngFromSvg(input);
+        },
+        async toFile(output) {
+          const buffer = pngFromSvg(input);
+          await fs.promises.mkdir(path.dirname(output), { recursive: true });
+          await fs.promises.writeFile(output, buffer);
+          return { format: "png", size: buffer.length, width: parseDimension(Buffer.isBuffer(input) ? input.toString("utf8") : input, "width", 128), height: parseDimension(Buffer.isBuffer(input) ? input.toString("utf8") : input, "height", 128) };
+        }
+      };
+    }
+
+    module.exports = sharp;
     """#
 
     private static let artifactToolCompatModule = #"""
@@ -1960,7 +2101,7 @@ actor SandboxService {
             do {
                 try Self.stageArtifactToolPackageProbe(in: ctx)
                 packageExportsResult = await ctx.executeSubshell?(
-                    #"cd /tmp/primary-runtime-package-probe && js-exec -m -c 'import { runtimeName, resolveFs } from "@oai/artifact-tool"; import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx"; import { icons } from "lucide"; const fresh = await import("@oai/artifact-tool"); console.log(runtimeName); console.log(resolveFs()); console.log(jsx("slide").type); console.log(Fragment); console.log(fresh.runtimeName); console.log(icons.Smartphone[0][0]);'"#
+                    #"cd /tmp/primary-runtime-package-probe && js-exec -m -c 'import { createRequire } from "node:module"; import { runtimeName, resolveFs } from "@oai/artifact-tool"; import jsx, { Fragment } from "@oai/artifact-tool/presentation-jsx"; import { icons } from "lucide"; const require = createRequire(import.meta.url); const sharp = require("sharp"); const png = await sharp(Buffer.from("<svg width=\"16\" height=\"16\"></svg>", "utf8")).png().toBuffer(); if (png.length < 20) throw new Error("sharp compatibility failed"); const fresh = await import("@oai/artifact-tool"); console.log(runtimeName); console.log(resolveFs()); console.log(jsx("slide").type); console.log(Fragment); console.log(fresh.runtimeName); console.log(icons.Smartphone[0][0]); console.log(png.length);'"#
                 )
             } catch {
                 packageExportsResult = ExecResult.failure(
@@ -2115,7 +2256,8 @@ actor SandboxService {
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 "JavaScript helper scripts can invoke host-provided python3 through child_process",
                 "same-interpreter Python subprocess fan-out is adapted in-process for app-visible helper scripts",
-                "presentation icon rendering requires sharp or skia-canvas native graphics packages"
+                "standalone Lucide PNG icon rendering can use the staged pure-JS sharp SVG-to-PNG compatibility package",
+                "native sharp/skia-canvas rendering remains unavailable on iOS"
               ]
             },
             "spreadsheets": {
@@ -2162,6 +2304,8 @@ actor SandboxService {
         try ctx.fileSystem.createDirectory(path: "\(packageRoot)/dist/presentation-jsx", relativeTo: ctx.cwd, recursive: true)
         let lucideRoot = "/tmp/primary-runtime-package-probe/node_modules/lucide"
         try ctx.fileSystem.createDirectory(path: "\(lucideRoot)/dist", relativeTo: ctx.cwd, recursive: true)
+        let sharpRoot = "/tmp/primary-runtime-package-probe/node_modules/sharp"
+        try ctx.fileSystem.createDirectory(path: sharpRoot, relativeTo: ctx.cwd, recursive: true)
         try ctx.fileSystem.writeFile(
             """
             {
@@ -2199,6 +2343,8 @@ actor SandboxService {
         )
         try ctx.fileSystem.writeFile(lucidePackageJSON, to: "\(lucideRoot)/package.json", relativeTo: ctx.cwd)
         try ctx.fileSystem.writeFile(lucideCompatModule, to: "\(lucideRoot)/dist/index.mjs", relativeTo: ctx.cwd)
+        try ctx.fileSystem.writeFile(sharpPackageJSON, to: "\(sharpRoot)/package.json", relativeTo: ctx.cwd)
+        try ctx.fileSystem.writeFile(sharpCompatModule, to: "\(sharpRoot)/index.js", relativeTo: ctx.cwd)
     }
 
     private static func jsonEscaped(_ value: String) -> String {

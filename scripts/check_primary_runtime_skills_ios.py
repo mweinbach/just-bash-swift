@@ -573,11 +573,27 @@ def check_presentations(
             )
     native_graphics_evidence = presentation_native_graphics_evidence(skill_dir)
     if native_graphics_evidence:
-        report.add(
-            "blocked",
-            "presentation icon rendering helper requires sharp or skia-canvas native graphics packages that are not staged for iOS",
-            native_graphics_evidence,
-        )
+        if "sharpPackageJSON" in sandbox_text and "sharpCompatModule" in sandbox_text:
+            report.add(
+                "ok",
+                "iOS host stages a pure-JS sharp compatibility package for the presentation Lucide SVG-to-PNG helper path",
+                [
+                    *native_graphics_evidence,
+                    line_for(sandbox_service, "sharpPackageJSON"),
+                    line_for(sandbox_service, "sharpCompatModule"),
+                ],
+            )
+            report.add(
+                "warning",
+                "sharp compatibility is bounded to SVG icon PNG output; native sharp/skia-canvas rendering remains unavailable on iOS",
+                [line_for(sandbox_service, "sharpCompatModule")],
+            )
+        else:
+            report.add(
+                "blocked",
+                "presentation icon rendering helper requires sharp or skia-canvas native graphics packages that are not staged for iOS",
+                native_graphics_evidence,
+            )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
             "ok",

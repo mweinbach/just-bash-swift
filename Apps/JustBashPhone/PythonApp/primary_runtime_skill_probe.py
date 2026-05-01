@@ -84,7 +84,9 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                     "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                     "JavaScript helper scripts can invoke host-provided python3 through child_process",
                     "same-interpreter Python subprocess fan-out is adapted in-process for app-visible helper scripts",
-                    "ctx.addLucideIcon can use the staged pure-JS lucide SVG package; standalone PNG icon rendering still requires sharp or skia-canvas native graphics packages",
+                    "ctx.addLucideIcon can use the staged pure-JS lucide SVG package",
+                    "standalone Lucide PNG icon rendering can use the staged pure-JS sharp SVG-to-PNG compatibility package",
+                    "native sharp/skia-canvas rendering remains unavailable on iOS",
                 ],
             },
             "spreadsheets": {
