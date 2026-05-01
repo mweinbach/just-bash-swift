@@ -57,16 +57,16 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
             "presentations": {
                 "status": "blocked",
                 "blockers": [
-                    "cached scripts require @oai/artifact-tool/presentation-jsx",
-                    "cached scripts depend on native/npm packages that are not bundled for iOS",
+                    "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
+                    "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 ],
             },
             "spreadsheets": {
                 "status": "blocked",
                 "python_modules": [_module_status(name) for name in spreadsheet_modules],
                 "blockers": [
-                    "cached skill requires @oai/artifact-tool workbook APIs",
-                    "real @oai/artifact-tool package is not bundled or adapted as an iOS runtime module",
+                    "limited pure-JS @oai/artifact-tool workbook export compatibility is staged by the iOS host",
+                    "full artifact-tool inspection/render/import behavior is not ported to iOS",
                 ],
             },
         },

@@ -184,8 +184,11 @@ actor SandboxService {
         let mountable = MountableFileSystem(root: root)
         mountable.mount(ReadWriteFileSystem(base: workspaceBase), at: "/workspace")
 
+        var files = seedFiles
+        files.merge(primaryRuntimeArtifactToolFiles(), uniquingKeysWith: { _, new in new })
+
         return Bash(options: .init(
-            files: seedFiles,
+            files: files,
             customCommands: Self.pythonCommands() + Self.primaryRuntimeSkillCommands(),
             filesystem: mountable,
             embeddedRuntimes: [
@@ -291,6 +294,490 @@ actor SandboxService {
         ]
     }
 
+    private static func primaryRuntimeArtifactToolFiles() -> [String: String] {
+        let packageRoots = [
+            "/node_modules/@oai/artifact-tool",
+            "/home/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool",
+        ]
+        return packageRoots.reduce(into: [:]) { files, packageRoot in
+            files["\(packageRoot)/package.json"] = artifactToolPackageJSON
+            files["\(packageRoot)/dist/artifact_tool.mjs"] = artifactToolCompatModule
+            files["\(packageRoot)/dist/presentation-jsx/index.mjs"] = presentationJSXCompatModule
+            files["\(packageRoot)/dist/presentation-jsx/jsx-runtime.mjs"] = presentationJSXRuntimeCompatModule
+            files["\(packageRoot)/dist/presentation-jsx/jsx-dev-runtime.mjs"] = presentationJSXRuntimeCompatModule
+        }
+    }
+
+    private static let artifactToolPackageJSON = #"""
+    {
+      "name": "@oai/artifact-tool",
+      "version": "2.7.4",
+      "type": "module",
+      "exports": {
+        ".": "./dist/artifact_tool.mjs",
+        "./presentation-jsx": "./dist/presentation-jsx/index.mjs",
+        "./presentation-jsx/jsx-runtime": "./dist/presentation-jsx/jsx-runtime.mjs",
+        "./presentation-jsx/jsx-dev-runtime": "./dist/presentation-jsx/jsx-dev-runtime.mjs"
+      }
+    }
+    """#
+
+    private static let presentationJSXCompatModule = #"""
+    export const Fragment = Symbol.for("@oai/artifact-tool/presentation-jsx.fragment");
+    export function createRef() {
+      return { current: null };
+    }
+    export function jsx(type, props, key) {
+      return { type, props: props || {}, key: key == null ? null : String(key) };
+    }
+    export const jsxs = jsx;
+    export const jsxDEV = jsx;
+    export function paint(value) {
+      return value;
+    }
+    export function stroke(value) {
+      if (typeof value === "string") return { fill: value, width: 1, style: "solid" };
+      return value || { fill: "#000000", width: 1, style: "solid" };
+    }
+    export function textStyle(value) {
+      return value || {};
+    }
+    export default jsx;
+    """#
+
+    private static let presentationJSXRuntimeCompatModule = #"""
+    import { Fragment, jsx, jsxs, jsxDEV } from "./index.mjs";
+    export { Fragment, jsx, jsxs, jsxDEV };
+    """#
+
+    private static let artifactToolCompatModule = #"""
+    import fs from "node:fs/promises";
+
+    const MIME = {
+      png: "image/png",
+      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      csv: "text/csv",
+      txt: "text/plain",
+      json: "application/json"
+    };
+
+    const PNG_1X1 = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+
+    function bytes(value) {
+      if (value instanceof Uint8Array) return value;
+      if (Array.isArray(value)) return Uint8Array.from(value);
+      if (value && value.data && Array.isArray(value.data)) return Uint8Array.from(value.data);
+      return Buffer.from(String(value == null ? "" : value), "utf8");
+    }
+
+    function strBytes(value) {
+      return Buffer.from(String(value), "utf8");
+    }
+
+    function concat(chunks) {
+      let length = 0;
+      chunks.forEach((chunk) => { length += chunk.length; });
+      const out = new Uint8Array(length);
+      let offset = 0;
+      chunks.forEach((chunk) => { out.set(chunk, offset); offset += chunk.length; });
+      return out;
+    }
+
+    function u16(value) {
+      return Uint8Array.from([value & 255, (value >>> 8) & 255]);
+    }
+
+    function u32(value) {
+      return Uint8Array.from([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]);
+    }
+
+    const CRC_TABLE = (() => {
+      const table = [];
+      for (let n = 0; n < 256; n += 1) {
+        let c = n;
+        for (let k = 0; k < 8; k += 1) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+      }
+      return table;
+    })();
+
+    function crc32(data) {
+      let c = 0xffffffff;
+      for (let i = 0; i < data.length; i += 1) c = CRC_TABLE[(c ^ data[i]) & 255] ^ (c >>> 8);
+      return (c ^ 0xffffffff) >>> 0;
+    }
+
+    function zip(files) {
+      const locals = [];
+      const centrals = [];
+      let offset = 0;
+      Object.keys(files).forEach((name) => {
+        const nameBytes = strBytes(name);
+        const data = bytes(files[name]);
+        const crc = crc32(data);
+        const local = concat([
+          u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+          u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0),
+          nameBytes, data
+        ]);
+        locals.push(local);
+        centrals.push(concat([
+          u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+          u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0),
+          u16(0), u16(0), u32(0), u32(offset), nameBytes
+        ]));
+        offset += local.length;
+      });
+      const central = concat(centrals);
+      return concat([
+        ...locals,
+        central,
+        u32(0x06054b50), u16(0), u16(0), u16(centrals.length), u16(centrals.length),
+        u32(central.length), u32(offset), u16(0)
+      ]);
+    }
+
+    function xml(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function colName(index) {
+      let n = index + 1;
+      let out = "";
+      while (n > 0) {
+        const r = (n - 1) % 26;
+        out = String.fromCharCode(65 + r) + out;
+        n = Math.floor((n - 1) / 26);
+      }
+      return out;
+    }
+
+    function colIndex(label) {
+      let out = 0;
+      String(label).toUpperCase().split("").forEach((ch) => { out = out * 26 + ch.charCodeAt(0) - 64; });
+      return out - 1;
+    }
+
+    function parseCell(ref) {
+      const match = String(ref).match(/^([A-Za-z]+)(\d+)$/);
+      if (!match) throw new Error("Unsupported cell reference: " + ref);
+      return { row: Number(match[2]) - 1, col: colIndex(match[1]) };
+    }
+
+    function parseRange(ref) {
+      const parts = String(ref).split("!");
+      const address = parts.length > 1 ? parts[1] : parts[0];
+      const ends = address.split(":");
+      const start = parseCell(ends[0]);
+      const end = parseCell(ends[1] || ends[0]);
+      return {
+        row: start.row,
+        col: start.col,
+        rows: Math.max(1, end.row - start.row + 1),
+        cols: Math.max(1, end.col - start.col + 1)
+      };
+    }
+
+    function csvRows(text) {
+      return String(text).trimEnd().split(/\r?\n/).map((line) => {
+        const row = [];
+        let cell = "";
+        let quoted = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const ch = line[i];
+          if (quoted && ch === '"' && line[i + 1] === '"') { cell += '"'; i += 1; continue; }
+          if (ch === '"') { quoted = !quoted; continue; }
+          if (ch === "," && !quoted) { row.push(cell); cell = ""; continue; }
+          cell += ch;
+        }
+        row.push(cell);
+        return row;
+      });
+    }
+
+    export class FileBlob {
+      constructor(data, mime) {
+        this.data = bytes(data);
+        this.mime = mime || "application/octet-stream";
+      }
+      static async load(path) {
+        const data = await fs.readFile(path);
+        const ext = String(path).split(".").pop();
+        return new FileBlob(data, MIME[ext] || "application/octet-stream");
+      }
+      async save(path) {
+        await fs.writeFile(path, this.data);
+      }
+      async text() {
+        return Buffer.from(this.data).toString("utf8");
+      }
+      async arrayBuffer() {
+        return this.data;
+      }
+    }
+
+    class LooseCollection {
+      constructor(factory) {
+        this.items = [];
+        this.factory = factory || ((x) => x || {});
+      }
+      add(options) {
+        const item = this.factory(options || {});
+        this.items.push(item);
+        return item;
+      }
+      getItem(index) {
+        return this.items[index];
+      }
+      get count() {
+        return this.items.length;
+      }
+    }
+
+    export class Presentation {
+      constructor(options) {
+        this.slideSize = (options && options.slideSize) || { width: 1280, height: 720 };
+        this.slides = new SlideCollection(this);
+      }
+      static create(options) {
+        return new Presentation(options || {});
+      }
+      async export(options) {
+        const format = (options && options.format) || "png";
+        if (format === "layout") {
+          return new FileBlob(JSON.stringify(this.toJSON(), null, 2), "application/json");
+        }
+        return new FileBlob(PNG_1X1, "image/png");
+      }
+      toJSON() {
+        return {
+          slideSize: this.slideSize,
+          slides: this.slides.items.map((slide) => slide.toJSON())
+        };
+      }
+    }
+
+    class SlideCollection extends LooseCollection {
+      constructor(presentation) {
+        super(() => new Slide(presentation));
+      }
+    }
+
+    export class Slide {
+      constructor(presentation) {
+        this.presentation = presentation;
+        this.shapes = new LooseCollection((options) => new Shape(options));
+        this.images = new LooseCollection((options) => new Image(options));
+        this.tables = new LooseCollection((options) => ({ options: options || {}, position: (options || {}).position || {} }));
+        this.background = {};
+      }
+      toJSON() {
+        return {
+          shapes: this.shapes.items.map((shape) => shape.toJSON()),
+          images: this.images.items.map((image) => image.toJSON())
+        };
+      }
+    }
+
+    export class Shape {
+      constructor(options) {
+        this.options = options || {};
+        this.position = this.options.position || {};
+        this.fill = this.options.fill;
+        this.line = this.options.line;
+        this.geometry = this.options.geometry || "rect";
+        this.text = "";
+      }
+      toJSON() {
+        return { position: this.position, geometry: this.geometry, text: this.text };
+      }
+    }
+
+    export class Image {
+      constructor(options) {
+        this.options = options || {};
+        this.position = this.options.position || {};
+      }
+      toJSON() {
+        return { position: this.position, alt: this.options.alt || "" };
+      }
+    }
+
+    function slideXml(slide) {
+      const shapes = slide.shapes.items.map((shape, index) => {
+        const text = typeof shape.text === "string" ? shape.text : String(shape.text || "");
+        return `<p:sp><p:nvSpPr><p:cNvPr id="${index + 2}" name="Text ${index + 1}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="700000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>${xml(text)}</a:t></a:r></a:p></p:txBody></p:sp>`;
+      }).join("");
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+    }
+
+    export class PresentationFile {
+      static async exportPptx(presentation) {
+        const files = {
+          "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${presentation.slides.items.map((_, i) => `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}</Types>`,
+          "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`,
+          "ppt/presentation.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldIdLst>${presentation.slides.items.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`).join("")}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`,
+          "ppt/_rels/presentation.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${presentation.slides.items.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`).join("")}</Relationships>`
+        };
+        presentation.slides.items.forEach((slide, i) => { files[`ppt/slides/slide${i + 1}.xml`] = slideXml(slide); });
+        return new FileBlob(zip(files), MIME.pptx);
+      }
+    }
+
+    export class Workbook {
+      constructor() {
+        this.worksheets = new WorksheetCollection(this);
+      }
+      static create() {
+        return new Workbook();
+      }
+      static async fromCSV(csvText, options) {
+        const workbook = new Workbook();
+        const sheet = workbook.worksheets.add((options && options.sheetName) || "Sheet1");
+        const rows = csvRows(csvText);
+        if (rows.length) sheet.getRangeByIndexes(0, 0, rows.length, Math.max(...rows.map((row) => row.length))).values = rows;
+        return workbook;
+      }
+      getActiveWorksheet() {
+        return this.worksheets.items[0] || this.worksheets.add("Sheet1");
+      }
+      async render() {
+        return new FileBlob(PNG_1X1, "image/png");
+      }
+      inspect(options) {
+        return { ndjson: JSON.stringify({ kind: "workbook", sheets: this.worksheets.items.map((s) => s.name), options: options || {} }) + "\n" };
+      }
+      help(query) {
+        return { ndjson: JSON.stringify({ query, note: "Just Bash iOS artifact-tool compatibility surface" }) + "\n" };
+      }
+    }
+
+    class WorksheetCollection extends LooseCollection {
+      constructor(workbook) {
+        super((name) => new Worksheet(workbook, typeof name === "string" ? name : "Sheet" + (workbook.worksheets.count + 1)));
+      }
+      getItem(nameOrIndex) {
+        if (typeof nameOrIndex === "number") return this.items[nameOrIndex];
+        return this.items.find((sheet) => sheet.name === nameOrIndex);
+      }
+    }
+
+    export class Worksheet {
+      constructor(workbook, name) {
+        this.workbook = workbook;
+        this.name = name;
+        this.cells = {};
+        this.charts = new LooseCollection((options) => ({ options: options || {}, series: new LooseCollection(), title: {}, legend: {} }));
+        this.shapes = new LooseCollection((options) => ({ options: options || {}, text: "", position: (options || {}).position || {} }));
+        this.images = new LooseCollection((options) => ({ options: options || {}, position: (options || {}).position || {} }));
+        this.tables = new LooseCollection((options) => ({ options: options || {} }));
+        this.freezePanes = { freezeRows() {}, freezeColumns() {} };
+      }
+      getRange(address) {
+        return new Range(this, parseRange(address));
+      }
+      getRangeByIndexes(row, col, rows, cols) {
+        return new Range(this, { row, col, rows, cols });
+      }
+      deleteAllDrawings() {
+        this.charts.items = [];
+        this.shapes.items = [];
+        this.images.items = [];
+      }
+    }
+
+    export class Range {
+      constructor(sheet, bounds) {
+        this.sheet = sheet;
+        this.bounds = bounds;
+        this.format = { fill: {}, font: {}, borders: {}, alignment: {}, numberFormat: "" };
+        this.dataValidation = {};
+        this.conditionalFormats = new LooseCollection();
+      }
+      get values() {
+        const out = [];
+        for (let r = 0; r < this.bounds.rows; r += 1) {
+          const row = [];
+          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).value || null);
+          out.push(row);
+        }
+        return out;
+      }
+      set values(matrix) {
+        (matrix || []).forEach((row, r) => (row || []).forEach((value, c) => {
+          this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] = { ...(this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}), value };
+        }));
+      }
+      get formulas() {
+        const out = [];
+        for (let r = 0; r < this.bounds.rows; r += 1) {
+          const row = [];
+          for (let c = 0; c < this.bounds.cols; c += 1) row.push((this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}).formula || null);
+          out.push(row);
+        }
+        return out;
+      }
+      set formulas(matrix) {
+        (matrix || []).forEach((row, r) => (row || []).forEach((formula, c) => {
+          this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] = { ...(this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`] || {}), formula };
+        }));
+      }
+      clear() {
+        for (let r = 0; r < this.bounds.rows; r += 1) {
+          for (let c = 0; c < this.bounds.cols; c += 1) delete this.sheet.cells[`${this.bounds.row + r},${this.bounds.col + c}`];
+        }
+      }
+      autofit() {}
+      fillDown() {}
+      fillRight() {}
+    }
+
+    function sheetXml(sheet) {
+      const rows = {};
+      Object.keys(sheet.cells).forEach((key) => {
+        const parts = key.split(",").map((n) => Number(n));
+        const r = parts[0];
+        const c = parts[1];
+        if (!rows[r]) rows[r] = [];
+        const cell = sheet.cells[key];
+        const ref = `${colName(c)}${r + 1}`;
+        if (cell.formula) rows[r].push(`<c r="${ref}"><f>${xml(String(cell.formula).replace(/^=/, ""))}</f></c>`);
+        else if (typeof cell.value === "number") rows[r].push(`<c r="${ref}"><v>${cell.value}</v></c>`);
+        else if (typeof cell.value === "boolean") rows[r].push(`<c r="${ref}" t="b"><v>${cell.value ? 1 : 0}</v></c>`);
+        else rows[r].push(`<c r="${ref}" t="inlineStr"><is><t>${xml(cell.value == null ? "" : cell.value)}</t></is></c>`);
+      });
+      const body = Object.keys(rows).sort((a, b) => Number(a) - Number(b)).map((r) => `<row r="${Number(r) + 1}">${rows[r].join("")}</row>`).join("");
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+    }
+
+    export class SpreadsheetFile {
+      static async importXlsx(blob) {
+        const workbook = Workbook.create();
+        workbook.worksheets.add("Sheet1");
+        return workbook;
+      }
+      static async exportXlsx(workbook) {
+        const sheets = workbook.worksheets.items.length ? workbook.worksheets.items : [workbook.worksheets.add("Sheet1")];
+        const files = {
+          "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`,
+          "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+          "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, i) => `<sheet name="${xml(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`,
+          "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}</Relationships>`
+        };
+        sheets.forEach((sheet, i) => { files[`xl/worksheets/sheet${i + 1}.xml`] = sheetXml(sheet); });
+        return new FileBlob(zip(files), MIME.xlsx);
+      }
+    }
+    """#
+
     private static func primaryRuntimeSkillCommands() -> [AnyBashCommand] {
         let handler: CommandHandler = { _, ctx in
             let pythonResult = PythonSupport.run(
@@ -310,7 +797,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -c 'try { require("@oai/artifact-tool"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -423,15 +910,15 @@ actor SandboxService {
             "presentations": {
               "status": "blocked",
               "blockers": [
-                "requires @oai/artifact-tool/presentation-jsx",
-                "depends on native/npm packages that are not bundled for iOS"
+                "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
+                "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS"
               ]
             },
             "spreadsheets": {
               "status": "blocked",
               "blockers": [
-                "requires @oai/artifact-tool workbook APIs",
-                "requires the real @oai/artifact-tool package to be bundled and adapted for iOS"
+                "limited pure-JS @oai/artifact-tool workbook export compatibility is staged",
+                "full artifact-tool inspection/render/import behavior is not ported to iOS"
               ]
             }
           },

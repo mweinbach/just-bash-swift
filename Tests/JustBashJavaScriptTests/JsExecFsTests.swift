@@ -67,4 +67,27 @@ final class JsExecFsTests: XCTestCase {
         let exists = await bash.exec("test -d /a/b/c && echo yes || echo no")
         XCTAssertEqual(exists.stdout, "yes\n")
     }
+
+    func testSymlinkedPackageDirectoryResolvesThroughFSBridge() async {
+        let bash = Bash(options: .init(
+            files: [
+                "/runtime/pkg/package.json": #"{"name":"pkg","type":"module","exports":{".":"./index.mjs"}}"#,
+                "/runtime/pkg/index.mjs": #"export const value = "linked";"#,
+                "/workspace/scripts/main.mjs": """
+                import fs from "node:fs/promises";
+                await fs.mkdir("/workspace/node_modules", { recursive: true });
+                await fs.symlink("/runtime/pkg", "/workspace/node_modules/pkg");
+                console.log(await fs.realpath("/workspace/node_modules/pkg/index.mjs"));
+                const mod = await import("pkg");
+                console.log(mod.value);
+                """
+            ],
+            embeddedRuntimes: [JavaScriptRuntime()]
+        ))
+
+        let result = await bash.exec("cd /workspace && js-exec scripts/main.mjs")
+
+        XCTAssertEqual(result.exitCode, 0, "stderr: \(result.stderr)")
+        XCTAssertEqual(result.stdout, "/runtime/pkg/index.mjs\nlinked\n")
+    }
 }

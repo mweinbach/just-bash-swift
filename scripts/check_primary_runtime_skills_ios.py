@@ -124,6 +124,16 @@ def artifact_tool_evidence() -> list[str]:
     return evidence
 
 
+def artifact_tool_compat_evidence() -> list[str]:
+    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
+    evidence = [
+        line_for(sandbox_service, "primaryRuntimeArtifactToolFiles"),
+        line_for(sandbox_service, '"/node_modules/@oai/artifact-tool"'),
+        line_for(sandbox_service, "artifactToolCompatModule"),
+    ]
+    return evidence
+
+
 def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: str) -> None:
     if "@oai/artifact-tool" not in read_text(skill_md):
         return
@@ -135,6 +145,19 @@ def check_artifact_tool_runtime(report: SkillReport, skill_md: Path, message: st
             "ok",
             "js-exec handles artifact-tool's bundled/minified ESM shape and nested package export conditions",
             [str(require_resolver), str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs")],
+        )
+
+    sandbox_service = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/SandboxService.swift"
+    sandbox_text = read_text(sandbox_service)
+    if (
+        "primaryRuntimeArtifactToolFiles" in sandbox_text
+        and "artifactToolCompatModule" in sandbox_text
+        and "/node_modules/@oai/artifact-tool" in sandbox_text
+    ):
+        report.add(
+            "ok",
+            "iOS host stages a limited pure-JS @oai/artifact-tool compatibility package for direct imports, presentation-jsx, and basic xlsx/pptx export smoke checks",
+            artifact_tool_compat_evidence(),
         )
 
     report.add(
@@ -296,7 +319,7 @@ def check_presentations(cache_root: Path) -> SkillReport:
     check_artifact_tool_runtime(
         report,
         skill_md,
-        "@oai/artifact-tool is required; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
+        "@oai/artifact-tool is required; the iOS host has a limited compatibility package, but the full native rendering/import stack is not ported",
     )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
@@ -333,7 +356,7 @@ def check_spreadsheets(cache_root: Path) -> SkillReport:
     check_artifact_tool_runtime(
         report,
         skill_md,
-        "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled into the iOS app or adapted as an iOS JavaScriptCore/Swift runtime",
+        "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render/import behavior is not ported",
     )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")

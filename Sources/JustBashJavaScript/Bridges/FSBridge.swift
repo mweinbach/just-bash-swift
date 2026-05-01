@@ -10,9 +10,39 @@ import JustBashFS
 func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
     let fs = JSValue(newObjectIn: context)!
 
+    func resolveSymlinkPath(_ path: String, relativeTo cwd: String, depth: Int = 0) -> String {
+        guard depth < 40 else {
+            return execution.cmdCtx.fileSystem.normalizePath(path, relativeTo: cwd)
+        }
+        let normalized = execution.cmdCtx.fileSystem.normalizePath(path, relativeTo: cwd)
+        if normalized == "/" {
+            return normalized
+        }
+
+        let components = VirtualPath.components(for: normalized)
+        var current = ""
+        for index in components.indices {
+            current = current.isEmpty ? "/\(components[index])" : "\(current)/\(components[index])"
+            guard
+                let info = try? execution.cmdCtx.fileSystem.fileInfo(path: current, relativeTo: "/"),
+                info.kind == .symlink,
+                let target = try? execution.cmdCtx.fileSystem.readlink(current, relativeTo: "/")
+            else {
+                continue
+            }
+
+            let targetPath = execution.cmdCtx.fileSystem.normalizePath(target, relativeTo: VirtualPath.dirname(current))
+            let remaining = components[(index + 1)...].joined(separator: "/")
+            let nextPath = remaining.isEmpty ? targetPath : "\(targetPath)/\(remaining)"
+            return resolveSymlinkPath(nextPath, relativeTo: "/", depth: depth + 1)
+        }
+        return normalized
+    }
+
     let readFileSync: @convention(block) (String, JSValue?) -> JSValue? = { path, encoding in
         do {
-            let data = try execution.cmdCtx.fileSystem.readFile(path: path, relativeTo: execution.cmdCtx.cwd)
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+            let data = try execution.cmdCtx.fileSystem.readFile(path: resolvedPath, relativeTo: "/")
             if let encoding = encoding, !encoding.isUndefined, let enc = encoding.toString() {
                 if enc.lowercased() == "utf8" || enc.lowercased() == "utf-8" {
                     return JSValue(object: String(decoding: data, as: UTF8.self), in: context)
@@ -37,8 +67,9 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
 
     let writeFileSync: @convention(block) (String, JSValue, JSValue?) -> Void = { path, contents, _ in
         do {
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
             let data = jsValueToData(contents)
-            try execution.cmdCtx.fileSystem.writeFile(path: path, content: data, relativeTo: execution.cmdCtx.cwd)
+            try execution.cmdCtx.fileSystem.writeFile(path: resolvedPath, content: data, relativeTo: "/")
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "write", in: context)
         } catch {
@@ -49,9 +80,10 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
 
     let appendFileSync: @convention(block) (String, JSValue, JSValue?) -> Void = { path, contents, _ in
         do {
-            let existing = (try? execution.cmdCtx.fileSystem.readFile(path: path, relativeTo: execution.cmdCtx.cwd)) ?? Data()
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+            let existing = (try? execution.cmdCtx.fileSystem.readFile(path: resolvedPath, relativeTo: "/")) ?? Data()
             let appended = existing + jsValueToData(contents)
-            try execution.cmdCtx.fileSystem.writeFile(path: path, content: appended, relativeTo: execution.cmdCtx.cwd)
+            try execution.cmdCtx.fileSystem.writeFile(path: resolvedPath, content: appended, relativeTo: "/")
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "write", in: context)
         } catch {
@@ -62,7 +94,8 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
 
     let readdirSync: @convention(block) (String) -> [String]? = { path in
         do {
-            return try execution.cmdCtx.fileSystem.listDirectory(path: path, relativeTo: execution.cmdCtx.cwd)
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+            return try execution.cmdCtx.fileSystem.listDirectory(path: resolvedPath, relativeTo: "/")
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "scandir", in: context)
             return nil
@@ -121,13 +154,15 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
     fs.setObject(rmdirSync, forKeyedSubscript: "rmdirSync" as NSString)
 
     let existsSync: @convention(block) (String) -> Bool = { path in
-        execution.cmdCtx.fileSystem.fileExists(path: path, relativeTo: execution.cmdCtx.cwd)
+        let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+        return execution.cmdCtx.fileSystem.fileExists(path: resolvedPath, relativeTo: "/")
     }
     fs.setObject(existsSync, forKeyedSubscript: "existsSync" as NSString)
 
     let statSync: @convention(block) (String) -> JSValue? = { path in
         do {
-            let info = try execution.cmdCtx.fileSystem.fileInfo(path: path, relativeTo: execution.cmdCtx.cwd)
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+            let info = try execution.cmdCtx.fileSystem.fileInfo(path: resolvedPath, relativeTo: "/")
             return statValue(from: info, in: context)
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "stat", in: context)
@@ -140,10 +175,37 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
     fs.setObject(statSync, forKeyedSubscript: "statSync" as NSString)
     fs.setObject(statSync, forKeyedSubscript: "lstatSync" as NSString)
 
+    let symlinkSync: @convention(block) (String, String, JSValue?) -> Void = { target, path, _ in
+        do {
+            try execution.cmdCtx.fileSystem.createSymlink(target, at: path, relativeTo: execution.cmdCtx.cwd)
+        } catch let e {
+            context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "symlink", in: context)
+        } catch {
+            context.exception = JSValue(newErrorFromMessage: "fs.symlinkSync: \(error.localizedDescription)", in: context)
+        }
+    }
+    fs.setObject(symlinkSync, forKeyedSubscript: "symlinkSync" as NSString)
+
+    let readlinkSync: @convention(block) (String) -> JSValue? = { path in
+        do {
+            let target = try execution.cmdCtx.fileSystem.readlink(path, relativeTo: execution.cmdCtx.cwd)
+            return JSValue(object: target, in: context)
+        } catch let e {
+            context.exception = NodeErrorMapper.makeError(forAny: e, path: path, syscall: "readlink", in: context)
+            return nil
+        } catch {
+            context.exception = JSValue(newErrorFromMessage: "fs.readlinkSync: \(error.localizedDescription)", in: context)
+            return nil
+        }
+    }
+    fs.setObject(readlinkSync, forKeyedSubscript: "readlinkSync" as NSString)
+
     let copyFileSync: @convention(block) (String, String) -> Void = { src, dst in
         do {
-            let data = try execution.cmdCtx.fileSystem.readFile(path: src, relativeTo: execution.cmdCtx.cwd)
-            try execution.cmdCtx.fileSystem.writeFile(path: dst, content: data, relativeTo: execution.cmdCtx.cwd)
+            let resolvedSource = resolveSymlinkPath(src, relativeTo: execution.cmdCtx.cwd)
+            let resolvedDestination = resolveSymlinkPath(dst, relativeTo: execution.cmdCtx.cwd)
+            let data = try execution.cmdCtx.fileSystem.readFile(path: resolvedSource, relativeTo: "/")
+            try execution.cmdCtx.fileSystem.writeFile(path: resolvedDestination, content: data, relativeTo: "/")
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: src, syscall: "copyfile", in: context)
         } catch {
@@ -154,9 +216,11 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
 
     let renameSync: @convention(block) (String, String) -> Void = { src, dst in
         do {
-            let data = try execution.cmdCtx.fileSystem.readFile(path: src, relativeTo: execution.cmdCtx.cwd)
-            try execution.cmdCtx.fileSystem.writeFile(path: dst, content: data, relativeTo: execution.cmdCtx.cwd)
-            try execution.cmdCtx.fileSystem.deleteFile(path: src, relativeTo: execution.cmdCtx.cwd, recursive: false, force: false)
+            let resolvedSource = resolveSymlinkPath(src, relativeTo: execution.cmdCtx.cwd)
+            let resolvedDestination = resolveSymlinkPath(dst, relativeTo: execution.cmdCtx.cwd)
+            let data = try execution.cmdCtx.fileSystem.readFile(path: resolvedSource, relativeTo: "/")
+            try execution.cmdCtx.fileSystem.writeFile(path: resolvedDestination, content: data, relativeTo: "/")
+            try execution.cmdCtx.fileSystem.deleteFile(path: resolvedSource, relativeTo: "/", recursive: false, force: false)
         } catch let e {
             context.exception = NodeErrorMapper.makeError(forAny: e, path: src, syscall: "rename", in: context)
         } catch {
@@ -166,7 +230,7 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
     fs.setObject(renameSync, forKeyedSubscript: "renameSync" as NSString)
 
     let realpathSync: @convention(block) (String) -> String = { path in
-        execution.cmdCtx.fileSystem.normalizePath(path, relativeTo: execution.cmdCtx.cwd)
+        resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
     }
     fs.setObject(realpathSync, forKeyedSubscript: "realpathSync" as NSString)
 
@@ -178,7 +242,7 @@ func installFSBridge(into context: JSContext, execution: JSCExecutionContext) {
     })
     """
     let asyncFactory = context.evaluateScript(asyncWrap)!
-    for name in ["readFile", "writeFile", "appendFile", "readdir", "mkdir", "rm", "unlink", "rmdir", "stat", "lstat", "copyFile", "rename", "realpath"] {
+    for name in ["readFile", "writeFile", "appendFile", "readdir", "mkdir", "rm", "unlink", "rmdir", "stat", "lstat", "symlink", "readlink", "copyFile", "rename", "realpath"] {
         let syncName = name + "Sync"
         if let syncFn = fs.objectForKeyedSubscript(syncName) {
             let asyncFn = asyncFactory.call(withArguments: [syncFn])!

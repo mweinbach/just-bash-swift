@@ -263,6 +263,18 @@ public protocol BashFilesystem: Sendable {
     /// - Throws: `FilesystemError.invalidPath` if the path is malformed
     func fileInfo(path: String, relativeTo: String) throws -> FileInfo
 
+    /// Creates a symbolic link.
+    ///
+    /// Implementations that do not support symlinks may use the default
+    /// implementation from the protocol extension.
+    func createSymlink(_ target: String, at path: String, relativeTo: String) throws
+
+    /// Reads the target path stored in a symbolic link.
+    ///
+    /// Implementations that do not support symlinks may use the default
+    /// implementation from the protocol extension.
+    func readlink(_ path: String, relativeTo: String) throws -> String
+
     // MARK: - Directory Walking
 
     /// Recursively walks a directory tree and returns all paths.

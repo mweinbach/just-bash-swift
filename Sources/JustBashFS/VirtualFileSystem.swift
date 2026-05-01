@@ -528,7 +528,7 @@ extension VirtualFileSystem: BashFilesystem {
             throw VirtualFileSystemError.notFound(normalized)
         }
     }
-    
+
     public func writeFile(path: String, content: Data, relativeTo: String) throws {
         try writeFile(content, to: path, relativeTo: relativeTo)
     }
@@ -581,7 +581,7 @@ extension VirtualFileSystem: BashFilesystem {
     public func walk(path: String, relativeTo: String) throws -> [String] {
         return try walk(path, relativeTo: relativeTo)
     }
-    
+
     public func normalizePath(_ path: String, relativeTo: String) -> String {
         return VirtualPath.normalize(path, relativeTo: relativeTo)
     }

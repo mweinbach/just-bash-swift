@@ -181,7 +181,9 @@ For the OpenAI primary-runtime Documents, Presentations, and Spreadsheets skill
 bundles, see [Primary Runtime Skills On iOS](PRIMARY_RUNTIME_SKILLS_IOS.md).
 Those skills are not iOS-runnable unchanged today because their upstream
 contracts depend on desktop/container runtimes such as LibreOffice, native Node
-packages, and a bundled/adapted `@oai/artifact-tool`.
+packages, and full `@oai/artifact-tool` renderer/import behavior. The iPhone
+host does stage a limited pure-JS artifact-tool compatibility package for direct
+imports and basic `.xlsx`/`.pptx` export smoke checks.
 
 ## Native Package Status
 

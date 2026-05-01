@@ -25,6 +25,11 @@ filesystem, and optional embedded runtimes.
   handles bundled/minified ESM package shapes where imports and `export{...}`
   lists appear mid-line without whitespace, plus nested export conditions such as
   `exports.node.import`.
+- The iPhone host stages a limited pure-JS `@oai/artifact-tool` compatibility
+  package under both `/node_modules/@oai/artifact-tool` and the Codex primary
+  runtime cache-shaped path. It supports direct imports, `presentation-jsx`, and
+  basic `.xlsx`/`.pptx` export smoke checks. It is not the full upstream
+  artifact-tool renderer/importer.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -86,11 +91,13 @@ iOS blockers:
 - JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
   `node:*` builtin aliases, ESM compatibility for minified package output, and
   sandboxed package resolution, but it does not provide native Node packages.
-- `@oai/artifact-tool` is not currently bundled as an iOS-compatible
-  JavaScriptCore addon module or Swift framework in this repository. The local
-  Codex runtime cache has the Node package, but that cache is not part of the
-  iOS app bundle and includes bundled runtime assets such as `skia-canvas` and
-  `@oai/walnut` WASM that need an explicit iOS packaging and execution path.
+- The staged `@oai/artifact-tool` compatibility package covers direct imports,
+  `presentation-jsx`, and basic Office export smoke checks, but it intentionally
+  does not provide full upstream rendering or Office import behavior.
+- The local Codex runtime cache has the full Node package, but that cache is not
+  part of the iOS app bundle and includes bundled runtime assets such as
+  `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and
+  execution path.
 - `skia-canvas` includes a native Node addon (`lib/skia.node`), and the browser
   fallback assumes DOM canvas APIs that are not available in this JavaScriptCore
   runtime.
@@ -124,16 +131,15 @@ Required pieces found in the skill:
 
 iOS blockers:
 
-- The required artifact-tool package is not exposed as an iOS runtime module.
-  The local Codex runtime cache contains the Node package, but it is not bundled
-  into the app or adapted to the JavaScriptCore runtime.
+- The iPhone host exposes a limited pure-JS artifact-tool compatibility package
+  for workbook creation and basic `.xlsx` export smoke checks.
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.
 - The JavaScript loader can parse the package's minified ESM import/export shape,
-  so the remaining blocker is not syntax loading; it is the unbundled and
-  unadapted artifact-tool runtime dependencies, especially `skia-canvas` native
-  rendering and `@oai/walnut` WASM resources.
+  so the remaining blocker is not syntax loading; it is the unported
+  full-fidelity artifact-tool runtime dependencies, especially `skia-canvas`
+  native rendering and `@oai/walnut` WASM resources.
 - The optional Python analysis stack includes packages that are not currently
   bundled for BeeWare iOS (`pandas`, `pypdf`, `python-docx`, `reportlab`; only
   `numpy` is tracked as an optional native iOS probe today).
@@ -167,5 +173,7 @@ exits nonzero while the report is blocked so an on-device agent can use it as a
 readiness gate.
 
 The current expected result is `blocked`: the skill bundles are present and
-parseable, but they require desktop/container runtime capabilities that this iOS
-runtime does not yet provide.
+parseable, and the iPhone host can import a limited pure-JS artifact-tool
+compatibility package, but full Documents rendering plus high-fidelity
+artifact-tool render/import behavior still require desktop/container runtime
+capabilities that this iOS runtime does not yet provide.

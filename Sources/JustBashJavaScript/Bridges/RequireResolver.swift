@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import JustBashFS
 
 /// Installs a CommonJS-style `require()` resolver.
 ///
@@ -17,9 +18,39 @@ func installRequireResolver(into context: JSContext, execution: JSCExecutionCont
     }
     context.setObject(addonsObject, forKeyedSubscript: "__jb_addon_sources" as NSString)
 
+    func resolveSymlinkPath(_ path: String, relativeTo cwd: String, depth: Int = 0) -> String {
+        guard depth < 40 else {
+            return execution.cmdCtx.fileSystem.normalizePath(path, relativeTo: cwd)
+        }
+        let normalized = execution.cmdCtx.fileSystem.normalizePath(path, relativeTo: cwd)
+        if normalized == "/" {
+            return normalized
+        }
+
+        let components = VirtualPath.components(for: normalized)
+        var current = ""
+        for index in components.indices {
+            current = current.isEmpty ? "/\(components[index])" : "\(current)/\(components[index])"
+            guard
+                let info = try? execution.cmdCtx.fileSystem.fileInfo(path: current, relativeTo: "/"),
+                info.kind == .symlink,
+                let target = try? execution.cmdCtx.fileSystem.readlink(current, relativeTo: "/")
+            else {
+                continue
+            }
+
+            let targetPath = execution.cmdCtx.fileSystem.normalizePath(target, relativeTo: VirtualPath.dirname(current))
+            let remaining = components[(index + 1)...].joined(separator: "/")
+            let nextPath = remaining.isEmpty ? targetPath : "\(targetPath)/\(remaining)"
+            return resolveSymlinkPath(nextPath, relativeTo: "/", depth: depth + 1)
+        }
+        return normalized
+    }
+
     let readFileSync: @convention(block) (String) -> JSValue? = { path in
         do {
-            let data = try execution.cmdCtx.fileSystem.readFile(path: path, relativeTo: execution.cmdCtx.cwd)
+            let resolvedPath = resolveSymlinkPath(path, relativeTo: execution.cmdCtx.cwd)
+            let data = try execution.cmdCtx.fileSystem.readFile(path: resolvedPath, relativeTo: "/")
             return JSValue(object: String(decoding: data, as: UTF8.self), in: context)
         } catch {
             return nil
