@@ -165,6 +165,13 @@ iOS blockers:
 - `Workbook.render(...)` and `SpreadsheetFile.importXlsx(...)` fail explicitly
   in the iOS compatibility package; `.xlsx` export is only a basic authoring
   smoke path.
+- The skill's completion criteria require formulas to compute, formula-error
+  scans to work, and `workbook.trace(...)` to return real dependency trees. The
+  iOS compatibility package stores formulas structurally but does not evaluate
+  them.
+- Chart and dashboard workflows require native Excel chart export plus rendered
+  visual verification. The iOS compatibility package exposes only placeholder
+  chart objects and does not export or render real charts.
 - The optional Python analysis stack is partially staged: `numpy`, `pypdf`, and
   `reportlab` are available in the current package lane, while `pandas` and
   `python-docx` remain unavailable for this iOS target because of unresolved

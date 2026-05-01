@@ -177,6 +177,23 @@ def presentation_native_graphics_evidence(skill_dir: Path) -> list[str]:
     ]
 
 
+def spreadsheet_calculation_evidence(skill_md: Path) -> list[str]:
+    return [
+        line_for(skill_md, "formulas compute"),
+        line_for(skill_md, "Scan formula errors"),
+        line_for(skill_md, "workbook.trace"),
+    ]
+
+
+def spreadsheet_chart_evidence(skill_md: Path) -> list[str]:
+    charts_md = skill_md.parent / "charts.md"
+    return [
+        line_for(skill_md, "include at least one native Excel chart"),
+        line_for(charts_md, "Chart from a bounded source/helper range"),
+        line_for(skill_md, 'sheet.charts.add("line"'),
+    ]
+
+
 def artifact_tool_evidence(artifact_tool_root: Path) -> list[str]:
     evidence = [str(artifact_tool_root / "package.json")]
     if (artifact_tool_root / "dist" / "artifact_tool.mjs").exists():
@@ -509,6 +526,16 @@ def check_spreadsheets(
         skill_md,
         "@oai/artifact-tool is required for workbook authoring/export; the iOS host has a limited compatibility package, but full inspection/render/import behavior is not ported",
         artifact_tool_root,
+    )
+    report.add(
+        "blocked",
+        "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
+        spreadsheet_calculation_evidence(skill_md),
+    )
+    report.add(
+        "blocked",
+        "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
+        spreadsheet_chart_evidence(skill_md),
     )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")

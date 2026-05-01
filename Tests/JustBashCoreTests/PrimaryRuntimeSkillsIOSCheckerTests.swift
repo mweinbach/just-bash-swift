@@ -104,6 +104,8 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
         XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
         XCTAssertContainsFinding(in: spreadsheets, containing: "explicitly rejects full render/import APIs")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "require formula computation")
+        XCTAssertContainsFinding(in: spreadsheets, containing: "require native Excel charts")
         XCTAssertContainsFinding(in: spreadsheets, containing: "skia-canvas")
         XCTAssertContainsFinding(
             in: spreadsheets,
