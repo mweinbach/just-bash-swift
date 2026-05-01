@@ -55,6 +55,11 @@ enum PythonSupport {
             return failureResult(error: initializationError)
         }
 
+        let gilState = PyGILState_Ensure()
+        defer {
+            PyGILState_Release(gilState)
+        }
+
         let outputDirectory = workspacePath + "/.python-run"
         let outputPaths = OutputFilePaths(baseDirectory: outputDirectory)
         try? FileManager.default.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
@@ -338,6 +343,9 @@ enum PythonSupport {
         guard bootstrapStatus == 0 else {
             return PythonExecutionError.executionFailed(bootstrapStatus)
         }
+
+        _ = PyEval_SaveThread()
+        writeTrace("after-save-thread", to: traceDir)
 
         return nil
     }

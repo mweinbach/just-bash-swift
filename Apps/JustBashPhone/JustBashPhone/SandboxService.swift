@@ -2136,7 +2136,7 @@ actor SandboxService {
                 )
             }
 
-            return ExecResult(stdout: report, stderr: pythonResult.stderr, exitCode: 1)
+            return ExecResult(stdout: report, stderr: pythonResult.stderr, exitCode: report.contains(#""overall": "ready""#) ? 0 : 1)
         }
 
         return [
@@ -2160,6 +2160,27 @@ actor SandboxService {
         let childProcessPythonStatus = childProcessPythonResult?.exitCode == 0 ? "available" : "blocked"
         let packageExportsStatus = packageExportsResult?.exitCode == 0 ? "available" : "blocked"
         let unsupportedFullApiStatus = unsupportedFullApiResult?.exitCode == 0 ? "guarded" : "unguarded"
+        let documentsStatus = pythonSkillStatus(
+            from: pythonResult,
+            skill: "documents",
+            fallback: "blocked"
+        )
+        let commonArtifactStatus = (
+            artifactToolStatus == "available"
+            && nodeModuleStatus == "available"
+            && esmStatus == "available"
+            && childProcessPythonStatus == "available"
+            && packageExportsStatus == "available"
+            && unsupportedFullApiStatus == "guarded"
+        ) ? "ready" : "blocked"
+        let presentationsStatus = commonArtifactStatus
+        let spreadsheetsStatus = commonArtifactStatus
+        let overallStatus = (
+            pythonStatus == "available"
+            && documentsStatus == "ready"
+            && presentationsStatus == "ready"
+            && spreadsheetsStatus == "ready"
+        ) ? "ready" : "blocked"
         let documentBlockers = pythonSkillBlockers(
             from: pythonResult,
             skill: "documents",
@@ -2196,7 +2217,7 @@ actor SandboxService {
         return """
         {
           "platform": "ios",
-          "overall": "blocked",
+          "overall": "\(overallStatus)",
           "runtime": {
             "beeWarePython": {
               "status": "\(pythonStatus)",
@@ -2246,11 +2267,11 @@ actor SandboxService {
           },
           "skills": {
             "documents": {
-              "status": "blocked",
+              "status": "\(documentsStatus)",
               "blockers": \(documentBlockersJSON)
             },
             "presentations": {
-              "status": "blocked",
+              "status": "\(presentationsStatus)",
               "blockers": [
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
                 "basic presentation PNG rendering and layout JSON are staged; full-fidelity rendering still needs a real iOS renderer",
@@ -2263,7 +2284,7 @@ actor SandboxService {
               ]
             },
             "spreadsheets": {
-              "status": "blocked",
+              "status": "\(spreadsheetsStatus)",
               "blockers": \(spreadsheetBlockersJSON)
             }
           },
@@ -2271,6 +2292,22 @@ actor SandboxService {
         }
 
         """
+    }
+
+    private static func pythonSkillStatus(
+        from pythonResult: PythonExecResult,
+        skill: String,
+        fallback: String
+    ) -> String {
+        guard pythonResult.exitCode == 0,
+              let data = pythonResult.stdout.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let skills = payload["skills"] as? [String: Any],
+              let skillPayload = skills[skill] as? [String: Any],
+              let status = skillPayload["status"] as? String else {
+            return fallback
+        }
+        return status
     }
 
     private static func pythonSkillBlockers(

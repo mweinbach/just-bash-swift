@@ -82,6 +82,11 @@ func installProcessBridge(into context: JSContext, execution: JSCExecutionContex
             }
             return wrapBuffer(new Uint8Array(bytes));
           }
+          if (enc === 'latin1' || enc === 'binary' || enc === 'ascii') {
+            var arr = new Uint8Array(input.length);
+            for (var i = 0; i < input.length; i++) arr[i] = input.charCodeAt(i) & 0xff;
+            return wrapBuffer(arr);
+          }
           if (enc === 'base64') {
             var bin = atob(input);
             var arr = new Uint8Array(bin.length);
@@ -94,13 +99,42 @@ func installProcessBridge(into context: JSContext, execution: JSCExecutionContex
             return wrapBuffer(arr);
           }
         }
+        if (input instanceof ArrayBuffer) return wrapBuffer(new Uint8Array(input));
+        if (ArrayBuffer.isView && ArrayBuffer.isView(input)) {
+          return wrapBuffer(new Uint8Array(input.buffer, input.byteOffset, input.byteLength));
+        }
         if (input instanceof Uint8Array) return wrapBuffer(input);
         if (Array.isArray(input)) return wrapBuffer(new Uint8Array(input));
         return wrapBuffer(new Uint8Array(0));
       };
-      Buffer.alloc = function(size) { return wrapBuffer(new Uint8Array(size)); };
+      Buffer.alloc = function(size, fill) {
+        var arr = new Uint8Array(size);
+        if (fill !== undefined) arr.fill(typeof fill === 'number' ? fill & 0xff : Buffer.from(String(fill))[0] || 0);
+        return wrapBuffer(arr);
+      };
+      Buffer.concat = function(list, totalLength) {
+        if (totalLength === undefined) {
+          totalLength = 0;
+          for (var i = 0; i < list.length; i++) totalLength += list[i].length;
+        }
+        var out = new Uint8Array(totalLength);
+        var offset = 0;
+        for (var i = 0; i < list.length && offset < totalLength; i++) {
+          var item = Buffer.from(list[i]);
+          var limit = Math.min(item.length, totalLength - offset);
+          out.set(item.subarray(0, limit), offset);
+          offset += limit;
+        }
+        return wrapBuffer(out);
+      };
       Buffer.byteLength = function(s, enc) { return Buffer.from(s, enc || 'utf8').length; };
+      Buffer.isBuffer = function(input) { return !!(input && input.__justBashBuffer === true); };
       function wrapBuffer(u8) {
+        try {
+          Object.defineProperty(u8, "__justBashBuffer", { value: true, enumerable: false });
+        } catch (_) {
+          u8.__justBashBuffer = true;
+        }
         u8.toString = function(enc) {
           enc = enc || 'utf8';
           if (enc === 'utf8' || enc === 'utf-8') {
@@ -125,12 +159,28 @@ func installProcessBridge(into context: JSContext, execution: JSCExecutionContex
             for (var i = 0; i < this.length; i++) bin += String.fromCharCode(this[i]);
             return btoa(bin);
           }
+          if (enc === 'latin1' || enc === 'binary' || enc === 'ascii') {
+            var s = '';
+            for (var i = 0; i < this.length; i++) s += String.fromCharCode(this[i]);
+            return s;
+          }
           if (enc === 'hex') {
             var s = '';
             for (var i = 0; i < this.length; i++) { var h = this[i].toString(16); if (h.length === 1) h = '0' + h; s += h; }
             return s;
           }
           return '';
+        };
+        u8.copy = function(target, targetStart, sourceStart, sourceEnd) {
+          targetStart = targetStart || 0;
+          sourceStart = sourceStart || 0;
+          sourceEnd = sourceEnd === undefined ? this.length : sourceEnd;
+          var copied = 0;
+          for (var i = sourceStart; i < sourceEnd && targetStart + copied < target.length; i++) {
+            target[targetStart + copied] = this[i];
+            copied += 1;
+          }
+          return copied;
         };
         return u8;
       }

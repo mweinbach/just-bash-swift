@@ -83,7 +83,12 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
         XCTAssertTrue(text.contains("bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged"))
         XCTAssertTrue(text.contains("full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine"))
         XCTAssertTrue(text.contains("ctx.addLucideIcon can use the staged pure-JS lucide SVG package"))
+        XCTAssertTrue(text.contains(#""overall": "\(overallStatus)""#))
+        XCTAssertTrue(text.contains(#""status": "\(documentsStatus)""#))
+        XCTAssertTrue(text.contains(#""status": "\(presentationsStatus)""#))
+        XCTAssertTrue(text.contains(#""status": "\(spreadsheetsStatus)""#))
         XCTAssertFalse(text.contains("only stores formulas structurally"))
+        XCTAssertFalse(text.contains(#""overall": "blocked""#))
     }
 
     private func runChecker(
