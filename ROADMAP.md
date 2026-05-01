@@ -16,7 +16,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - In-process execution only: parser -> AST -> interpreter -> virtual commands/filesystem
 - Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
 - Filesystem persists across `exec()` calls; shell state resets per call
-- Current verification baseline: `swift test` with 379 executed tests passing; 34 performance benchmarks are opt-in and skipped by default
+- Current verification baseline: `swift test` with 377 executed tests passing; 34 performance benchmarks are opt-in and skipped by default
 
 ## Recently Completed
 
@@ -105,7 +105,7 @@ This roadmap is for execution order, not feature wish-listing. The goal is to ke
 - fixture categories now include: redirections (14), substitution (23), globbing (7), alias (6), parse_errors (6), shell_builtins (22), advanced_features (21), associative_array (12), sparse_array (10), quoted_array (20), special_variables (12) — 147 total fixture-driven test cases
 - alias expansion decision: documented as intentionally limited to command-position only (see README.md)
 - `xan` CSV processing command implemented with RFC 4180 compliant parser, TSV support, column selection by index/name, expression filtering, sorting, frequency tables, and statistics — 16 tests added
-- host-backed `git` passthrough now exists on macOS / Mac Catalyst when the active filesystem resolves the shell cwd to a real writable host path; coverage includes local repo lifecycle, bare-remote push, mounted-path resolution, and credential-helper plumbing
+- portable in-process `git` support now runs on the active `BashFilesystem`, including the default iPhone-compatible `VirtualFileSystem`; coverage includes local repo lifecycle, status, bare-remote clone/push, GitHub HTTPS `ls-remote`/clone transport, and credential-store plumbing
 
 ## Now: ACTIVE — Embedded Language Runtimes
 

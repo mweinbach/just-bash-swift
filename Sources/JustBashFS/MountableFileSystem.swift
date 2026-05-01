@@ -264,14 +264,4 @@ extension MountableFileSystem: BashFilesystem {
         return Array(Set(results)).sorted()
     }
 
-    public func hostPath(for path: String, relativeTo: String) -> String? {
-        let normalized = VirtualPath.normalize(path, relativeTo: relativeTo)
-        let (fs, resolved) = resolve(normalized)
-        guard let hostFS = fs as? any HostPathFileSystem else {
-            return nil
-        }
-        return hostFS.hostPath(for: resolved, relativeTo: "/")
-    }
 }
-
-extension MountableFileSystem: HostPathFileSystem {}

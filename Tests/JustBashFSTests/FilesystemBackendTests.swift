@@ -191,10 +191,6 @@ final class ReadWriteFileSystemTests: XCTestCase {
         try fs.deleteFile(path: "/nope", relativeTo: "/", recursive: false, force: true)
     }
 
-    func testHostPathResolution() {
-        let fs = ReadWriteFileSystem(base: tempDir)
-        XCTAssertEqual(fs.hostPath(for: "/nested/file.txt", relativeTo: "/"), tempDir + "/nested/file.txt")
-    }
 }
 
 // MARK: - MountableFileSystem Tests
@@ -303,18 +299,4 @@ final class MountableFileSystemTests: XCTestCase {
         XCTAssertTrue(paths.contains("/mnt/a.txt"))
     }
 
-    func testHostPathResolutionRoutesToMountedBackend() {
-        let hostDir = NSTemporaryDirectory() + "MountableHostPath-\(UUID().uuidString)"
-        try? FileManager.default.createDirectory(atPath: hostDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: hostDir) }
-
-        let fs = MountableFileSystem(root: VirtualFileSystem())
-        fs.mount(ReadWriteFileSystem(base: hostDir), at: "/repo")
-
-        XCTAssertEqual(
-            fs.hostPath(for: "/repo/subdir/project", relativeTo: "/"),
-            hostDir + "/subdir/project"
-        )
-        XCTAssertNil(fs.hostPath(for: "/tmp/project", relativeTo: "/"))
-    }
 }

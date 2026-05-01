@@ -327,16 +327,6 @@ public protocol BashFilesystem: Sendable {
     func glob(_ pattern: String, relativeTo: String, dotglob: Bool, extglob: Bool) -> [String]
 }
 
-/// Optional capability for filesystems that can map virtual shell paths back
-/// to concrete host filesystem paths. Commands that need to interact with
-/// host-native tooling (for example `git`) can use this to avoid pretending a
-/// purely virtual filesystem has real on-disk semantics.
-public protocol HostPathFileSystem: BashFilesystem {
-    /// Resolves a virtual path into a concrete host path, or returns `nil`
-    /// when the path does not correspond to a host-backed location.
-    func hostPath(for path: String, relativeTo: String) -> String?
-}
-
 // MARK: - Default Parameters Extension
 
 extension BashFilesystem {

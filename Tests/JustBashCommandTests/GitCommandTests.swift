@@ -1,58 +1,29 @@
-import Foundation
 import XCTest
 @testable import JustBash
-@testable import JustBashFS
 
 final class GitCommandTests: XCTestCase {
-#if os(macOS) || targetEnvironment(macCatalyst)
-    private func makeTempDirectory(prefix: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(prefix)-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
-    private func writeText(_ text: String, to url: URL) throws {
-        try text.data(using: .utf8)?.write(to: url)
-    }
-
-    private func makeGitBash(rootURL: URL, cwd: String, env: [String: String] = [:]) -> Bash {
-        let baseEnv = [
-            "GIT_AUTHOR_NAME": "Just Bash",
-            "GIT_AUTHOR_EMAIL": "just-bash@example.com",
-            "GIT_COMMITTER_NAME": "Just Bash",
-            "GIT_COMMITTER_EMAIL": "just-bash@example.com",
-            "GIT_CONFIG_NOSYSTEM": "1",
-        ].merging(env, uniquingKeysWith: { _, new in new })
-
-        return Bash(options: .init(
-            env: baseEnv,
-            cwd: cwd,
-            filesystem: ReadWriteFileSystem(base: rootURL.path)
+    private func makeGitBash(env: [String: String] = [:], cwd: String = "/workspace") -> Bash {
+        Bash(options: .init(
+            env: [
+                "GIT_AUTHOR_NAME": "Just Bash",
+                "GIT_AUTHOR_EMAIL": "just-bash@example.com",
+                "GIT_COMMITTER_NAME": "Just Bash",
+                "GIT_COMMITTER_EMAIL": "just-bash@example.com",
+            ].merging(env, uniquingKeysWith: { _, new in new }),
+            cwd: cwd
         ))
     }
 
-    func testGitRejectsPureVirtualFilesystem() async {
-        let bash = Bash()
-        let result = await bash.exec("git status")
-        XCTAssertNotEqual(result.exitCode, 0)
-        XCTAssertTrue(result.stderr.contains("host-backed writable filesystem"))
-    }
-
-    func testGitCanInitCommitAndInspectRepository() async throws {
-        let rootURL = try makeTempDirectory(prefix: "GitCommandRepo")
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let repoURL = rootURL.appendingPathComponent("repo", isDirectory: true)
-        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
-
-        let bash = makeGitBash(rootURL: rootURL, cwd: "/repo")
+    func testGitRunsOnDefaultVirtualFilesystem() async {
+        let bash = makeGitBash()
 
         let setup = await bash.exec("""
+        mkdir -p /workspace
+        cd /workspace
         git init
         echo 'hello git' > hello.txt
         git add hello.txt
         git commit -m 'initial import'
-        git status --short
         """)
         XCTAssertEqual(setup.exitCode, 0, setup.stderr)
         XCTAssertTrue(setup.stdout.contains("Initialized empty Git repository"), setup.stdout)
@@ -64,20 +35,34 @@ final class GitCommandTests: XCTestCase {
 
         let cleanStatus = await bash.exec("git status --short")
         XCTAssertEqual(cleanStatus.exitCode, 0, cleanStatus.stderr)
-        XCTAssertTrue(cleanStatus.stdout.isEmpty, cleanStatus.stdout)
+        XCTAssertEqual(cleanStatus.stdout, "")
 
         let topLevel = await bash.exec("git rev-parse --show-toplevel")
         XCTAssertEqual(topLevel.exitCode, 0, topLevel.stderr)
-        let resolvedTopLevel = URL(fileURLWithPath: topLevel.stdout.trimmingCharacters(in: .whitespacesAndNewlines)).standardizedFileURL.path
-        XCTAssertEqual(resolvedTopLevel, repoURL.standardizedFileURL.path)
+        XCTAssertEqual(topLevel.stdout, "/workspace\n")
     }
 
-    func testGitCanPushToBareRemoteUsingVirtualAbsolutePaths() async throws {
-        let rootURL = try makeTempDirectory(prefix: "GitCommandRemote")
-        defer { try? FileManager.default.removeItem(at: rootURL) }
+    func testGitStatusShowsUntrackedAndModifiedFiles() async {
+        let bash = makeGitBash()
+        _ = await bash.exec("""
+        mkdir -p /workspace
+        cd /workspace
+        git init
+        echo one > tracked.txt
+        git add tracked.txt
+        git commit -m one
+        echo two > tracked.txt
+        echo new > new.txt
+        """)
 
-        try FileManager.default.createDirectory(at: rootURL.appendingPathComponent("workspace", isDirectory: true), withIntermediateDirectories: true)
-        let bash = makeGitBash(rootURL: rootURL, cwd: "/workspace")
+        let status = await bash.exec("git status --short")
+        XCTAssertEqual(status.exitCode, 0, status.stderr)
+        XCTAssertTrue(status.stdout.contains(" M tracked.txt"), status.stdout)
+        XCTAssertTrue(status.stdout.contains("?? new.txt"), status.stdout)
+    }
+
+    func testGitCanCloneAndPushToBareRemoteInsideVirtualFilesystem() async {
+        let bash = makeGitBash(cwd: "/")
 
         let initRemote = await bash.exec("git init --bare /remote.git")
         XCTAssertEqual(initRemote.exitCode, 0, initRemote.stderr)
@@ -88,38 +73,30 @@ final class GitCommandTests: XCTestCase {
         echo 'from clone' > note.txt
         git add note.txt
         git commit -m 'publish'
-        git push origin HEAD:refs/heads/main
+        git push /remote.git HEAD:refs/heads/master
         """)
         XCTAssertEqual(publish.exitCode, 0, publish.stderr)
 
-        let remoteHead = await bash.exec("git --git-dir=/remote.git rev-parse refs/heads/main")
+        let remoteHead = await bash.exec("git --git-dir=/remote.git rev-parse refs/heads/master")
         XCTAssertEqual(remoteHead.exitCode, 0, remoteHead.stderr)
         XCTAssertEqual(remoteHead.stdout.trimmingCharacters(in: .whitespacesAndNewlines).count, 40)
     }
 
-    func testGitCredentialHelperUsesMappedHomeDirectory() async throws {
-        let rootURL = try makeTempDirectory(prefix: "GitCommandCreds")
-        defer { try? FileManager.default.removeItem(at: rootURL) }
+    func testGitCredentialHelperUsesVirtualHomeDirectory() async {
+        let bash = makeGitBash(env: [
+            "HOME": "/home/tester",
+            "GIT_TERMINAL_PROMPT": "0",
+        ])
 
-        try FileManager.default.createDirectory(at: rootURL.appendingPathComponent("workspace", isDirectory: true), withIntermediateDirectories: true)
-        let hostHome = rootURL.appendingPathComponent("home/tester", isDirectory: true)
-        try FileManager.default.createDirectory(at: hostHome, withIntermediateDirectories: true)
-        try writeText("[credential]\n\thelper = store\n", to: hostHome.appendingPathComponent(".gitconfig"))
-        try writeText("https://octocat:ghp_example@github.com\n", to: hostHome.appendingPathComponent(".git-credentials"))
-
-        let bash = makeGitBash(
-            rootURL: rootURL,
-            cwd: "/workspace",
-            env: [
-                "HOME": "/home/tester",
-                "GIT_TERMINAL_PROMPT": "0",
-            ]
-        )
+        _ = await bash.exec("""
+        mkdir -p /home/tester /workspace
+        printf '[credential]\\n\\thelper = store\\n' > /home/tester/.gitconfig
+        printf 'https://octocat:ghp_example@github.com\\n' > /home/tester/.git-credentials
+        """)
 
         let filled = await bash.exec("printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill")
         XCTAssertEqual(filled.exitCode, 0, filled.stderr)
         XCTAssertTrue(filled.stdout.contains("username=octocat"), filled.stdout)
         XCTAssertTrue(filled.stdout.contains("password=ghp_example"), filled.stdout)
     }
-#endif
 }

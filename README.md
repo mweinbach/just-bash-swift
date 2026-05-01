@@ -63,7 +63,7 @@ Four modules, zero dependencies beyond Foundation:
 - Fully in-process execution through the Swift parser, interpreter, builtins, and virtual commands
 - Shared in-memory filesystem across `exec()` calls, with fresh shell state per call
 - Pluggable filesystem backends via the `BashFilesystem` protocol (default: `VirtualFileSystem`)
-- Host-native `git` passthrough on macOS / Mac Catalyst when the active filesystem maps the shell cwd onto a real writable host path
+- Portable in-process `git` command support on the same virtual filesystem used by iPhone/iPadOS hosts
 - Optional embedded language runtimes via the `EmbeddedRuntime` protocol (see [Optional Products](#optional-products))
 - Selective, test-driven parity with upstream `just-bash`, not line-for-line feature parity yet
 
@@ -207,12 +207,12 @@ For complex command substitutions, shell functions are recommended over aliases.
 
 **External commands:** `cat`, `tee`, `ls`, `mkdir`, `mktemp`, `touch`, `rm`, `rmdir`, `cp`, `mv`, `ln`, `chmod`, `stat`, `tree`, `split`, `find`, `du`, `realpath`, `readlink`, `basename`, `dirname`, `file`, `strings`, `grep`, `egrep`, `fgrep`, `rg`, `sed`, `awk`, `sort`, `uniq`, `tr`, `cut`, `paste`, `join`, `wc`, `head`, `tail`, `tac`, `rev`, `nl`, `fold`, `expand`, `unexpand`, `column`, `od`, `seq`, `yes`, `bc`, `base64`, `expr`, `md5sum`, `sha1sum`, `sha256sum`, `gzip`, `gunzip`, `zcat`, `tar`, `sqlite3`, `jq`, `yq`, `xan`, `curl`, `git`, `html-to-markdown`, `xargs`, `diff`, `comm`, `date`, `sleep`, `uname`, `hostname`, `whoami`, `clear`, `help`, `history`, `bash`, `sh`, `time`, `timeout`
 
-`git` is intentionally different from the pure-Swift commands above: on macOS
-and Mac Catalyst it shells out to the host machine's real `git`, preserving
-normal subcommand syntax, remote-host support, and credential-helper behavior.
-That requires the active filesystem to expose a real writable host path (for
-example `ReadWriteFileSystem`, or a `MountableFileSystem` mount backed by one).
-Pure virtual or overlay-only filesystems do not vend `git`.
+`git` is implemented in-process against the active `BashFilesystem`, so it works
+on iPhone/iPadOS hosts where `Process`/`NSTask` is unavailable. The current
+portable command surface covers repository creation, staging, commits, status,
+log, revision lookup, local clone/push, GitHub HTTPS `ls-remote`/clone through
+`URLSession`, and credential-store lookups using the same command syntax shape
+as git for those operations.
 
 ### Execution Limits
 
@@ -304,11 +304,6 @@ The `BashFilesystem` protocol requires methods for:
 
 **Note:** All filesystem implementations must be `Sendable` and handle their own synchronization for thread safety.
 
-If you want host-native tooling such as `git`, prefer a host-backed filesystem
-like `ReadWriteFileSystem` for the working tree you want `git` to operate on.
-The default `VirtualFileSystem` is intentionally sandboxed and does not expose a
-real host path for process-backed commands.
-
 ## API Reference
 
 ### `Bash` (actor)
@@ -367,7 +362,7 @@ Swift 6.0+ with strict concurrency.
 swift test
 ```
 
-379 tests covering: 60+ commands, control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, host-backed git passthrough, gzip-family and zip compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, custom filesystem abstraction, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
+377 tests covering: 60+ commands, control flow, functions, alias expansion, brace expansion, command substitution, heredocs, variable operations, indexed and associative array support, shell builtins parity, arithmetic, conditionals, pipes, `|&`, redirections, output limits, nounset, noclobber, field splitting, glob character classes, expanded utility command coverage, portable in-process git support, gzip-family and zip compression, tar archives, sqlite3 support, jq and yq support (including try/catch, type filters, del, XML output), xan CSV processing, readonly/shopt behavior, `select` loops, `trap` registration, dynamic variables (`$RANDOM`, `$BASH_VERSION`, `$HOSTNAME`, `$SECONDS`, `$LINENO`), `printf -v`, `read -a`, `declare -p`, filesystem persistence, session isolation, custom filesystem abstraction, curated parity cases, and fixture-driven parity suites for redirections, substitutions, globbing, aliases, parse errors, shell builtins, and advanced features.
 
 ## License
 
