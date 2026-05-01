@@ -28,8 +28,10 @@ filesystem, and optional embedded runtimes.
 - The iPhone host stages a limited pure-JS `@oai/artifact-tool` compatibility
   package under both `/node_modules/@oai/artifact-tool` and the Codex primary
   runtime cache-shaped path. It supports direct imports, `presentation-jsx`, and
-  basic `.xlsx`/`.pptx` export smoke checks. It is not the full upstream
-  artifact-tool renderer/importer.
+  basic `.xlsx`/`.pptx` export smoke checks. Full render/import APIs fail
+  explicitly on iOS so skill verification cannot accidentally treat placeholder
+  images or empty imports as success. It is not the full upstream artifact-tool
+  renderer/importer.
 - Python is available only in the generated iPhone host app when built with
   BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
   `python3` custom commands, stages the Python home into the app bundle, and
@@ -102,6 +104,8 @@ iOS blockers:
 - The staged `@oai/artifact-tool` compatibility package covers direct imports,
   `presentation-jsx`, and basic Office export smoke checks, but it intentionally
   does not provide full upstream rendering or Office import behavior.
+- Presentation visual export fails explicitly in the iOS compatibility package
+  until a real renderer is ported.
 - The local Codex runtime cache has the full Node package, but that cache is not
   part of the iOS app bundle and includes bundled runtime assets such as
   `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and
@@ -153,6 +157,9 @@ iOS blockers:
   so the remaining blocker is not syntax loading; it is the unported
   full-fidelity artifact-tool runtime dependencies, especially `skia-canvas`
   native rendering and `@oai/walnut` WASM resources.
+- `Workbook.render(...)` and `SpreadsheetFile.importXlsx(...)` fail explicitly
+  in the iOS compatibility package; `.xlsx` export is only a basic authoring
+  smoke path.
 - The optional Python analysis stack is partially staged: `numpy`, `pypdf`, and
   `reportlab` are available in the current package lane, while `pandas` and
   `python-docx` remain unavailable for this iOS target because of unresolved
@@ -215,6 +222,6 @@ wrote `/workspace/primary-runtime-skills-ios-report.json` with:
   Poppler renderer, and real `lxml`/`python-docx` OOXML behavior required
 - Presentations and Spreadsheets blockers: limited pure-JS artifact-tool
   compatibility is staged, including common structural spreadsheet helpers, but
-  full render/import behavior remains unported
+  full render/import behavior remains unported and fails explicitly
 - Import probes: `openpyxl`, `PIL`, `pdf2image`, `numpy`, `pypdf`, and
   `reportlab` import; `docx`, `lxml`, and `pandas` do not

@@ -240,6 +240,18 @@ def check_artifact_tool_runtime(
             artifact_tool_compat_evidence(),
         )
 
+    if "unsupportedArtifactToolFeature" in sandbox_text:
+        report.add(
+            "blocked",
+            "iOS artifact-tool compatibility explicitly rejects full render/import APIs required by these skills instead of returning fake visual verification",
+            [
+                line_for(sandbox_service, "unsupportedArtifactToolFeature"),
+                line_for(sandbox_service, "Presentation.export"),
+                line_for(sandbox_service, "Workbook.render"),
+                line_for(sandbox_service, "SpreadsheetFile.importXlsx"),
+            ],
+        )
+
     package, package_evidence = artifact_tool_package_shape(artifact_tool_root)
     if package is not None:
         export_text = json.dumps(package.get("exports", {}), sort_keys=True)

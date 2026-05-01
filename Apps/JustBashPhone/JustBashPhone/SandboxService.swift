@@ -559,6 +559,10 @@ actor SandboxService {
       };
     }
 
+    function unsupportedArtifactToolFeature(name) {
+      throw new Error(`${name} is not implemented by the Just Bash iOS artifact-tool compatibility package`);
+    }
+
     export class Presentation {
       constructor(options) {
         this.slideSize = (options && options.slideSize) || { width: 1280, height: 720 };
@@ -572,7 +576,7 @@ actor SandboxService {
         if (format === "layout") {
           return new FileBlob(JSON.stringify(this.toJSON(), null, 2), "application/json");
         }
-        return new FileBlob(PNG_1X1, "image/png");
+        unsupportedArtifactToolFeature(`Presentation.export(${format})`);
       }
       toJSON() {
         return {
@@ -695,7 +699,7 @@ actor SandboxService {
         return this.worksheets.items[0] || this.worksheets.add("Sheet1");
       }
       async render() {
-        return new FileBlob(PNG_1X1, "image/png");
+        unsupportedArtifactToolFeature("Workbook.render");
       }
       inspect(options) {
         return { ndjson: JSON.stringify({ kind: "workbook", sheets: this.worksheets.items.map((s) => s.name), options: options || {} }) + "\n" };
@@ -952,9 +956,7 @@ actor SandboxService {
 
     export class SpreadsheetFile {
       static async importXlsx(blob) {
-        const workbook = Workbook.create();
-        workbook.worksheets.add("Sheet1");
-        return workbook;
+        unsupportedArtifactToolFeature("SpreadsheetFile.importXlsx");
       }
       static async exportXlsx(workbook) {
         const sheets = workbook.worksheets.items.length ? workbook.worksheets.items : [workbook.worksheets.add("Sheet1")];
