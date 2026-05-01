@@ -36,8 +36,11 @@ runs cached `set_protection.py` and `comments_strip.py` against generated DOCX
 files with this staged package. The app bundle root also includes a pure-Python
 `python-docx` compatibility package for the document/table/header APIs exercised
 by cached helpers such as `xlsx_to_docx_table.py`, `docx_table_to_csv.py`, and
-OOXML element insertion. Broader Documents support is still blocked on
-replacements for `soffice`/Poppler-based rendering and on expanding the compat
-surface as additional cached helper paths are smoke-tested.
+OOXML element insertion. A pure-Python `pdf2image` compatibility module plus the
+iOS host's in-process `soffice` command adapter let cached `render_docx.py`
+produce page PNGs in the bash environment without LibreOffice or Poppler
+binaries. That render path is intentionally bounded compatibility, not full
+LibreOffice/Poppler visual fidelity, and should expand as additional cached
+helper paths are smoke-tested.
 
 Runtime `pip install` is not the supported path on iPhone.

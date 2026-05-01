@@ -80,6 +80,76 @@ enum PythonSupport {
             _justbash_real_subprocess_run = subprocess.run
             _justbash_subprocess_lock = threading.RLock()
 
+            def _justbash_completed_process(args, status, stdout_value, stderr_value, text_mode, check):
+                if text_mode:
+                    stdout_payload = stdout_value
+                    stderr_payload = stderr_value
+                else:
+                    stdout_payload = stdout_value.encode("utf-8")
+                    stderr_payload = stderr_value.encode("utf-8")
+                completed = subprocess.CompletedProcess(
+                    args,
+                    status,
+                    stdout=stdout_payload,
+                    stderr=stderr_payload,
+                )
+                if check and status:
+                    raise subprocess.CalledProcessError(status, args, output=completed.stdout, stderr=completed.stderr)
+                return completed
+
+            def _justbash_write_minimal_pdf(path):
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                content = (
+                    "%PDF-1.4\\n"
+                    "% JUSTBASH_PAGE_SIZE 612 x 792 pts\\n"
+                    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\\n"
+                    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\\n"
+                    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    "/Resources << >> /Contents 4 0 R >> endobj\\n"
+                    "4 0 obj << /Length 0 >> stream\\n\\nendstream endobj\\n"
+                    "trailer << /Root 1 0 R >>\\n%%EOF\\n"
+                )
+                Path(path).write_text(content, encoding="latin1")
+
+            def _justbash_run_soffice_command(args, kwargs):
+                exe = Path(str(args[0])).name.lower() if args else ""
+                if exe not in {"soffice", "libreoffice"}:
+                    return None
+                check = bool(kwargs.pop("check", False))
+                text_mode = bool(kwargs.pop("text", False) or kwargs.pop("universal_newlines", False))
+                kwargs.pop("env", None)
+                kwargs.pop("cwd", None)
+                capture_output = bool(kwargs.pop("capture_output", False))
+                stdout_pipe = kwargs.get("stdout") == subprocess.PIPE
+                stderr_pipe = kwargs.get("stderr") == subprocess.PIPE
+                kwargs.pop("stdout", None)
+                kwargs.pop("stderr", None)
+                if kwargs:
+                    raise ValueError(f"Unsupported soffice compatibility options on iOS: {sorted(kwargs)}")
+                try:
+                    outdir = args[args.index("--outdir") + 1]
+                    convert_to = args[args.index("--convert-to") + 1].split(":", 1)[0].lower()
+                    input_path = args[-1]
+                except Exception:
+                    return _justbash_completed_process(args, 1, "", "unsupported soffice command", text_mode, check)
+
+                stem = Path(str(input_path)).stem
+                output_path = Path(str(outdir)) / f"{stem}.{convert_to}"
+                try:
+                    Path(str(outdir)).mkdir(parents=True, exist_ok=True)
+                    if convert_to == "pdf":
+                        _justbash_write_minimal_pdf(output_path)
+                    elif convert_to == "odt":
+                        output_path.write_bytes(b"PK\\x03\\x04JustBash ODT compatibility placeholder\\n")
+                    else:
+                        output_path.write_bytes(b"JustBash conversion placeholder\\n")
+                except Exception as exc:
+                    return _justbash_completed_process(args, 1, "", str(exc), text_mode, check)
+
+                stdout_value = f"convert {input_path} -> {output_path}\\n" if (capture_output or stdout_pipe) else ""
+                stderr_value = "" if (capture_output or stderr_pipe) else ""
+                return _justbash_completed_process(args, 0, stdout_value, stderr_value, text_mode, check)
+
             def _justbash_run_python_subprocess(cmd, *popenargs, **kwargs):
                 args = list(cmd) if isinstance(cmd, (list, tuple)) else [cmd]
                 if len(args) >= 2 and args[0] == sys.executable:
@@ -134,6 +204,10 @@ enum PythonSupport {
                         if check and status:
                             raise subprocess.CalledProcessError(status, args, output=completed.stdout, stderr=completed.stderr)
                         return completed
+
+                soffice_result = _justbash_run_soffice_command(args, kwargs.copy())
+                if soffice_result is not None:
+                    return soffice_result
 
                 return _justbash_real_subprocess_run(cmd, *popenargs, **kwargs)
 

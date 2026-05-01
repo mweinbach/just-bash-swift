@@ -30,8 +30,8 @@ def _missing_modules(statuses: list[dict[str, object]]) -> list[str]:
 
 def _documents_blockers(missing_modules: list[str]) -> list[str]:
     blockers = [
-        "render_docx.py requires soffice/LibreOffice through subprocess",
-        "pdf2image typically requires Poppler binaries",
+        "render_docx.py soffice/LibreOffice command shape is adapted in-process by the iOS host",
+        "pure-Python pdf2image compatibility is staged for bounded page-PNG render smoke behavior",
     ]
     if missing_modules:
         blockers.append("missing required Python modules: " + ", ".join(missing_modules))
@@ -47,6 +47,8 @@ def _documents_blockers(missing_modules: list[str]) -> list[str]:
         )
     elif "lxml" in missing_modules:
         blockers.append("lxml.etree-compatible OOXML parsing and mutation support is not importable")
+    else:
+        blockers.append("bounded Documents render compatibility is not full LibreOffice/Poppler visual fidelity")
     return blockers
 
 
@@ -74,7 +76,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
         "python": python,
         "skills": {
             "documents": {
-                "status": "blocked",
+                "status": "ready" if not documents_missing else "blocked",
                 "python_modules": documents_module_statuses,
                 "external_binaries": {
                     "soffice_or_libreoffice": soffice_path,

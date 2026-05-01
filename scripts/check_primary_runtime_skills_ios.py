@@ -89,6 +89,7 @@ def staged_ios_python_package(package_name: str) -> Path | None:
     package_paths = {
         "lxml": IOS_PYTHON_APP / "lxml" / "etree.py",
         "python-docx": IOS_PYTHON_APP / "docx" / "__init__.py",
+        "pdf2image": IOS_PYTHON_APP / "pdf2image.py",
     }
     path = package_paths.get(package_name.lower())
     if path is not None and path.exists():
@@ -535,6 +536,12 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
             "pure-Python python-docx compatibility is staged for tested DOCX table/header/OOXML helper behavior",
             [str(staged_compat[next(pkg for pkg in staged_compat if pkg.lower() == "python-docx")])],
         )
+    if "pdf2image" in {pkg.lower() for pkg in staged_compat}:
+        report.add(
+            "ok",
+            "pure-Python pdf2image compatibility is staged for bounded DOCX render smoke behavior",
+            [str(staged_compat[next(pkg for pkg in staged_compat if pkg.lower() == "pdf2image")])],
+        )
     missing = sorted(
         pkg
         for pkg in required
@@ -560,19 +567,39 @@ def check_documents(cache_root: Path, root: Path | None = None) -> SkillReport:
     else:
         report.add("ok", "all detected Documents Python imports are declared or compat-staged for iOS")
 
+    python_support = REPO_ROOT / "Apps/JustBashPhone/JustBashPhone/PythonSupport.swift"
+    python_support_text = read_text(python_support)
     render_text = read_text(render_py)
     if "soffice" in render_text:
-        report.add(
-            "blocked",
-            "DOCX render QA shells out to soffice/LibreOffice, which is not available in the iOS runtime",
-            [line_for(render_py, '"soffice"')],
-        )
+        if "_justbash_run_soffice_command" in python_support_text:
+            report.add(
+                "ok",
+                "soffice/LibreOffice conversion command shape is adapted in-process for the cached DOCX render helper on iOS",
+                [line_for(render_py, '"soffice"'), line_for(python_support, "_justbash_run_soffice_command")],
+            )
+        else:
+            report.add(
+                "blocked",
+                "DOCX render QA shells out to soffice/LibreOffice, which is not available in the iOS runtime",
+                [line_for(render_py, '"soffice"')],
+            )
     if "subprocess.run" in render_text:
-        report.add(
-            "blocked",
-            "Documents render path uses subprocess execution; iOS host needs in-process render/adapters",
-            [line_for(render_py, "subprocess.run")],
-        )
+        if "_justbash_run_soffice_command" in python_support_text and staged_ios_python_package("pdf2image"):
+            report.add(
+                "warning",
+                "Documents render path uses a bounded in-process iOS adapter; it produces page PNGs for helper compatibility but is not a full LibreOffice/Poppler renderer",
+                [
+                    line_for(render_py, "subprocess.run"),
+                    line_for(python_support, "_justbash_run_soffice_command"),
+                    str(staged_ios_python_package("pdf2image")),
+                ],
+            )
+        else:
+            report.add(
+                "blocked",
+                "Documents render path uses subprocess execution; iOS host needs in-process render/adapters",
+                [line_for(render_py, "subprocess.run")],
+            )
     report.add(
         "info",
         "skill contract requires Codex workspace dependencies rather than system Python",

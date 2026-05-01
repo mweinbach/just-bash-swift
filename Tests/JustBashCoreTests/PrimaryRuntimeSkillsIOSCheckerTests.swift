@@ -152,16 +152,21 @@ final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(documents["status"] as? String, "blocked")
+        XCTAssertEqual(documents["status"] as? String, "ready")
         XCTAssertContainsFinding(in: documents, containing: "skill manifest is complete")
         XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
         XCTAssertContainsFinding(in: documents, containing: "Documents Python dependency scan inspected all helper scripts")
         XCTAssertContainsFinding(in: documents, containing: "pure-Python lxml.etree compatibility")
         XCTAssertContainsFinding(in: documents, containing: "pure-Python python-docx compatibility")
+        XCTAssertContainsFinding(in: documents, containing: "pure-Python pdf2image compatibility")
         XCTAssertContainsFinding(in: documents, containing: "all detected Documents Python imports")
         XCTAssertContainsFinding(
             in: documents,
-            containing: "soffice/LibreOffice"
+            containing: "soffice/LibreOffice conversion command shape"
+        )
+        XCTAssertContainsFinding(
+            in: documents,
+            containing: "bounded in-process iOS adapter"
         )
 
         XCTAssertEqual(presentations["status"] as? String, "blocked")

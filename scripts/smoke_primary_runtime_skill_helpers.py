@@ -362,6 +362,45 @@ def write_minimal_docx(path: Path) -> None:
         zf.writestr("word/comments.xml", comments)
 
 
+def write_fake_soffice(path: Path) -> None:
+    write_text(
+        path,
+        """
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+args = sys.argv[1:]
+try:
+    outdir = Path(args[args.index("--outdir") + 1])
+    convert_to = args[args.index("--convert-to") + 1].split(":", 1)[0].lower()
+    input_path = Path(args[-1])
+except Exception as exc:
+    print(f"unsupported soffice command: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+outdir.mkdir(parents=True, exist_ok=True)
+out = outdir / f"{input_path.stem}.{convert_to}"
+if convert_to == "pdf":
+    out.write_text(
+        "%PDF-1.4\\n"
+        "% JUSTBASH_PAGE_SIZE 612 x 792 pts\\n"
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\\n"
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\\n"
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        "/Resources << >> /Contents 4 0 R >> endobj\\n"
+        "4 0 obj << /Length 0 >> stream\\n\\nendstream endobj\\n"
+        "trailer << /Root 1 0 R >>\\n%%EOF\\n",
+        encoding="latin1",
+    )
+else:
+    out.write_bytes(b"PK\\x03\\x04JustBash compatibility placeholder\\n")
+print(f"convert {input_path} -> {out}")
+""".lstrip(),
+    )
+    path.chmod(0o755)
+
+
 def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str, object]:
     input_docx = workdir / "documents-in.docx"
     protected_docx = workdir / "documents-protected.docx"
@@ -370,6 +409,10 @@ def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str
     table_docx = workdir / "documents-table.docx"
     patched_table_docx = workdir / "documents-table-patched.docx"
     table_csv = workdir / "documents-table.csv"
+    render_dir = workdir / "documents-render"
+    fake_bin = workdir / "bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    write_fake_soffice(fake_bin / "soffice")
     write_minimal_docx(input_docx)
 
     python_env = env.copy()
@@ -379,6 +422,7 @@ def smoke_documents_lxml_helpers(workdir: Path, env: dict[str, str]) -> dict[str
         if not existing_path
         else str(IOS_PYTHON_APP) + os.pathsep + existing_path
     )
+    python_env["PATH"] = str(fake_bin) + os.pathsep + python_env.get("PATH", "")
 
     protection = run_command(
         [
@@ -509,18 +553,43 @@ wb.save(out)
     if "w:hyperlink" not in patched_doc or "https://example.com" not in patched_rels:
         raise RuntimeError("docx_ooxml_patch did not create the expected external hyperlink")
 
+    render_docx = run_command(
+        [
+            sys.executable,
+            str(DOCUMENTS_ROOT / "render_docx.py"),
+            str(patched_table_docx),
+            "--output_dir",
+            str(render_dir),
+            "--width",
+            "800",
+            "--height",
+            "1000",
+        ],
+        cwd=workdir,
+        env=python_env,
+        label="documents render_docx bounded iOS path",
+    )
+    require_success(render_docx)
+    rendered_page = render_dir / "page-1.png"
+    if not rendered_page.exists() or rendered_page.stat().st_size <= 50:
+        raise RuntimeError(f"render_docx did not create a useful page PNG: {rendered_page}")
+    if rendered_page.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError("render_docx output is not a PNG")
+
     return {
         "result": protection,
         "secondResult": strip,
         "thirdResult": xlsx_to_docx,
         "fourthResult": docx_to_csv,
         "fifthResult": patch_docx,
+        "sixthResult": render_docx,
         "artifacts": {
             "protected": {"path": str(protected_docx), "bytes": protected_docx.stat().st_size},
             "stripped": {"path": str(stripped_docx), "bytes": stripped_docx.stat().st_size},
             "tableDocx": {"path": str(table_docx), "bytes": table_docx.stat().st_size},
             "patchedTableDocx": {"path": str(patched_table_docx), "bytes": patched_table_docx.stat().st_size},
             "tableCsv": {"path": str(table_csv), "bytes": table_csv.stat().st_size},
+            "renderedPage": {"path": str(rendered_page), "bytes": rendered_page.stat().st_size},
         },
     }
 
