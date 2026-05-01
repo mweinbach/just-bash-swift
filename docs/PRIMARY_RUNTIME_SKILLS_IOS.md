@@ -83,7 +83,10 @@ iOS blockers:
   `node:*` builtin aliases, and ESM compatibility, but it does not
   provide npm package resolution or native Node packages.
 - `@oai/artifact-tool` is not currently bundled as an iOS-compatible
-  JavaScriptCore addon module or Swift framework in this repository.
+  JavaScriptCore addon module or Swift framework in this repository. The local
+  Codex runtime cache has the Node package, but that cache is not part of the
+  iOS app bundle and includes bundled runtime assets such as `skia-canvas` and
+  `@oai/walnut` WASM that need an explicit iOS packaging and execution path.
 - Native rendering dependencies such as `sharp`/`skia-canvas` are not staged for
   iOS.
 
@@ -111,6 +114,8 @@ Required pieces found in the skill:
 iOS blockers:
 
 - The required artifact-tool package is not exposed as an iOS runtime module.
+  The local Codex runtime cache contains the Node package, but it is not bundled
+  into the app or adapted to the JavaScriptCore runtime.
 - Node module resolution is not available inside the current JavaScriptCore
   runtime.
 - The optional Python analysis stack includes packages that are not currently

@@ -21,6 +21,10 @@ from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE_ROOT = Path("/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime")
+DEFAULT_ARTIFACT_TOOL = (
+    Path("/Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime")
+    / "dependencies/node/node_modules/@oai/artifact-tool"
+)
 
 
 @dataclass
@@ -99,6 +103,17 @@ def js_import_specs(root: Path) -> set[str]:
         for esm, cjs in pattern.findall(text):
             specs.add(esm or cjs)
     return specs
+
+
+def artifact_tool_evidence() -> list[str]:
+    evidence = [str(DEFAULT_ARTIFACT_TOOL / "package.json")]
+    if (DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs").exists():
+        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "dist" / "artifact_tool.mjs"))
+    if (DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas").exists():
+        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "skia-canvas" / "package.json"))
+    if (DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm").exists():
+        evidence.append(str(DEFAULT_ARTIFACT_TOOL / "node_modules" / "@oai" / "walnut" / "wasm"))
+    return evidence
 
 
 def validate_plugin(report: SkillReport, plugin_name: str) -> Path | None:
@@ -225,8 +240,8 @@ def check_presentations(cache_root: Path) -> SkillReport:
     if "@oai/artifact-tool" in read_text(skill_md):
         report.add(
             "blocked",
-            "@oai/artifact-tool is required but this repo has no iOS JavaScriptCore/Swift artifact-tool runtime",
-            [line_for(skill_md, "@oai/artifact-tool")],
+            "@oai/artifact-tool is required; the cached Node package exists but is not bundled or adapted as an iOS JavaScriptCore/Swift runtime",
+            [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
         )
     if any("child_process" in spec for spec in specs) or "node:child_process" in specs:
         report.add(
@@ -249,8 +264,8 @@ def check_spreadsheets(cache_root: Path) -> SkillReport:
     if "@oai/artifact-tool" in text:
         report.add(
             "blocked",
-            "@oai/artifact-tool is required for workbook authoring/export but is not an iOS runtime module here",
-            [line_for(skill_md, "@oai/artifact-tool")],
+            "@oai/artifact-tool is required for workbook authoring/export; the cached Node package exists but is not bundled or adapted as an iOS JavaScriptCore/Swift runtime",
+            [line_for(skill_md, "@oai/artifact-tool"), *artifact_tool_evidence()],
         )
     optional_py = {"pandas", "numpy", "pypdf", "python-docx", "reportlab"}
     default_reqs = load_requirements(REPO_ROOT / "Apps/JustBashPhone/PythonApp/requirements-default.txt")
