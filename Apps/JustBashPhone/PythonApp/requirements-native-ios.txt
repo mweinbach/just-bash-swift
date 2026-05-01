@@ -1,0 +1,15 @@
+# Optional native iOS package set.
+#
+# These packages are not installed by generate_project.sh by default because
+# they need iOS-specific wheels per device/simulator architecture. Use
+# scripts/install_python_native_packages.sh to populate PythonApp/native.
+#
+# Current status:
+# - numpy has CPython 3.14 iOS wheels on BeeWare's secondary wheel index.
+# - pandas and scipy do not currently resolve for CPython 3.14 iPhoneOS via
+#   PyPI + BeeWare's secondary wheel index.
+numpy==2.3.5.post1
+
+# Keep probing these; do not enable until compatible iOS wheels exist.
+# pandas
+# scipy

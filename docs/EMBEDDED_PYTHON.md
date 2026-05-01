@@ -33,10 +33,14 @@ Default included examples:
 - compiled stdlib extensions such as `_sqlite3`, `_ssl`, `_socket`, `zlib`,
   `bz2`, `lzma`, `_csv`, `_json`, `math`, `unicodedata`, and `zoneinfo`
 - any app-local modules copied from `Apps/JustBashPhone/PythonApp`
+- the pinned pure-Python default package set in
+  `Apps/JustBashPhone/PythonApp/requirements-default.txt` when the Python
+  project is generated normally
 
 Not included by default:
 
-- third-party packages such as `requests`, `numpy`, `rich`, or `pydantic`
+- native-heavy packages such as `numpy`, `pandas`, `scipy`, `duckdb`, `pyarrow`,
+  `pillow`, or `lxml`
 - a supported runtime `pip install` flow on iPhone
 - transparent CPython access to JustBash's full in-memory virtual filesystem
 
@@ -74,6 +78,16 @@ Apps/JustBashPhone/generate_project.sh --with-python
 The generated project links `Python.xcframework`, points Swift at the
 SDK-specific Python headers, and stages the selected Python home into the app
 bundle.
+
+By default, `--with-python` also installs the pure-Python package set into:
+
+```text
+Apps/JustBashPhone/PythonApp/site-packages
+```
+
+That directory is gitignored and copied into the app bundle at build time.
+Set `JUSTBASH_PHONE_SKIP_PYTHON_PACKAGES=1` if you need to regenerate the Xcode
+project without refreshing packages.
 
 One important integration detail: the Python include/module-map path must be
 SDK-specific. Pointing both the device and simulator include directories at the
@@ -117,22 +131,81 @@ in-memory `/data`.
 
 ## Add Python Modules
 
-For pure-Python modules, vendor them into `Apps/JustBashPhone/PythonApp`:
+The default pure-Python package set is pinned in:
+
+```text
+Apps/JustBashPhone/PythonApp/requirements-default.txt
+```
+
+It currently includes:
+
+- HTTP/client helpers: `httpx`, `httpcore`, `requests`, `urllib3`, `certifi`,
+  `idna`, `charset-normalizer`, `anyio`, `h11`
+- CLI/config/runtime helpers: `click`, `rich`, `pygments`, `python-dotenv`,
+  `platformdirs`, `filelock`, `tenacity`, `packaging`, `typing-extensions`
+- data/text helpers: `python-dateutil`, `tomlkit`, `fastjsonschema`,
+  `jmespath`, `beautifulsoup4`, `html5lib`, `markdown-it-py`
+- Python-code helpers useful for local agents: `pyflakes`, `isort`, `rope`,
+  `jedi`, `parso`, `attrs`, `cattrs`
+
+Install or refresh the default set with:
+
+```bash
+./scripts/install_python_app_packages.sh
+```
+
+For additional pure-Python modules, add them to `requirements-default.txt` or
+install into `Apps/JustBashPhone/PythonApp/site-packages`:
 
 ```bash
 cd /Users/mweinbach/Projects/just-bash-swift
-python3 -m pip install --target Apps/JustBashPhone/PythonApp requests
+python3 -m pip install --target Apps/JustBashPhone/PythonApp/site-packages some-pure-python-package
 Apps/JustBashPhone/generate_project.sh --with-python
 ```
 
-The Python-linked build copies `Apps/JustBashPhone/PythonApp/.` into the app
-bundle's `app` resource directory, and `PythonSupport` inserts that directory at
-the front of `sys.path` before user code runs.
+The Python-linked build copies `Apps/JustBashPhone/PythonApp/.` into the app's
+`app` resource directory. `PythonSupport` inserts both the `app` directory and
+`app/site-packages` at the front of `sys.path` before user code runs.
+
+The embedded interpreter stays initialized for the lifetime of the app process.
+Each `py-exec` call gets fresh script globals and `sys.argv`, but the underlying
+CPython runtime is not finalized between commands. That keeps native extensions
+such as `numpy` usable across repeated imports.
 
 Packages with native extensions must be built for iOS and included at build
 time. On-device runtime installation of native wheels is not the supported path:
 the app has no compiler toolchain, native code must be signed with the app, and
 downloaded executable code is not the model we want for this host.
+
+## Native Package Status
+
+Use this probe to check whether native packages resolve for CPython 3.14 iOS
+device and simulator wheel tags:
+
+```bash
+./scripts/probe_python_ios_wheels.sh numpy pandas scipy
+```
+
+Current probe result:
+
+- `numpy==2.3.5.post1` resolves from BeeWare's secondary wheel index for
+  `ios_15_4_arm64_iphoneos`, `ios_15_4_arm64_iphonesimulator`, and
+  `ios_13_0_x86_64_iphonesimulator`.
+- `pandas` does not currently resolve for CPython 3.14 iOS using PyPI plus
+  BeeWare's secondary wheel index.
+- `scipy` does not currently resolve for CPython 3.14 iOS using PyPI plus
+  BeeWare's secondary wheel index.
+
+To install the optional native set, currently `numpy`, into architecture-specific
+staging directories:
+
+```bash
+./scripts/install_python_native_packages.sh
+```
+
+Those packages are staged under `Apps/JustBashPhone/PythonApp/native/` and are
+gitignored. The Xcode build copies only the matching device/simulator slice into
+`app/site-packages` and removes the other native slices from the app bundle.
 
 ## Verified Import Spike
 

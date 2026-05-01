@@ -5,3 +5,5 @@ DerivedData/
 .omx/
 /.build-codex
 Vendor/BeeWare/
+Apps/JustBashPhone/PythonApp/site-packages/
+Apps/JustBashPhone/PythonApp/native/

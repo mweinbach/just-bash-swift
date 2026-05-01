@@ -64,10 +64,13 @@ Included by default:
   `math`, `unicodedata`, and `zoneinfo`
 - app-local modules copied from `Apps/JustBashPhone/PythonApp` into the bundle's
   `app` resource directory
+- the pinned pure-Python package set in `PythonApp/requirements-default.txt`
+  when `./generate_project.sh --with-python` runs normally
 
 Not included by default:
 
-- third-party packages such as `requests`, `numpy`, `rich`, or `pydantic`
+- native-heavy packages such as `numpy`, `pandas`, `scipy`, `duckdb`, `pyarrow`,
+  `pillow`, or `lxml`
 - a supported runtime `pip install` workflow on iPhone
 - access from CPython to the full JustBash virtual filesystem
 
@@ -104,23 +107,42 @@ into the virtual filesystem. Use relative paths, `Path.cwd()`, or the
 
 ### Adding Python Modules
 
-For pure-Python dependencies, vendor them into `PythonApp` before generating or
-building the Python-linked project:
+For pure-Python dependencies, update `PythonApp/requirements-default.txt` and
+refresh the generated package directory:
 
 ```bash
 cd /Users/mweinbach/Projects/just-bash-swift
-python3 -m pip install --target Apps/JustBashPhone/PythonApp requests
+./scripts/install_python_app_packages.sh
 cd Apps/JustBashPhone
 ./generate_project.sh --with-python
 ```
 
 Anything in `Apps/JustBashPhone/PythonApp` is copied into the app bundle's
-`app` resource directory and added to `sys.path` before user code runs.
+`app` resource directory. `app` and `app/site-packages` are added to `sys.path`
+before user code runs.
+
+The app keeps the embedded CPython interpreter alive across `py-exec` calls.
+That still gives each command fresh script globals, but avoids repeatedly
+finalizing native extensions like `numpy`.
 
 Packages with native extensions are a build-time integration task. They need
 iOS-compatible extension binaries for the target slice, must be included in the
 signed app bundle, and may require extra Xcode build-script work. Installing
 native wheels on-device at runtime is not a supported iPhone path.
+
+Optional native package lane:
+
+```bash
+cd /Users/mweinbach/Projects/just-bash-swift
+./scripts/probe_python_ios_wheels.sh numpy pandas scipy
+./scripts/install_python_native_packages.sh
+cd Apps/JustBashPhone
+./generate_project.sh --with-python
+```
+
+Today, `numpy==2.3.5.post1` resolves for CPython 3.14 iOS through BeeWare's
+secondary wheel index. `pandas` and `scipy` do not resolve yet for this target
+set, so they stay documented/probed rather than bundled.
 
 Verified lane after installing BeeWare support:
 

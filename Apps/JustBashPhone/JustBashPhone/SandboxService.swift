@@ -67,9 +67,35 @@ actor SandboxService {
         let escapedPath = smokePath.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
         let code = """
+        import importlib.metadata
         import sys
         from pathlib import Path
-        Path('\(escapedPath)').write_text('python smoke ok\\n' + sys.version)
+
+        import bs4
+        import fastjsonschema
+        import httpx
+        import jedi
+        import rich
+        import tomlkit
+
+        lines = [
+            'python smoke ok',
+            sys.version,
+            'default packages import ok',
+            f'beautifulsoup4={importlib.metadata.version("beautifulsoup4")}',
+            f'fastjsonschema={importlib.metadata.version("fastjsonschema")}',
+            f'httpx={importlib.metadata.version("httpx")}',
+            f'jedi={importlib.metadata.version("jedi")}',
+            f'rich={importlib.metadata.version("rich")}',
+            f'tomlkit={importlib.metadata.version("tomlkit")}',
+        ]
+
+        try:
+            lines.append(f'numpy dist={importlib.metadata.version("numpy")}')
+        except Exception as exc:
+            lines.append(f'numpy dist unavailable: {type(exc).__name__}: {exc}')
+
+        Path('\(escapedPath)').write_text('\\n'.join(lines) + '\\n')
         """
 
         try? "before run\n".write(toFile: beforeRunPath, atomically: true, encoding: .utf8)
@@ -86,8 +112,27 @@ actor SandboxService {
         }
 
         let shellSmoke = await run("""
-        py-exec -c 'from pathlib import Path; Path("python-shell-smoke.txt").write_text("py-exec smoke ok\\n")'
+        py-exec - <<'PY'
+        from pathlib import Path
+        import httpx
+
+        lines = ["py-exec smoke ok", f"httpx={httpx.__version__}"]
+        try:
+            import numpy
+            lines.append(f"numpy={numpy.__version__}")
+        except Exception as exc:
+            lines.append(f"numpy unavailable: {type(exc).__name__}: {exc}")
+
+        Path("python-shell-smoke.txt").write_text("\\n".join(lines) + "\\n")
+        PY
         cat /workspace/python-shell-smoke.txt
+        py-exec - <<'PY'
+        try:
+            import numpy
+            print(f"numpy repeat={numpy.__version__}")
+        except Exception as exc:
+            print(f"numpy repeat unavailable: {type(exc).__name__}: {exc}")
+        PY
         """)
         let shellSmokePath = Self.workspaceDirectoryPath() + "/python-shell-smoke-result.txt"
         let shellSmokeOutput = """

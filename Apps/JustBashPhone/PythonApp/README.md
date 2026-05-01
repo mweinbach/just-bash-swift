@@ -4,11 +4,27 @@ Files in this directory are copied into the Python-linked iPhone app bundle at
 build time and added to `sys.path` before user code runs.
 
 Use it for pure-Python helper modules or vendored dependencies that should ship
-with the app. For example:
+with the app.
 
 ```bash
-python3 -m pip install --target Apps/JustBashPhone/PythonApp requests
+./scripts/install_python_app_packages.sh
 ```
 
-Native extension packages need iOS-compatible builds and must be bundled and
-signed at build time; runtime `pip install` is not the supported path on iPhone.
+That installs the pinned default package set from `requirements-default.txt` into
+`site-packages/`. `Apps/JustBashPhone/generate_project.sh --with-python` runs
+that installer automatically unless `JUSTBASH_PHONE_SKIP_PYTHON_PACKAGES=1` is
+set.
+
+Optional native iOS packages are handled separately because they need one wheel
+per device/simulator architecture:
+
+```bash
+./scripts/install_python_native_packages.sh
+```
+
+The native installer currently targets `numpy` because compatible CPython 3.14
+iOS wheels are available from BeeWare's secondary wheel index. `pandas` and
+`scipy` are tracked in `requirements-native-ios.txt`, but are intentionally left
+commented until compatible iOS wheels resolve.
+
+Runtime `pip install` is not the supported path on iPhone.

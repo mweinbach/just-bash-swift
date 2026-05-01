@@ -12,6 +12,8 @@ import Python
 enum PythonSupport {
     static var isAvailable: Bool { true }
 
+    private static let interpreterLock = NSLock()
+
     static func availabilitySummary() -> String {
         "BeeWare Python support is linked."
     }
@@ -25,6 +27,11 @@ enum PythonSupport {
     ) -> PythonExecResult {
         let pythonHome = pythonHomePath()
         let traceDir = workspacePath
+
+        interpreterLock.lock()
+        defer {
+            interpreterLock.unlock()
+        }
 
         try? FileManager.default.createDirectory(atPath: workspacePath, withIntermediateDirectories: true)
         let previousDirectory = FileManager.default.currentDirectoryPath
@@ -44,95 +51,8 @@ enum PythonSupport {
         setenv("LANG", "\(Locale.current.identifier).UTF-8", 1)
         writeTrace("after-lang", to: traceDir)
 
-        var preconfig = PyPreConfig()
-        var config = PyConfig()
-        PyPreConfig_InitIsolatedConfig(&preconfig)
-        PyConfig_InitIsolatedConfig(&config)
-        preconfig.utf8_mode = 1
-        preconfig.configure_locale = 1
-        config.use_system_logger = 1
-        config.buffered_stdio = 0
-        config.write_bytecode = 0
-        config.install_signal_handlers = 1
-        writeTrace("after-config-init", to: traceDir)
-
-        var status = Py_PreInitialize(&preconfig)
-        guard !statusHasException(status) else {
-            PyConfig_Clear(&config)
-            return failureResult(
-                error: PythonExecutionError.statusFailure("preinitialize", statusMessage(status))
-            )
-        }
-        writeTrace("after-preinitialize", to: traceDir)
-
-        guard let homeWide = Py_DecodeLocale(pythonHome, nil) else {
-            PyConfig_Clear(&config)
-            return failureResult(error: PythonExecutionError.decodeLocale("pythonHome"))
-        }
-        defer { PyMem_RawFree(homeWide) }
-
-        withUnsafeMutablePointer(to: &config) { configPtr in
-            withUnsafeMutablePointer(to: &configPtr.pointee.home) { homePtr in
-                status = PyConfig_SetString(configPtr, homePtr, homeWide)
-            }
-        }
-        guard !statusHasException(status) else {
-            PyConfig_Clear(&config)
-            return failureResult(
-                error: PythonExecutionError.statusFailure("set-home", statusMessage(status))
-            )
-        }
-        writeTrace("after-set-home", to: traceDir)
-
-        status = PyConfig_Read(&config)
-        guard !statusHasException(status) else {
-            PyConfig_Clear(&config)
-            return failureResult(
-                error: PythonExecutionError.statusFailure("read-config", statusMessage(status))
-            )
-        }
-        writeConfigSnapshot(config, to: traceDir)
-        writeTrace("after-config-read", to: traceDir)
-
-        let argv = ([scriptPath ?? scriptName] + arguments).map { strdup($0) }
-        defer {
-            for arg in argv {
-                free(arg)
-            }
-        }
-
-        status = argv.withUnsafeBufferPointer { buffer in
-            PyConfig_SetBytesArgv(&config, buffer.count, UnsafeMutablePointer(mutating: buffer.baseAddress))
-        }
-        guard !statusHasException(status) else {
-            PyConfig_Clear(&config)
-            return failureResult(
-                error: PythonExecutionError.statusFailure("set-argv", statusMessage(status))
-            )
-        }
-        writeTrace("after-argv", to: traceDir)
-
-        status = Py_InitializeFromConfig(&config)
-        guard !statusHasException(status) else {
-            PyConfig_Clear(&config)
-            return failureResult(
-                error: PythonExecutionError.statusFailure("initialize", statusMessage(status))
-            )
-        }
-        writeTrace("after-initialize", to: traceDir)
-        defer {
-            Py_Finalize()
-            PyConfig_Clear(&config)
-        }
-
-        let bootstrap = """
-        import sys
-        sys.path.insert(0, \(pythonStringLiteral(appPath())))
-        """
-        let bootstrapStatus = PyRun_SimpleString(bootstrap)
-        writeTrace("after-bootstrap-\(bootstrapStatus)", to: traceDir)
-        guard bootstrapStatus == 0 else {
-            return failureResult(error: PythonExecutionError.executionFailed(bootstrapStatus))
+        if let initializationError = initializeIfNeeded(pythonHome: pythonHome, traceDir: traceDir) {
+            return failureResult(error: initializationError)
         }
 
         let outputDirectory = workspacePath + "/.python-run"
@@ -148,9 +68,11 @@ enum PythonSupport {
         let wrappedCode = """
         import contextlib
         import io
+        import sys
         import traceback
         from pathlib import Path
 
+        sys.argv = \(pythonListLiteral([scriptPath ?? scriptName] + arguments))
         _stdout_buffer = io.StringIO()
         _stderr_buffer = io.StringIO()
         _status = 0
@@ -188,6 +110,98 @@ enum PythonSupport {
     private static func appPath() -> String {
         Bundle.main.path(forResource: "app", ofType: nil)
             ?? (Bundle.main.resourceURL?.path ?? NSTemporaryDirectory()) + "/app"
+    }
+
+    private static func initializeIfNeeded(pythonHome: String, traceDir: String) -> Error? {
+        guard Py_IsInitialized() == 0 else {
+            return nil
+        }
+
+        var preconfig = PyPreConfig()
+        var config = PyConfig()
+        PyPreConfig_InitIsolatedConfig(&preconfig)
+        PyConfig_InitIsolatedConfig(&config)
+        defer {
+            PyConfig_Clear(&config)
+        }
+
+        preconfig.utf8_mode = 1
+        preconfig.configure_locale = 1
+        config.use_system_logger = 1
+        config.buffered_stdio = 0
+        config.write_bytecode = 0
+        config.install_signal_handlers = 1
+        writeTrace("after-config-init", to: traceDir)
+
+        var status = Py_PreInitialize(&preconfig)
+        guard !statusHasException(status) else {
+            return PythonExecutionError.statusFailure("preinitialize", statusMessage(status))
+        }
+        writeTrace("after-preinitialize", to: traceDir)
+
+        guard let homeWide = Py_DecodeLocale(pythonHome, nil) else {
+            return PythonExecutionError.decodeLocale("pythonHome")
+        }
+        defer { PyMem_RawFree(homeWide) }
+
+        withUnsafeMutablePointer(to: &config) { configPtr in
+            withUnsafeMutablePointer(to: &configPtr.pointee.home) { homePtr in
+                status = PyConfig_SetString(configPtr, homePtr, homeWide)
+            }
+        }
+        guard !statusHasException(status) else {
+            return PythonExecutionError.statusFailure("set-home", statusMessage(status))
+        }
+        writeTrace("after-set-home", to: traceDir)
+
+        status = PyConfig_Read(&config)
+        guard !statusHasException(status) else {
+            return PythonExecutionError.statusFailure("read-config", statusMessage(status))
+        }
+        writeConfigSnapshot(config, to: traceDir)
+        writeTrace("after-config-read", to: traceDir)
+
+        let argv = [strdup("JustBashPhone")]
+        defer {
+            for arg in argv {
+                free(arg)
+            }
+        }
+
+        status = argv.withUnsafeBufferPointer { buffer in
+            PyConfig_SetBytesArgv(&config, buffer.count, UnsafeMutablePointer(mutating: buffer.baseAddress))
+        }
+        guard !statusHasException(status) else {
+            return PythonExecutionError.statusFailure("set-argv", statusMessage(status))
+        }
+        writeTrace("after-argv", to: traceDir)
+
+        status = Py_InitializeFromConfig(&config)
+        guard !statusHasException(status) else {
+            return PythonExecutionError.statusFailure("initialize", statusMessage(status))
+        }
+        writeTrace("after-initialize", to: traceDir)
+
+        let bootstrap = """
+        import sys
+        _justbash_app_path = \(pythonStringLiteral(appPath()))
+        _justbash_site_packages = _justbash_app_path + "/site-packages"
+        if _justbash_site_packages not in sys.path:
+            sys.path.insert(0, _justbash_site_packages)
+        if _justbash_app_path not in sys.path:
+            sys.path.insert(0, _justbash_app_path)
+        """
+        let bootstrapStatus = PyRun_SimpleString(bootstrap)
+        writeTrace("after-bootstrap-\(bootstrapStatus)", to: traceDir)
+        guard bootstrapStatus == 0 else {
+            return PythonExecutionError.executionFailed(bootstrapStatus)
+        }
+
+        return nil
+    }
+
+    private static func pythonListLiteral(_ values: [String]) -> String {
+        "[" + values.map(pythonStringLiteral).joined(separator: ", ") + "]"
     }
 
     private static func pythonStringLiteral(_ value: String) -> String {

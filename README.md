@@ -94,8 +94,9 @@ open JustBashPhone.xcodeproj
 
 See [Embedded Python](docs/EMBEDDED_PYTHON.md) for what the BeeWare build
 includes by default, how to vendor extra pure-Python modules into
-`Apps/JustBashPhone/PythonApp`, and the filesystem caveat for Python running
-beside the JustBash virtual filesystem.
+`Apps/JustBashPhone/PythonApp`, how to probe optional native iOS wheels such as
+`numpy`, and the filesystem caveat for Python running beside the JustBash
+virtual filesystem.
 
 Verified build lane:
 

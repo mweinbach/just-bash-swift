@@ -15,6 +15,9 @@ if [[ "${1:-}" == "--with-python" ]]; then
     echo "Install it first with ./scripts/install_beeware_python_support.sh" >&2
     exit 1
   fi
+  if [[ "${JUSTBASH_PHONE_SKIP_PYTHON_PACKAGES:-0}" != "1" ]]; then
+    "${ROOT_DIR}/scripts/install_python_app_packages.sh"
+  fi
   SPEC_FILE="project.python.yml"
 fi
 
