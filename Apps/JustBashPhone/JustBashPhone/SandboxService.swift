@@ -441,12 +441,66 @@ actor SandboxService {
       ]);
     }
 
+    function u16At(data, offset) {
+      return data[offset] | (data[offset + 1] << 8);
+    }
+
+    function u32At(data, offset) {
+      return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
+    }
+
+    function unzipStored(filesBlob) {
+      const data = bytes(filesBlob);
+      const files = {};
+      let offset = 0;
+      while (offset + 30 <= data.length) {
+        const signature = u32At(data, offset);
+        if (signature === 0x02014b50 || signature === 0x06054b50) break;
+        if (signature !== 0x04034b50) {
+          offset += 1;
+          continue;
+        }
+
+        const flags = u16At(data, offset + 6);
+        const method = u16At(data, offset + 8);
+        const compressedSize = u32At(data, offset + 18);
+        const nameLength = u16At(data, offset + 26);
+        const extraLength = u16At(data, offset + 28);
+        if (flags & 8) {
+          throw new Error("SpreadsheetFile.importXlsx supports stored ZIP entries without data descriptors on iOS");
+        }
+        if (method !== 0) {
+          throw new Error("SpreadsheetFile.importXlsx supports uncompressed XLSX files only on iOS");
+        }
+        const nameStart = offset + 30;
+        const dataStart = nameStart + nameLength + extraLength;
+        const name = Buffer.from(data.slice(nameStart, nameStart + nameLength)).toString("utf8");
+        files[name] = data.slice(dataStart, dataStart + compressedSize);
+        offset = dataStart + compressedSize;
+      }
+      return files;
+    }
+
     function xml(value) {
       return String(value == null ? "" : value)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+    }
+
+    function xmlDecode(value) {
+      return String(value == null ? "" : value)
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&");
+    }
+
+    function zipText(files, name) {
+      const data = files[name];
+      return data ? Buffer.from(data).toString("utf8") : "";
     }
 
     function colName(index) {
@@ -484,6 +538,65 @@ actor SandboxService {
         rows: Math.max(1, end.row - start.row + 1),
         cols: Math.max(1, end.col - start.col + 1)
       };
+    }
+
+    function parseSharedStrings(xmlText) {
+      const strings = [];
+      const matches = String(xmlText).match(/<si\b[\s\S]*?<\/si>/g) || [];
+      matches.forEach((entry) => {
+        const textParts = [];
+        const textMatches = entry.match(/<t\b[^>]*>[\s\S]*?<\/t>/g) || [];
+        textMatches.forEach((part) => {
+          textParts.push(xmlDecode(part.replace(/^<t\b[^>]*>/, "").replace(/<\/t>$/, "")));
+        });
+        strings.push(textParts.join(""));
+      });
+      return strings;
+    }
+
+    function parseWorkbookSheets(workbookXml, relsXml) {
+      const relTargets = {};
+      (String(relsXml).match(/<Relationship\b[^>]*\/>/g) || []).forEach((rel) => {
+        const id = (rel.match(/\bId="([^"]+)"/) || [])[1];
+        const target = (rel.match(/\bTarget="([^"]+)"/) || [])[1];
+        if (id && target) relTargets[id] = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+      });
+
+      const sheets = [];
+      (String(workbookXml).match(/<sheet\b[^>]*\/>/g) || []).forEach((sheet) => {
+        const name = xmlDecode((sheet.match(/\bname="([^"]+)"/) || [])[1] || `Sheet${sheets.length + 1}`);
+        const relId = (sheet.match(/\br:id="([^"]+)"/) || [])[1];
+        const target = relTargets[relId] || `xl/worksheets/sheet${sheets.length + 1}.xml`;
+        sheets.push({ name, target });
+      });
+      return sheets.length ? sheets : [{ name: "Sheet1", target: "xl/worksheets/sheet1.xml" }];
+    }
+
+    function parseWorksheetCells(sheet, xmlText, sharedStrings) {
+      const cellMatches = String(xmlText).match(/<c\b[\s\S]*?<\/c>/g) || [];
+      cellMatches.forEach((cellXml) => {
+        const ref = (cellXml.match(/\br="([^"]+)"/) || [])[1];
+        if (!ref) return;
+        const cell = parseCell(ref);
+        const type = (cellXml.match(/\bt="([^"]+)"/) || [])[1] || "";
+        const formulaMatch = cellXml.match(/<f\b[^>]*>([\s\S]*?)<\/f>/);
+        const valueMatch = cellXml.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);
+        const inlineMatch = cellXml.match(/<is\b[\s\S]*?<t\b[^>]*>([\s\S]*?)<\/t>[\s\S]*?<\/is>/);
+        const record = {};
+        if (formulaMatch) record.formula = "=" + xmlDecode(formulaMatch[1]);
+        if (type === "s" && valueMatch) {
+          record.value = sharedStrings[Number(valueMatch[1])] ?? "";
+        } else if (type === "b" && valueMatch) {
+          record.value = valueMatch[1] === "1";
+        } else if (inlineMatch) {
+          record.value = xmlDecode(inlineMatch[1]);
+        } else if (valueMatch) {
+          const raw = xmlDecode(valueMatch[1]);
+          const numeric = Number(raw);
+          record.value = Number.isNaN(numeric) ? raw : numeric;
+        }
+        sheet.cells[`${cell.row},${cell.col}`] = record;
+      });
     }
 
     function csvRows(text) {
@@ -1039,7 +1152,18 @@ actor SandboxService {
 
     export class SpreadsheetFile {
       static async importXlsx(blob) {
-        unsupportedArtifactToolFeature("SpreadsheetFile.importXlsx");
+        const files = unzipStored(blob instanceof FileBlob ? blob.data : blob);
+        const workbookXml = zipText(files, "xl/workbook.xml");
+        if (!workbookXml) throw new Error("SpreadsheetFile.importXlsx could not find xl/workbook.xml");
+        const workbook = Workbook.create();
+        workbook.worksheets.deleteAll();
+        const sharedStrings = parseSharedStrings(zipText(files, "xl/sharedStrings.xml"));
+        const sheets = parseWorkbookSheets(workbookXml, zipText(files, "xl/_rels/workbook.xml.rels"));
+        sheets.forEach((entry) => {
+          const sheet = workbook.worksheets.add(entry.name);
+          parseWorksheetCells(sheet, zipText(files, entry.target), sharedStrings);
+        });
+        return workbook;
       }
       static async exportXlsx(workbook) {
         const sheets = workbook.worksheets.items.length ? workbook.worksheets.items : [workbook.worksheets.add("Sheet1")];
@@ -1074,7 +1198,7 @@ actor SandboxService {
             )
 
             let artifactToolResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
+                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, PresentationFile } from "@oai/artifact-tool"; const wb = Workbook.create(); const ws = wb.worksheets.add("Smoke"); ws.getRange("A1:B2").values = [["runtime", "ios"], ["ok", true]]; await wb.fromCSV("name,value\nalpha,1", { sheetName: "ImportedData" }); const imported = wb.worksheets.getOrAdd("ImportedData"); const copied = imported.getRange("A1:B2").copyTo(ws.getRange("C1:D2"), "values"); ws.getCell(4, 0).writeValues([["trace"]]); ws.getRange("A1:D4").getRow(0).format.autofitColumns(); ws.getRange("A1:D4").getColumn(0).setNumberFormat("@"); ws.mergeCells("A6:B6"); ws.unmergeCells("A6:B6"); const chart = ws.charts.add("line", ws.getRange("A1:B2")); if (chart.type !== "line" || ws.charts.count !== 1) throw new Error("chart compatibility failed"); const table = ws.tables.add("A1:B2", true, "SmokeTable"); if (table.name !== "SmokeTable") throw new Error("table compatibility failed"); const spark = ws.getRange("E1:E2").sparklines.add("line", ws.getRange("B1:B2"), { color: "rgb(37,99,235)" }); if (spark.type !== "line") throw new Error("sparkline compatibility failed"); wb.comments.setSelf({ displayName: "ChatGPT" }); const thread = wb.comments.addThread({ cell: ws.getRange("A1") }, "Source: iOS smoke"); if (thread.comments[0].text !== "Source: iOS smoke") throw new Error("comment compatibility failed"); if (!wb.trace("Smoke!A1").ndjson) throw new Error("trace unavailable"); if (!copied.values[0][0]) throw new Error("copyTo failed"); const xlsx = await SpreadsheetFile.exportXlsx(wb); const roundTrip = await SpreadsheetFile.importXlsx(xlsx); if (roundTrip.worksheets.getItem("Smoke").getRange("A1").values[0][0] !== "runtime") throw new Error("xlsx import compatibility failed"); await xlsx.save("/tmp/primary-runtime-smoke.xlsx"); const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); const shape = slide.shapes.add({ position: { left: 40, top: 40, width: 400, height: 80 } }); shape.text = "iOS artifact-tool smoke"; shape.text.fontSize = 24; shape.text.color = "rgb(17,24,39)"; if (shape.text.fontSize !== 24) throw new Error("text frame not mutable"); const pptx = await PresentationFile.exportPptx(deck); await pptx.save("/tmp/primary-runtime-smoke.pptx"); console.log("available");'"#
             )
             let nodeModuleResult = await ctx.executeSubshell?(
                 #"js-exec -c 'try { require("node:fs"); console.log("available"); } catch (error) { console.log((error && error.code ? error.code : "ERROR") + ": " + error.message); process.exit(1); }'"#
@@ -1095,7 +1219,7 @@ actor SandboxService {
                 )
             }
             let unsupportedFullApiResult = await ctx.executeSubshell?(
-                #"js-exec -m -c 'import { Workbook, SpreadsheetFile, Presentation, FileBlob } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Workbook.render", () => Workbook.create().render({ sheetName: "Sheet1" })); await expectReject("SpreadsheetFile.importXlsx", () => SpreadsheetFile.importXlsx(new FileBlob(new Uint8Array(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))); await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
+                #"js-exec -m -c 'import { Workbook, Presentation } from "@oai/artifact-tool"; const failures = []; async function expectReject(label, fn) { try { await fn(); failures.push(label + " unexpectedly succeeded"); } catch (error) { console.log(label + ": " + (error && error.message ? error.message : error)); } } await expectReject("Workbook.render", () => Workbook.create().render({ sheetName: "Sheet1" })); await expectReject("Presentation.export(png)", () => { const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } }); const slide = deck.slides.add(); return deck.export({ slide, format: "png" }); }); if (failures.length) { console.error(failures.join("\n")); process.exit(1); }'"#
             )
 
             let report = Self.primaryRuntimeSkillReportJSON(
@@ -1157,8 +1281,8 @@ actor SandboxService {
             skill: "spreadsheets",
             fallback: [
                 "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
-                "full artifact-tool inspection/render/import behavior is not ported to iOS",
-                "full render/import APIs fail explicitly instead of returning fake visual verification",
+                "limited uncompressed .xlsx import/export is staged; full artifact-tool inspection/render/import behavior is not ported to iOS",
+                "render APIs fail explicitly instead of returning fake visual verification",
                 "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
                 "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
                 "missing optional spreadsheet Python modules: pandas, docx",
@@ -1228,7 +1352,7 @@ actor SandboxService {
               "status": "blocked",
               "blockers": [
                 "limited pure-JS @oai/artifact-tool/presentation-jsx compatibility is staged",
-                "full render/import APIs fail explicitly instead of returning fake visual verification",
+                "render APIs fail explicitly instead of returning fake visual verification",
                 "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                 "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
                 "presentation icon rendering requires sharp or skia-canvas native graphics packages"

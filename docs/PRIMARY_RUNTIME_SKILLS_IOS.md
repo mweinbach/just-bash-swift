@@ -154,7 +154,7 @@ iOS blockers:
 - The iPhone host exposes a limited pure-JS artifact-tool compatibility package
   for workbook creation, common structural spreadsheet helpers such as
   worksheet lookup/range copy/write methods, structural table/chart/comment/
-  sparkline objects, and basic `.xlsx` export smoke checks.
+  sparkline objects, and basic uncompressed `.xlsx` import/export smoke checks.
 - Sandboxed `node_modules` package resolution is available inside the current
   JavaScriptCore runtime, but only for package sources and assets that are
   actually staged into the app-visible filesystem.
@@ -162,9 +162,9 @@ iOS blockers:
   so the remaining blocker is not syntax loading; it is the unported
   full-fidelity artifact-tool runtime dependencies, especially `skia-canvas`
   native rendering and `@oai/walnut` WASM resources.
-- `Workbook.render(...)` and `SpreadsheetFile.importXlsx(...)` fail explicitly
-  in the iOS compatibility package; `.xlsx` export is only a basic authoring
-  smoke path.
+- `Workbook.render(...)` still fails explicitly in the iOS compatibility package.
+  `.xlsx` import/export is a bounded compatibility path for uncompressed OOXML,
+  not a full Excel inspection/render stack.
 - The skill's completion criteria require formulas to compute, formula-error
   scans to work, and `workbook.trace(...)` to return real dependency trees. The
   iOS compatibility package stores formulas structurally but does not evaluate

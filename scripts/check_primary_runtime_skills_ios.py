@@ -285,15 +285,31 @@ def check_artifact_tool_runtime(
             artifact_tool_compat_evidence(),
         )
 
-    if "unsupportedArtifactToolFeature" in sandbox_text:
+    if "unzipStored" in sandbox_text and "parseWorksheetCells" in sandbox_text:
+        report.add(
+            "ok",
+            "iOS artifact-tool compatibility can import uncompressed XLSX workbooks, including files produced by its own exportXlsx path",
+            [
+                line_for(sandbox_service, "unzipStored"),
+                line_for(sandbox_service, "parseWorksheetCells"),
+                line_for(sandbox_service, "static async importXlsx"),
+            ],
+        )
+    elif "SpreadsheetFile.importXlsx" in sandbox_text:
         report.add(
             "blocked",
-            "iOS artifact-tool compatibility explicitly rejects full render/import APIs required by these skills instead of returning fake visual verification",
+            "SpreadsheetFile.importXlsx is not implemented for the iOS artifact-tool compatibility package",
+            [line_for(sandbox_service, "SpreadsheetFile.importXlsx")],
+        )
+
+    if "unsupportedArtifactToolFeature(`Presentation.export" in sandbox_text or "unsupportedArtifactToolFeature(\"Workbook.render\")" in sandbox_text:
+        report.add(
+            "blocked",
+            "iOS artifact-tool compatibility explicitly rejects render APIs required by these skills instead of returning fake visual verification",
             [
                 line_for(sandbox_service, "unsupportedArtifactToolFeature"),
                 line_for(sandbox_service, "Presentation.export"),
                 line_for(sandbox_service, "Workbook.render"),
-                line_for(sandbox_service, "SpreadsheetFile.importXlsx"),
             ],
         )
 

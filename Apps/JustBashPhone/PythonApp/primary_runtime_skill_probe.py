@@ -80,7 +80,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "status": "blocked",
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool compatibility is staged by the iOS host",
-                    "full render/import APIs fail explicitly instead of returning fake visual verification",
+                    "render APIs fail explicitly instead of returning fake visual verification",
                     "full-fidelity rendering still depends on native/npm artifact-tool paths not ported to iOS",
                     "presentation helper scripts spawn host Python/Node subprocesses for contact sheets and reference slides",
                     "presentation icon rendering requires sharp or skia-canvas native graphics packages",
@@ -91,7 +91,7 @@ def build_report(workspace: str | None = None) -> dict[str, object]:
                 "python_modules": spreadsheet_module_statuses,
                 "blockers": [
                     "limited pure-JS @oai/artifact-tool workbook export plus common structural spreadsheet API compatibility, including table/chart/comment/sparkline stubs, is staged",
-                    "full artifact-tool inspection/render/import behavior is not ported to iOS",
+                    "limited uncompressed .xlsx import/export is staged; full artifact-tool inspection/render behavior is not ported to iOS",
                     "spreadsheet completion criteria require formula computation, formula-error scans, and real trace output; the iOS compatibility package only stores formulas structurally",
                     "spreadsheet chart and dashboard workflows require native Excel charts plus rendered visual verification; the iOS compatibility package does not export or render real charts",
                     (
