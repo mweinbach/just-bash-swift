@@ -114,18 +114,20 @@ struct RunCodexPromptIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let key = CodexPhoneSettings.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            return .result(value: "", dialog: "Add an OpenAI API key in Just Bash first.")
+        let selection: CodexPhoneSettings.ProviderSelection
+        do {
+            selection = try await CodexPhoneSettings.makeProvider(apiKeyFallback: key)
+        } catch {
+            return .result(value: "", dialog: "Sign in with ChatGPT or add an OpenAI API key in Just Bash first.")
         }
         let selectedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let provider = OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key))
         let configuration = AgentConfiguration(
             model: selectedModel?.isEmpty == false ? selectedModel! : CodexPhoneSettings.defaultModel,
             instructions: "You are Codex running fully on iOS inside Just Bash. Use JustBash-backed tools for workspace work.",
             approvalPolicy: .never,
             sandboxPolicy: .workspaceWrite
         )
-        let runtime = try await SandboxService.shared.makeCodexRuntime(modelProvider: provider, configuration: configuration)
+        let runtime = try await SandboxService.shared.makeCodexRuntime(modelProvider: selection.provider, configuration: configuration)
         let thread = try await runtime.createThread(title: "Shortcuts Codex")
         let response = try await runtime.sendMessage(threadID: thread.id, text: prompt)
         return .result(value: response, dialog: "Codex finished.")

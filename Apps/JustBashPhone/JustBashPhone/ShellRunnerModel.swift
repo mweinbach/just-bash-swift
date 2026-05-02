@@ -8,6 +8,57 @@ enum CodexPhoneSettings {
     static let defaultModel = "gpt-5.4"
     private static let keychainService = "com.mweinbach.JustBashPhone.codex"
     private static let keychainAccount = "openai-api-key"
+    private static let oauthKeychainService = "com.mweinbach.JustBashPhone.codex.oauth"
+    private static let oauthKeychainAccount = "chatgpt"
+
+    struct ProviderSelection {
+        let provider: any ModelProvider
+        let signature: String
+        let status: String
+        let usesAPIKey: Bool
+    }
+
+    static func makeOAuthStore() -> CodexKeychainAuthStore {
+        CodexKeychainAuthStore(service: oauthKeychainService, account: oauthKeychainAccount)
+    }
+
+    static func makeOAuthConfig() -> CodexChatGPTAuthConfig {
+        CodexChatGPTAuthConfig(codexHome: CodexDefaultLocations.codexHome)
+    }
+
+    static func loadChatGPTSession() async throws -> AuthSession? {
+        try await makeOAuthStore().loadSession()
+    }
+
+    static func clearChatGPTSession() async throws {
+        try await makeOAuthStore().clear()
+    }
+
+    static func makeProvider(apiKeyFallback: String) async throws -> ProviderSelection {
+        let store = makeOAuthStore()
+        let config = makeOAuthConfig()
+        if let session = try await store.loadSession(), session.mode == .chatGPT {
+            let auth = ChatGPTAuthProvider(session: session, codexStore: store, config: config)
+            let account = session.accountID ?? session.workspaceID ?? "chatgpt"
+            return ProviderSelection(
+                provider: OpenAIResponsesClient(auth: auth, options: .chatGPTCodexBackend),
+                signature: "chatgpt:\(account)",
+                status: "Using ChatGPT sign-in",
+                usesAPIKey: false
+            )
+        }
+
+        let key = apiKeyFallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw CodexCoreError.authError("Sign in with ChatGPT or add an OpenAI API key before starting Codex.")
+        }
+        return ProviderSelection(
+            provider: OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key)),
+            signature: "api:\(key.hashValue)",
+            status: "Using API key",
+            usesAPIKey: true
+        )
+    }
 
     static func loadAPIKey() -> String {
         var query = keychainBaseQuery()
@@ -204,14 +255,18 @@ final class ShellRunnerModel {
     var codexAPIKey = CodexPhoneSettings.loadAPIKey()
     var codexModel = CodexPhoneSettings.defaultModel
     var codexStatus = "Idle"
+    var codexAuthStatus = "Checking sign-in"
+    var codexOAuthUserCode = ""
+    var codexOAuthVerificationURL: URL?
     var codexTranscript: [CodexTranscriptItem] = []
     var codexStreamingText = ""
     var codexThreadID: String?
     var codexTurnID: String?
     var isCodexRunning = false
+    var isCodexOAuthRunning = false
 
     @ObservationIgnored private var codexRuntime: CodexRuntime?
-    @ObservationIgnored private var codexRuntimeAPIKey: String?
+    @ObservationIgnored private var codexRuntimeAuthSignature: String?
     @ObservationIgnored private var codexRuntimeModel: String?
 
     init() {
@@ -228,6 +283,7 @@ final class ShellRunnerModel {
         await SandboxService.shared.runPrimaryRuntimeSkillsSmokeIfRequested()
         pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
         pythonAvailable = await SandboxService.shared.isPythonAvailable()
+        await refreshCodexAuthStatus()
         await refreshFileSections()
     }
 
@@ -267,8 +323,79 @@ final class ShellRunnerModel {
         codexAPIKey = trimmed
         CodexPhoneSettings.saveAPIKey(trimmed)
         codexRuntime = nil
-        codexRuntimeAPIKey = nil
-        codexStatus = trimmed.isEmpty ? "API key missing" : "API key saved"
+        codexRuntimeAuthSignature = nil
+        codexAuthStatus = trimmed.isEmpty ? "API key cleared" : "API key saved"
+        codexStatus = codexAuthStatus
+    }
+
+    func signInCodexWithChatGPT() {
+        guard !isCodexOAuthRunning else { return }
+        isCodexOAuthRunning = true
+        codexAuthStatus = "Requesting ChatGPT sign-in"
+        codexOAuthUserCode = ""
+        codexOAuthVerificationURL = nil
+
+        Task {
+            do {
+                let store = CodexPhoneSettings.makeOAuthStore()
+                let client = CodexChatGPTAuthClient(config: CodexPhoneSettings.makeOAuthConfig(), store: store)
+                let deviceCode = try await client.requestDeviceCode()
+                await MainActor.run {
+                    codexOAuthUserCode = deviceCode.userCode
+                    codexOAuthVerificationURL = deviceCode.verificationURL
+                    codexAuthStatus = "Enter code \(deviceCode.userCode)"
+                }
+                let session = try await client.completeDeviceCodeLogin(deviceCode)
+                await MainActor.run {
+                    codexOAuthUserCode = ""
+                    codexOAuthVerificationURL = nil
+                    codexRuntime = nil
+                    codexRuntimeAuthSignature = nil
+                    codexAuthStatus = "Signed in with ChatGPT\(session.accountID.map { " (\($0))" } ?? "")"
+                    isCodexOAuthRunning = false
+                }
+            } catch {
+                await MainActor.run {
+                    codexTranscript.append(CodexTranscriptItem(role: .error, text: String(describing: error)))
+                    codexAuthStatus = "ChatGPT sign-in failed"
+                    isCodexOAuthRunning = false
+                }
+            }
+        }
+    }
+
+    func signOutCodexChatGPT() {
+        Task {
+            do {
+                try await CodexPhoneSettings.clearChatGPTSession()
+                await MainActor.run {
+                    codexRuntime = nil
+                    codexRuntimeAuthSignature = nil
+                    codexOAuthUserCode = ""
+                    codexOAuthVerificationURL = nil
+                    codexAuthStatus = codexAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Signed out" : "Using API key"
+                }
+            } catch {
+                await MainActor.run {
+                    codexTranscript.append(CodexTranscriptItem(role: .error, text: String(describing: error)))
+                    codexAuthStatus = "Sign out failed"
+                }
+            }
+        }
+    }
+
+    private func refreshCodexAuthStatus() async {
+        do {
+            if let session = try await CodexPhoneSettings.loadChatGPTSession(), session.mode == .chatGPT {
+                codexAuthStatus = "Signed in with ChatGPT\(session.accountID.map { " (\($0))" } ?? "")"
+            } else if !codexAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                codexAuthStatus = "Using API key"
+            } else {
+                codexAuthStatus = "Not signed in"
+            }
+        } catch {
+            codexAuthStatus = "Could not read saved sign-in"
+        }
     }
 
     func sendCodexPrompt() {
@@ -351,24 +478,24 @@ final class ShellRunnerModel {
 
     private func makeCodexRuntime() async throws -> CodexRuntime {
         let key = codexAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            throw CodexCoreError.authError("Add an OpenAI API key before starting Codex.")
-        }
-        if let codexRuntime, codexRuntimeAPIKey == key, codexRuntimeModel == codexModel {
+        let selection = try await CodexPhoneSettings.makeProvider(apiKeyFallback: key)
+        if let codexRuntime, codexRuntimeAuthSignature == selection.signature, codexRuntimeModel == codexModel {
             return codexRuntime
         }
-        CodexPhoneSettings.saveAPIKey(key)
-        let provider = OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key))
+        if selection.usesAPIKey {
+            CodexPhoneSettings.saveAPIKey(key)
+        }
         let configuration = AgentConfiguration(
             model: codexModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? CodexPhoneSettings.defaultModel : codexModel,
             instructions: "You are Codex running fully on iOS inside Just Bash. Use the JustBash-backed shell and file tools for workspace work. Use primary-runtime-skills-check before document, presentation, or spreadsheet artifact work.",
             approvalPolicy: .never,
             sandboxPolicy: .workspaceWrite
         )
-        let runtime = try await SandboxService.shared.makeCodexRuntime(modelProvider: provider, configuration: configuration)
+        let runtime = try await SandboxService.shared.makeCodexRuntime(modelProvider: selection.provider, configuration: configuration)
         codexRuntime = runtime
-        codexRuntimeAPIKey = key
+        codexRuntimeAuthSignature = selection.signature
         codexRuntimeModel = configuration.model
+        codexAuthStatus = selection.status
         return runtime
     }
 

@@ -7,6 +7,39 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("Codex") {
+                    Text(model.codexAuthStatus)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(model.isCodexOAuthRunning ? .blue : .secondary)
+
+                    HStack {
+                        Button {
+                            model.signInCodexWithChatGPT()
+                        } label: {
+                            Label(model.isCodexOAuthRunning ? "Signing In" : "ChatGPT", systemImage: "person.crop.circle.badge.checkmark")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isCodexOAuthRunning)
+
+                        Button(role: .destructive) {
+                            model.signOutCodexChatGPT()
+                        } label: {
+                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if let url = model.codexOAuthVerificationURL {
+                        Link(destination: url) {
+                            Label("Open Sign In", systemImage: "safari")
+                        }
+                    }
+
+                    if !model.codexOAuthUserCode.isEmpty {
+                        Text(model.codexOAuthUserCode)
+                            .font(.title3.monospaced().bold())
+                            .textSelection(.enabled)
+                    }
+
                     SecureField("OpenAI API key", text: $model.codexAPIKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -18,7 +51,7 @@ struct ContentView: View {
                     Button {
                         model.saveCodexAPIKey()
                     } label: {
-                        Label("Save Key", systemImage: "key")
+                        Label("Save API Key", systemImage: "key")
                     }
                     .buttonStyle(.bordered)
 
