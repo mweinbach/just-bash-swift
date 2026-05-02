@@ -2,6 +2,8 @@
 .swiftpm/
 DerivedData/
 .DS_Store
+__pycache__/
+*.pyc
 .omx/
 /.build-codex
 Vendor/BeeWare/

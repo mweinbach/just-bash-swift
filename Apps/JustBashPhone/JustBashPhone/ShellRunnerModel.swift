@@ -13,6 +13,7 @@ enum CodexPhoneSettings {
 
     struct ProviderSelection {
         let provider: any ModelProvider
+        let responsesClient: OpenAIResponsesClient?
         let signature: String
         let status: String
         let usesAPIKey: Bool
@@ -39,9 +40,11 @@ enum CodexPhoneSettings {
         let config = makeOAuthConfig()
         if let session = try await store.loadSession(), session.mode == .chatGPT {
             let auth = ChatGPTAuthProvider(session: session, codexStore: store, config: config)
+            let client = OpenAIResponsesClient(auth: auth, options: .chatGPTCodexBackend)
             let account = session.accountID ?? session.workspaceID ?? "chatgpt"
             return ProviderSelection(
-                provider: OpenAIResponsesClient(auth: auth, options: .chatGPTCodexBackend),
+                provider: client,
+                responsesClient: client,
                 signature: "chatgpt:\(account)",
                 status: "Using ChatGPT sign-in",
                 usesAPIKey: false
@@ -52,8 +55,10 @@ enum CodexPhoneSettings {
         guard !key.isEmpty else {
             throw CodexCoreError.authError("Sign in with ChatGPT or add an OpenAI API key before starting Codex.")
         }
+        let client = OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key))
         return ProviderSelection(
-            provider: OpenAIResponsesClient(auth: APIKeyAuthProvider(apiKey: key)),
+            provider: client,
+            responsesClient: client,
             signature: "api:\(key.hashValue)",
             status: "Using API key",
             usesAPIKey: true
@@ -260,10 +265,13 @@ final class ShellRunnerModel {
     var codexOAuthVerificationURL: URL?
     var codexTranscript: [CodexTranscriptItem] = []
     var codexStreamingText = ""
+    var codexBackgroundJobs: [CodexBackgroundJob] = []
     var codexThreadID: String?
     var codexTurnID: String?
     var isCodexRunning = false
     var isCodexOAuthRunning = false
+    var isCodexBackgroundQueueing = false
+    var isCodexBackgroundRefreshing = false
 
     @ObservationIgnored private var codexRuntime: CodexRuntime?
     @ObservationIgnored private var codexRuntimeAuthSignature: String?
@@ -284,6 +292,7 @@ final class ShellRunnerModel {
         pythonStatus = await SandboxService.shared.pythonAvailabilitySummary()
         pythonAvailable = await SandboxService.shared.isPythonAvailable()
         await refreshCodexAuthStatus()
+        await refreshCodexBackgroundJobs()
         await refreshFileSections()
     }
 
@@ -472,6 +481,78 @@ final class ShellRunnerModel {
                 codexStatus = "Interrupted"
                 isCodexRunning = false
                 codexTurnID = nil
+            }
+        }
+    }
+
+    func queueCodexBackgroundPrompt() {
+        let prompt = codexPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !isCodexBackgroundQueueing else { return }
+        isCodexBackgroundQueueing = true
+        codexStatus = "Queueing background job"
+        Task {
+            do {
+                let job = try await CodexBackgroundQueue.shared.enqueue(
+                    prompt: prompt,
+                    model: codexModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                await MainActor.run {
+                    codexTranscript.append(CodexTranscriptItem(role: .user, text: prompt))
+                    codexTranscript.append(CodexTranscriptItem(role: .event, text: "Queued background job \(job.displayID)"))
+                    isCodexBackgroundQueueing = false
+                    codexStatus = "Background queued"
+                }
+                await refreshCodexBackgroundJobs()
+            } catch {
+                await MainActor.run {
+                    codexTranscript.append(CodexTranscriptItem(role: .error, text: String(describing: error)))
+                    isCodexBackgroundQueueing = false
+                    codexStatus = "Background queue failed"
+                }
+            }
+        }
+    }
+
+    func refreshCodexBackgroundJobsButton() {
+        Task {
+            await refreshCodexBackgroundJobs()
+        }
+    }
+
+    func cancelCodexBackgroundJob(_ job: CodexBackgroundJob) {
+        Task {
+            do {
+                _ = try await CodexBackgroundQueue.shared.cancelJob(idPrefix: job.id)
+                await refreshCodexBackgroundJobs()
+            } catch {
+                await MainActor.run {
+                    codexTranscript.append(CodexTranscriptItem(role: .error, text: String(describing: error)))
+                }
+            }
+        }
+    }
+
+    private func refreshCodexBackgroundJobs() async {
+        await MainActor.run {
+            isCodexBackgroundRefreshing = true
+        }
+        do {
+            let jobs = try await CodexBackgroundQueue.shared.refreshPendingJobs()
+            await MainActor.run {
+                codexBackgroundJobs = jobs
+                isCodexBackgroundRefreshing = false
+            }
+        } catch {
+            do {
+                let jobs = try await CodexBackgroundQueue.shared.list()
+                await MainActor.run {
+                    codexBackgroundJobs = jobs
+                    isCodexBackgroundRefreshing = false
+                }
+            } catch {
+                await MainActor.run {
+                    isCodexBackgroundRefreshing = false
+                }
             }
         }
     }

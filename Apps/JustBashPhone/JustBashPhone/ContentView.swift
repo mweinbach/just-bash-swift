@@ -77,9 +77,58 @@ struct ContentView: View {
                         .disabled(!model.isCodexRunning)
                     }
 
+                    HStack {
+                        Button {
+                            model.queueCodexBackgroundPrompt()
+                        } label: {
+                            Label(model.isCodexBackgroundQueueing ? "Queueing" : "Background", systemImage: "clock.badge.checkmark")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.codexPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isCodexBackgroundQueueing)
+
+                        Button {
+                            model.refreshCodexBackgroundJobsButton()
+                        } label: {
+                            Label(model.isCodexBackgroundRefreshing ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isCodexBackgroundRefreshing)
+                    }
+
                     Text(model.codexStatus)
                         .font(.footnote.monospaced())
                         .foregroundStyle(model.isCodexRunning ? .blue : .secondary)
+
+                    if !model.codexBackgroundJobs.isEmpty {
+                        ForEach(model.codexBackgroundJobs) { job in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(job.displayID)
+                                        .font(.caption.monospaced().weight(.semibold))
+                                    Spacer()
+                                    Text(job.status.rawValue)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(job.status == .failed ? .red : .secondary)
+                                }
+                                Text(job.prompt)
+                                    .font(.footnote)
+                                    .lineLimit(2)
+                                if !job.outputText.isEmpty {
+                                    Text(job.outputText)
+                                        .font(.footnote.monospaced())
+                                        .lineLimit(4)
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    model.cancelCodexBackgroundJob(job)
+                                } label: {
+                                    Label("Cancel", systemImage: "xmark.circle")
+                                }
+                                .disabled(job.status == .completed || job.status == .failed || job.status == .cancelled)
+                            }
+                        }
+                    }
 
                     if model.codexTranscript.isEmpty && model.codexStreamingText.isEmpty {
                         Text("Codex output will appear here.")

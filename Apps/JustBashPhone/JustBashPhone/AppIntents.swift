@@ -134,6 +134,56 @@ struct RunCodexPromptIntent: AppIntent {
     }
 }
 
+struct QueueBackgroundCodexPromptIntent: AppIntent {
+    static var title: LocalizedStringResource { "Queue Background Codex Prompt" }
+    static var description: IntentDescription {
+        IntentDescription("Queue a Codex prompt as a durable background response.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    @Parameter(
+        title: "Prompt",
+        requestValueDialog: IntentDialog("What should Codex process in the background?")
+    )
+    var prompt: String
+
+    @Parameter(title: "Model")
+    var model: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Queue background Codex prompt")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        do {
+            let job = try await CodexBackgroundQueue.shared.enqueue(prompt: prompt, model: model)
+            return .result(value: job.displayID, dialog: "Queued background job \(job.displayID).")
+        } catch {
+            return .result(value: "", dialog: "Could not queue the background job.")
+        }
+    }
+}
+
+struct RefreshBackgroundCodexJobsIntent: AppIntent {
+    static var title: LocalizedStringResource { "Refresh Background Codex Jobs" }
+    static var description: IntentDescription {
+        IntentDescription("Refresh queued Codex background responses.")
+    }
+    static let supportedModes: IntentModes = [.background]
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Refresh background Codex jobs")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let jobs = try await CodexBackgroundQueue.shared.refreshPendingJobs()
+        let summary = jobs.isEmpty
+            ? "No background Codex jobs."
+            : jobs.map { "[\($0.displayID)] \($0.status.rawValue) \($0.responseStatus ?? "")" }.joined(separator: "\n")
+        return .result(value: summary, dialog: "Refreshed background Codex jobs.")
+    }
+}
+
 struct ReadWorkspaceFileIntent: AppIntent {
     static var title: LocalizedStringResource { "Read Workspace File" }
     static var description: IntentDescription {
@@ -238,6 +288,24 @@ struct JustBashShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Run Codex",
             systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: QueueBackgroundCodexPromptIntent(),
+            phrases: [
+                "Queue Codex in \(.applicationName)",
+                "Run Codex in the background with \(.applicationName)"
+            ],
+            shortTitle: "Queue Codex",
+            systemImageName: "clock.badge.checkmark"
+        )
+        AppShortcut(
+            intent: RefreshBackgroundCodexJobsIntent(),
+            phrases: [
+                "Refresh Codex jobs in \(.applicationName)",
+                "Check Codex background jobs with \(.applicationName)"
+            ],
+            shortTitle: "Refresh Jobs",
+            systemImageName: "arrow.clockwise"
         )
         AppShortcut(
             intent: ReadWorkspaceFileIntent(),
