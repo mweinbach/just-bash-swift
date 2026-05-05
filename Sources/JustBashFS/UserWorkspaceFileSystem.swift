@@ -9,7 +9,7 @@ import Foundation
 /// - `~/Desktop`, `~/Documents`, `~/Downloads`, `~/Movies`, `~/Music`,
 ///   `~/Pictures`, `~/Public`, `~/Library`, and `~/.Trash`
 /// - `/Applications`, `/Library`, `/System`, `/Volumes`, `/tmp`, `/private/tmp`,
-///   `/var/tmp`, `/bin`, `/usr/bin`
+///   `/var/tmp`, `/bin`, `/usr/bin`, `/dev`, and `/proc/self/fd`
 ///
 /// Host apps can use `importItem` and `exportItem` for document-picker style
 /// flows while shell commands use the same files through normal paths.
@@ -57,6 +57,10 @@ public final class UserWorkspaceFileSystem: @unchecked Sendable {
             "/bin",
             "/usr",
             "/usr/bin",
+            "/dev",
+            "/proc",
+            "/proc/self",
+            "/proc/self/fd",
             "/tmp",
             "/private",
             "/private/tmp",
@@ -181,6 +185,12 @@ public final class UserWorkspaceFileSystem: @unchecked Sendable {
             try backend.createDirectory(path: "/workspace", relativeTo: "/", recursive: true)
         }
         try backend.writeFile("Swift Virtual Kernel 1.0\n", to: "/System/version.txt")
+        try backend.writeFile("", to: "/dev/null")
+        try backend.writeFile("", to: "/dev/stdin")
+        try backend.writeFile("", to: "/dev/stdout")
+        try backend.writeFile("", to: "/dev/stderr")
+        try backend.writeFile("Swift Virtual CPU\n", to: "/proc/cpuinfo")
+        try backend.writeFile("MemTotal: 1048576 kB\nMemFree: 524288 kB\n", to: "/proc/meminfo")
         try backend.writeFile("", to: "\(homePath)/.bash_history")
     }
 }

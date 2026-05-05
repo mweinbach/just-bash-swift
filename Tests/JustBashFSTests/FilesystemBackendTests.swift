@@ -218,6 +218,9 @@ final class UserWorkspaceFileSystemTests: XCTestCase {
         XCTAssertTrue(fs.isDirectory(path: "/Users/coder/Downloads", relativeTo: "/"))
         XCTAssertTrue(fs.isDirectory(path: "/Users/coder/Desktop", relativeTo: "/"))
         XCTAssertTrue(fs.isDirectory(path: "/Applications", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/dev", relativeTo: "/"))
+        XCTAssertTrue(fs.isDirectory(path: "/proc/self/fd", relativeTo: "/"))
+        XCTAssertTrue(fs.fileExists(path: "/dev/null", relativeTo: "/"))
         XCTAssertTrue(fs.isDirectory(path: "/workspace", relativeTo: "/"))
     }
 
@@ -253,6 +256,17 @@ final class UserWorkspaceFileSystemTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains("/Users/coder/Documents"))
         XCTAssertTrue(result.stdout.contains("hello"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("Users/coder/Desktop/a.txt").path))
+    }
+
+    func testBashCodingAgentWorkspaceSupportsDevNullRedirection() async throws {
+        let options = try BashOptions.codingAgentWorkspace(rootURL: tempDir)
+        let bash = Bash(options: options)
+
+        let result = await bash.exec("find /private/var/mobile/Containers/Data/Application -path '*documents/SKILL.md' 2>/dev/null | head -20")
+
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertFalse(result.stderr.contains("/dev"))
     }
 }
 
