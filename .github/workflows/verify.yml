@@ -1,0 +1,25 @@
+name: Verify package and mobile runtime
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  macos:
+    # Public arm64 runner: https://github.blog/changelog/2026-07-16-xcode-27-runner-image-now-in-public-preview/
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Test shell, JavaScript artifacts, and pinned compatibility checks
+        run: swift test
+      - name: Verify Node artifact fixtures and Office archive structure
+        run: python3 scripts/smoke_primary_runtime_skill_helpers.py --json
+      - name: Compile iOS simulator libraries
+        run: |
+          SDK_PATH="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          swift build --target JustBash --triple arm64-apple-ios18.0-simulator --sdk "$SDK_PATH"
+          swift build --target JustBashJavaScript --triple arm64-apple-ios18.0-simulator --sdk "$SDK_PATH"

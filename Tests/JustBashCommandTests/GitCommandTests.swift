@@ -6,7 +6,7 @@ import XCTest
 @testable import JustBash
 
 final class GitCommandTests: XCTestCase {
-    private func makeGitBash(env: [String: String] = [:], cwd: String = "/workspace") -> Bash {
+    private func makeGitBash(env: [String: String] = [:], cwd: String = "/workspace", allowedURLPrefixes: [String] = []) -> Bash {
         Bash(options: .init(
             env: [
                 "GIT_AUTHOR_NAME": "Just Bash",
@@ -14,7 +14,8 @@ final class GitCommandTests: XCTestCase {
                 "GIT_COMMITTER_NAME": "Just Bash",
                 "GIT_COMMITTER_EMAIL": "just-bash@example.com",
             ].merging(env, uniquingKeysWith: { _, new in new }),
-            cwd: cwd
+            cwd: cwd,
+            allowedURLPrefixes: allowedURLPrefixes
         ))
     }
 
@@ -147,7 +148,7 @@ final class GitCommandTests: XCTestCase {
         let bash = makeGitBash(env: [
             "HOME": "/home/tester",
             "GIT_TERMINAL_PROMPT": "0",
-        ])
+        ], allowedURLPrefixes: ["https://api.github.com/"])
         let push = await bash.exec("""
         mkdir -p /home/tester /workspace
         printf 'https://octocat:ghp_example@github.com\\n' > /home/tester/.git-credentials
@@ -163,6 +164,31 @@ final class GitCommandTests: XCTestCase {
         XCTAssertTrue(push.stdout.contains("To https://github.com/octocat/Hello-World.git"), push.stdout)
         XCTAssertEqual(MockGitHubURLProtocol.seen.map(\.0), ["GET", "GET", "POST", "POST", "PATCH"])
         XCTAssertTrue(MockGitHubURLProtocol.seen.allSatisfy { $0.1.hasPrefix("/repos/octocat/Hello-World") })
+    }
+
+    func testGitRemoteOperationsHonorDefaultAndPerExecutionNetworkDenial() async {
+        MockGitHubURLProtocol.reset()
+        _ = URLProtocol.registerClass(MockGitHubURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(MockGitHubURLProtocol.self)
+            MockGitHubURLProtocol.reset()
+        }
+        MockGitHubURLProtocol.handler = { request in
+            MockGitHubURLProtocol.seen.append((request.httpMethod ?? "GET", request.url?.path ?? "", nil))
+            return MockGitHubURLProtocol.response(status: 403, json: #"{"message":"should not reach transport"}"#)
+        }
+        for prefixes in [[], ["https://"], ["https://unrelated.invalid/"]] {
+            let bash = makeGitBash(allowedURLPrefixes: prefixes)
+            let setup = await bash.exec("mkdir -p /workspace; git init; echo content > note.txt; git add note.txt; git commit -m initial")
+            XCTAssertEqual(setup.exitCode, 0, setup.stderr)
+            let options = ExecOptions(allowNetwork: prefixes == ["https://"] ? false : nil)
+            for command in ["git ls-remote https://github.com/octocat/Hello-World.git", "git clone https://github.com/octocat/Hello-World.git cloned", "git push https://github.com/octocat/Hello-World.git HEAD:refs/heads/master"] {
+                let result = await bash.exec(command, options: options)
+                XCTAssertNotEqual(result.exitCode, 0)
+                XCTAssertTrue(result.stderr.contains("not in allow-list"), result.stderr)
+            }
+        }
+        XCTAssertTrue(MockGitHubURLProtocol.seen.isEmpty)
     }
 }
 

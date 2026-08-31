@@ -45,6 +45,10 @@ public actor JSCEngine {
         scriptPath: String?,
         isModule: Bool
     ) async -> ExecResult {
+        if options.executionPolicy == .requirePreemptible {
+            return ExecResult.failure("js-exec: this JavaScriptCore backend cannot enforce a hard deadline; a preemptible worker runtime is required", exitCode: 2)
+        }
+        if Task.isCancelled { return ExecResult.failure("js-exec: cancelled", exitCode: 130) }
         if depth > 0 {
             return ExecResult.failure("js-exec: nested invocation rejected (re-entrance from inside js-exec is not supported)", exitCode: 2)
         }
@@ -116,6 +120,10 @@ public actor JSCEngine {
         }
 
         context.evaluateScript(wrappedSource)
+        if Task.isCancelled { return ExecResult.failure("js-exec: cancelled", exitCode: 130) }
+        if Date() >= pollDeadline {
+            return finalize(capture: capture, exception: "js-exec: script exceeded its cooperative \(deadlineMs)ms deadline", defaultExit: 124)
+        }
         // process.exit takes precedence over the synthetic __jb_exit exception
         // it raises to short-circuit the rest of the script.
         if executionContext.exitRequested {
@@ -128,6 +136,7 @@ public actor JSCEngine {
         // Drain microtasks for module mode (or any pending promise like fetch).
         var timedOut = false
         while (!moduleState.resolved || executionContext.pendingTasks > 0) && !timedOut {
+            if Task.isCancelled { return ExecResult.failure("js-exec: cancelled", exitCode: 130) }
             if Date() >= pollDeadline { timedOut = true; break }
             try? await Task.sleep(nanoseconds: 1_000_000)
         }

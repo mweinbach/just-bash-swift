@@ -10,5 +10,6 @@ func installBridges(into context: JSContext, execution: JSCExecutionContext) {
     installFSBridge(into: context, execution: execution)
     installFetchBridge(into: context, execution: execution)
     installChildProcessBridge(into: context, execution: execution)
+    installArtifactPreviewBridge(into: context)
     installRequireResolver(into: context, execution: execution)
 }

@@ -103,6 +103,7 @@ func unzip() -> AnyBashCommand {
         var test = false
         var quiet = false
         var overwrite = false
+        var printContents = false
         var outputDir: String?
         var zipFile: String?
         var filePatterns: [String] = []
@@ -119,6 +120,8 @@ func unzip() -> AnyBashCommand {
                 quiet = true
             case "-o", "--overwrite":
                 overwrite = true
+            case "-p":
+                printContents = true
             case "-d", "--directory":
                 index += 1
                 if index < args.count {
@@ -130,6 +133,7 @@ func unzip() -> AnyBashCommand {
                   -l, --list         list contents
                   -t, --test        test archive integrity
                   -o, --overwrite    overwrite existing files
+                  -p                 write selected file contents to stdout
                   -d, --directory    extract to directory
                   -q, --quiet       quiet operation
                   -h, --help         show help
@@ -153,6 +157,17 @@ func unzip() -> AnyBashCommand {
         do {
             let zipData = try ctx.fileSystem.readFile(path: zipPath, relativeTo: ctx.cwd)
             let entries = try parseZipArchive(data: zipData)
+            guard entries.count <= 10_000,
+                  entries.allSatisfy({ $0.uncompressedSize <= 128 * 1024 * 1024 }),
+                  entries.reduce(0, { $0 + $1.uncompressedSize }) <= 128 * 1024 * 1024 else {
+                return ExecResult.failure("unzip: archive exceeds extraction budget")
+            }
+            for entry in entries {
+                guard !entry.name.hasPrefix("/"), !entry.name.contains("\\"),
+                      !entry.name.split(separator: "/").contains("..") else {
+                    return ExecResult.failure("unzip: unsafe archive path: \(entry.name)")
+                }
+            }
             
             if list {
                 var lines: [String] = []
@@ -184,6 +199,7 @@ func unzip() -> AnyBashCommand {
             
             // Extract files
             let baseDir = outputDir ?? ctx.cwd
+            var printed = Data()
             
             for entry in entries {
                 // Filter by patterns if specified
@@ -198,13 +214,21 @@ func unzip() -> AnyBashCommand {
                 
                 if entry.name.hasSuffix("/") {
                     // Directory entry
-                    try ctx.fileSystem.createDirectory(path: destPath, relativeTo: ctx.cwd, recursive: true)
+                    if !printContents {
+                        try ctx.fileSystem.createDirectory(path: destPath, relativeTo: ctx.cwd, recursive: true)
+                    }
                 } else {
                     // File entry
-                    try ctx.fileSystem.createDirectory(path: VirtualPath.dirname(destPath), relativeTo: ctx.cwd, recursive: true)
-                    
                     let data = try decompressZipEntry(entry)
-                    try ctx.fileSystem.writeFile(path: destPath, content: data, relativeTo: ctx.cwd)
+                    guard data.count == entry.uncompressedSize, calculateCRC32(data) == entry.crc32 else {
+                        return ExecResult.failure("unzip: corrupt entry: \(entry.name)")
+                    }
+                    if printContents {
+                        printed.append(data)
+                    } else {
+                        try ctx.fileSystem.createDirectory(path: VirtualPath.dirname(destPath), relativeTo: ctx.cwd, recursive: true)
+                        try ctx.fileSystem.writeFile(path: destPath, content: data, relativeTo: ctx.cwd)
+                    }
                 }
                 
                 if !quiet {
@@ -212,7 +236,7 @@ func unzip() -> AnyBashCommand {
                 }
             }
             
-            return ExecResult.success()
+            return ExecResult.success(printContents ? String(decoding: printed, as: UTF8.self) : "")
         } catch {
             return ExecResult.failure("unzip: \(error.localizedDescription)")
         }

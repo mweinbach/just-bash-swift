@@ -3,6 +3,76 @@ import XCTest
 @testable import JustBashJavaScript
 
 final class JsExecBasicTests: XCTestCase {
+    func testPerExecutionNetworkDenialReachesFetchAndChildProcess() async {
+        let source = #"""
+        try { await fetch('https://example.invalid/'); throw new Error('network escaped'); }
+        catch (error) { if (!error.message.includes('not in allow-list')) throw error; }
+        const cp = require('node:child_process');
+        try { cp.execSync('curl https://example.invalid/'); throw new Error('subshell escaped'); }
+        catch (error) { if (!String(error.stderr).includes('not in allow-list')) throw error; }
+        console.log('denied');
+        """#
+        let bash = Bash(options: .init(files: ["/network.mjs": source], allowedURLPrefixes: ["https://"], embeddedRuntimes: [JavaScriptRuntime()]))
+        let result = await bash.exec("js-exec /network.mjs", options: .init(allowNetwork: false))
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.stdout, "denied\n")
+    }
+
+    func testFetchLocalURLsUseVirtualFilesystemAndPreserveBinary() async throws {
+        let physical = FileManager.default.temporaryDirectory.appendingPathComponent("justbash-fetch-\(UUID().uuidString).txt")
+        try Data("host-only-secret".utf8).write(to: physical)
+        defer { try? FileManager.default.removeItem(at: physical) }
+        let source = """
+        const response = await fetch('\(physical.absoluteString)');
+        if (await response.text() !== 'virtual-content') throw new Error('wrong filesystem');
+        require('node:fs').unlinkSync('\(physical.path)');
+        try { await fetch('\(physical.absoluteString)'); throw new Error('host file escaped'); }
+        catch (error) { if (error.message.includes('host file escaped')) throw error; }
+        const binary = await fetch('data:application/octet-stream;base64,AP9B');
+        const bytes = new Uint8Array(await binary.arrayBuffer());
+        if (String(bytes) !== '0,255,65') throw new Error('binary corrupted');
+        console.log('local');
+        """
+        let bash = Bash(options: .init(files: [physical.path: "virtual-content", "/local.mjs": source], embeddedRuntimes: [JavaScriptRuntime()]))
+        let result = await bash.exec("js-exec /local.mjs", options: .init(allowNetwork: false))
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.stdout, "local\n")
+    }
+
+    func testBase64PaddingPreservesBinaryArtifacts() async {
+        let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime()]))
+        let result = await bash.exec(#"js-exec -c 'for (const text of ["Zg==", "Zm8=", "Zm9v", "AP8="]) { if (Buffer.from(text, "base64").toString("base64") !== text) throw new Error("base64 padding: " + text); } console.log("ok");'"#)
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.stdout, "ok\n")
+    }
+
+    func testHardDeadlinePolicyRejectsBeforeExecutingUnboundedCode() async {
+        let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime(options: .init(executionPolicy: .requirePreemptible))]))
+        let result = await bash.exec("js-exec -c 'while (true) {}'")
+        XCTAssertEqual(result.exitCode, 2)
+        XCTAssertTrue(result.stderr.contains("preemptible worker"))
+        let next = await bash.exec("echo still-responsive")
+        XCTAssertEqual(next.stdout, "still-responsive\n")
+    }
+
+    func testFiniteSynchronousOverrunReportsDeadline() async {
+        let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime(options: .init(defaultTimeoutMs: 1))]))
+        let result = await bash.exec("js-exec -c 'const end = Date.now() + 30; while (Date.now() < end) {}'")
+        XCTAssertEqual(result.exitCode, 124, result.stderr)
+    }
+
+    func testCancellationStopsPendingJavaScriptAndFollowingShellCommand() async throws {
+        let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime()]))
+        let task = Task { await bash.exec("js-exec -m -c 'await new Promise(() => {})'; echo must-not-run") }
+        try await Task.sleep(for: .milliseconds(30))
+        task.cancel()
+        let result = await task.value
+        XCTAssertEqual(result.exitCode, 130, result.stderr)
+        XCTAssertFalse(result.stdout.contains("must-not-run"))
+        let next = await bash.exec("echo ok")
+        XCTAssertEqual(next.stdout, "ok\n")
+    }
+
     func testConsoleLogStdout() async {
         let bash = Bash(options: .init(embeddedRuntimes: [JavaScriptRuntime()]))
         let result = await bash.exec("js-exec -c 'console.log(1 + 2)'")

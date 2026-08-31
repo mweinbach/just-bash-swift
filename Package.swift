@@ -40,7 +40,8 @@ let package = Package(
             name: "JustBash",
             dependencies: ["JustBashCore", "JustBashFS", "JustBashCommands"],
             path: "Sources/JustBash",
-            sources: ["Bash.swift", "WorkspaceOptions.swift", "OAIPrimaryRuntimeSupport.swift"]
+            sources: ["Bash.swift", "WorkspaceOptions.swift", "OAIPrimaryRuntimeSupport.swift"],
+            resources: [.process("Resources")]
         ),
         .target(
             name: "JustBashJavaScript",
@@ -52,7 +53,8 @@ let package = Package(
         .testTarget(
             name: "JustBashJavaScriptTests",
             dependencies: ["JustBashJavaScript", "JustBash", "JustBashFS"],
-            path: "Tests/JustBashJavaScriptTests"
+            path: "Tests/JustBashJavaScriptTests",
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "JustBashFSTests",

@@ -188,8 +188,11 @@ Node-compat surface: `fs` (sync subset + `.promises.*`), `path`, `process`,
 **Caveats**: JavaScriptCore JIT is enabled on macOS but disabled on iOS / Mac
 Catalyst (no JIT entitlement for non-WebKit apps), so iOS execution runs in
 LLInt interpreter mode — roughly 5–10× slower than macOS for compute-heavy
-scripts. Memory limits are advisory on Apple platforms; the wall-clock timeout
-is enforced (default 10s, 60s when `allowedURLPrefixes` is non-empty).
+scripts. Memory limits are advisory. JavaScript deadlines (default 10s, 60s
+with network access) are cooperative: non-yielding synchronous JavaScript cannot
+be interrupted through public JavaScriptCore APIs. Hosts requiring hard
+interruption can select `.requirePreemptible`, which rejects execution on this
+backend. See [the execution contract](docs/PRIMARY_RUNTIME_SKILLS_IOS.md#execution-limits).
 
 ## What's Supported
 

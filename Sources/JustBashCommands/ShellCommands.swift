@@ -37,6 +37,12 @@ private func shellRunnerCommand(named name: String) -> AnyBashCommand {
         if args.isEmpty {
             return ExecResult.success()
         }
+        if args.first == "-c" {
+            guard args.count == 2 else {
+                return ExecResult.failure("\(name): -c requires one script; additional positional arguments are not supported", exitCode: 2)
+            }
+            return await executor(args[1])
+        }
         return await executor(args.joined(separator: " "))
     }
 }

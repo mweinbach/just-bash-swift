@@ -1,5 +1,13 @@
 import Foundation
 
+/// JavaScriptCore's public API cannot preempt arbitrary synchronous JavaScript.
+/// A host requiring a hard wall-time boundary must select `requirePreemptible`;
+/// this backend then fails before execution rather than claiming isolation.
+public enum JavaScriptExecutionPolicy: Sendable {
+    case cooperative
+    case requirePreemptible
+}
+
 /// A JavaScript module that should be discoverable via `require()` inside `js-exec`.
 ///
 /// Hosts can ship app-specific JS libraries by conforming to this protocol and
@@ -23,20 +31,24 @@ public struct BashJavaScriptOptions: Sendable {
     public var bootstrap: String?
     /// Modules discoverable via `require(name)` from inside `js-exec`.
     public var addonModules: [any JavaScriptModule]
-    /// Wall-clock timeout for a single `js-exec` invocation.
+    /// Cooperative deadline. Checked after synchronous evaluation and while
+    /// awaiting asynchronous work; does not interrupt non-yielding JavaScript.
     public var defaultTimeoutMs: Int
-    /// Wall-clock timeout when network access is enabled (i.e. allowedURLPrefixes is non-empty).
+    /// Cooperative deadline when network access is enabled.
     public var defaultNetworkTimeoutMs: Int
+    public var executionPolicy: JavaScriptExecutionPolicy
 
     public init(
         bootstrap: String? = nil,
         addonModules: [any JavaScriptModule] = [],
         defaultTimeoutMs: Int = 10_000,
-        defaultNetworkTimeoutMs: Int = 60_000
+        defaultNetworkTimeoutMs: Int = 60_000,
+        executionPolicy: JavaScriptExecutionPolicy = .cooperative
     ) {
         self.bootstrap = bootstrap
         self.addonModules = addonModules
         self.defaultTimeoutMs = defaultTimeoutMs
         self.defaultNetworkTimeoutMs = defaultNetworkTimeoutMs
+        self.executionPolicy = executionPolicy
     }
 }

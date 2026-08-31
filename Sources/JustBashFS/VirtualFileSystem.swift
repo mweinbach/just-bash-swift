@@ -564,7 +564,7 @@ extension VirtualFileSystem: BashFilesystem {
     }
     
     public func listDirectory(path: String, relativeTo: String) throws -> [String] {
-        let entries = try listDirectory(path, relativeTo: relativeTo)
+        let entries = try listDirectory(path, relativeTo: relativeTo, includeHidden: true)
         return entries.map { $0.name }
     }
     

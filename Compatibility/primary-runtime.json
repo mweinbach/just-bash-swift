@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "snapshotVersion": "26.826.12353",
+  "supportLevel": "bounded-ios-compatibility",
+  "families": {
+    "documents": {
+      "skillSHA256": "f627431b3e4599c70d658140c38e8c42ab8879645b8e69992dd8479f59072037"
+    },
+    "presentations": {
+      "skillSHA256": "fe9727d65eae3274693fd9a0d74be8a462dd0a407e1ecd8cfb138c8c41a9890f"
+    },
+    "spreadsheets": {
+      "skillSHA256": "dec5f25799c0643ef3aa49ed667a134db882253aff90c19076700e2a586fbf8a"
+    }
+  }
+}

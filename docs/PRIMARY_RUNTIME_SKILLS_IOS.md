@@ -1,313 +1,132 @@
-# Primary Runtime Skills On iOS
+# Primary runtime artifact support on iOS
 
-This note records the compatibility contract for evaluating the OpenAI primary
-runtime file-artifact skills against this repository's iOS runtime. It is about
-whether the cached skills could run if registered later; it does not install or
-register the skills.
+The supported skill snapshot is pinned by version and SHA256 in
+`Compatibility/primary-runtime.json`. The bundle generator must verify that
+manifest and adapt the skills to the mobile API below. Installing a newer skill
+bundle does not change the supported runtime. Unmodified desktop skill helpers
+are not a supported mobile execution contract.
 
-Evaluated skill bundles:
+The optional `JustBashJavaScript` product runs the bundled
+`Sources/JustBash/Resources/artifact-tool.mjs` module in JavaScriptCore. Enable it
+through `BashOptions.enableOAIPrimaryRuntime()`. No Python runtime is required for
+the supported JavaScript document, presentation, and spreadsheet workflows.
+BeeWare Python remains an optional phone-host integration, not a package product.
 
-- `/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents/26.430.10722`
-- `/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations/26.430.10722`
-- `/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets/26.430.10722`
+## Supported API
 
-## Current iOS Runtime Surface
+| Workflow | Supported | Explicitly outside the mobile contract |
+| --- | --- | --- |
+| DOCX | Styled text paragraphs, rectangular tables, literal `replaceText`, preserved original ZIP parts and XML structure during targeted edits | Pagination/rendering, desktop Python helpers, replacing all imported document paragraphs |
+| PPTX | Slide sizes, positioned rectangle/ellipse shapes, uniform font/style/color/alignment, embedded PNG/JPEG/SVG, import/export of that subset | Tables, custom masters/layouts, animations, groups, mixed text-run styles, cropped images, speaker notes |
+| XLSX | Values, formulas listed below, font/fill/border/alignment/number formats, merges, tables, freeze panes, literal-list validation, comments, line/bar/column charts | Pivots, macros, external links, conditional formatting, sparklines, what-if tables, images/shapes, R1C1 formulas |
+| PNG | Native CoreGraphics/CoreText/ImageIO rendering of slide shapes/text/PNG/JPEG and styled worksheet cells | SVG rasterization, document pagination, native chart preview, arbitrary Excel number-format syntax |
 
-`just-bash-swift` can run scripts in-process on iOS through Swift, the virtual
-filesystem, and optional embedded runtimes.
-
-- JavaScript is available through the `JustBashJavaScript` product. It is backed
-  by JavaScriptCore and exposes `js-exec`, CommonJS-style `require`, selected
-  Node-compatible shims including `node:*` builtin aliases, sandbox filesystem
-  access, `fetch`, host-provided addon modules, and a small ESM compatibility
-  layer for `.mjs` entrypoints, relative imports, dynamic `import()`, and
-  sandboxed `node_modules` packages with `package.json` exports. The loader also
-  handles bundled/minified ESM package shapes where imports and `export{...}`
-  lists appear mid-line without whitespace, plus nested export conditions such as
-  `exports.node.import`.
-- The iPhone host stages a broad pure-JS `@oai/artifact-tool` compatibility
-  package under both `/node_modules/@oai/artifact-tool` and the Codex primary
-  runtime cache-shaped path. It supports direct imports, `presentation-jsx`, and
-  common `.docx`/`.pptx`/`.xlsx` import/export smoke checks, plus bounded
-  worksheet and slide PNG previews. Unsupported high-fidelity render/import APIs
-  still fail explicitly on iOS so skill verification cannot accidentally treat
-  placeholder images or empty imports as success. It is not the full upstream
-  artifact-tool renderer/importer.
-- Python is available only in the generated iPhone host app when built with
-  BeeWare's `Python.xcframework`. The app registers `py-exec`, `python`, and
-  `python3` custom commands, stages the Python home into the app bundle, and
-  adds `Apps/JustBashPhone/PythonApp/site-packages` to `sys.path`.
-- iOS does not provide a general `Process`/`NSTask` execution model for these
-  skills. Anything that shells out to `node`, `python3`, `soffice`, Poppler, or
-  other host binaries must be replaced with an in-process iOS implementation or
-  bridged to an app-bundled, signed framework.
-
-## Compatibility Findings
-
-### Documents
-
-The Documents skill is not iOS-runnable unchanged.
-
-Required pieces found in the skill:
-
-- Python helper scripts using `python-docx`, `lxml`, `openpyxl`, `Pillow`, and
-  `pdf2image`.
-- `render_docx.py`, which invokes `soffice`/LibreOffice through `subprocess` for
-  DOCX-to-PDF conversion and render QA.
-- PDF-to-image conversion assumptions that typically require Poppler binaries
-  behind `pdf2image`.
-
-iOS blockers:
-
-- `soffice`/LibreOffice is not available as an app-bundled iOS renderer.
-- `subprocess` calls to external renderers are not compatible with the iOS host
-  execution model.
-- The current iOS package set stages `openpyxl`, `Pillow`, and `pdf2image`, but
-  `lxml` has no matching CPython 3.14 iOS wheel through PyPI plus BeeWare's
-  wheel index, and `python-docx` depends on `lxml`.
-- The Documents helpers require real `lxml`/`python-docx` OOXML behavior,
-  including namespace-aware XPath, XML parser options, parent/sibling mutation,
-  and low-level Word XML constructors. A shallow import shim is not sufficient.
-- `pdf2image` is importable when staged, but its normal rendering path expects
-  Poppler binaries that are not provided by the iOS app.
-
-Minimum path to support:
-
-- Add an iOS DOCX authoring and OOXML patching layer that uses only bundled
-  Swift/Python code and signed native extensions.
-- Replace LibreOffice/Poppler render QA with an iOS-compatible renderer, or mark
-  render QA as unavailable with a product-level fallback.
-- Stage all Python dependencies as iOS-compatible wheels/frameworks at build
-  time; do not rely on runtime `pip install`.
-- If `lxml`/`python-docx` remain unavailable as iOS wheels, replace the helper
-  calls with a native Swift or pure bundled OOXML adapter that implements the
-  same document-mutation behavior.
-
-### Presentations
-
-The Presentations skill is not iOS-runnable unchanged.
-
-Required pieces found in the skill:
-
-- Node `.mjs` scripts that import `node:fs`, `node:path`, `node:url`,
-  `node:module`, `node:child_process`, and other Node-only APIs.
-- `@oai/artifact-tool` version `2.7.3` or newer with
-  `@oai/artifact-tool/presentation-jsx`.
-- `lucide` for `ctx.addLucideIcon(...)` SVG data URLs.
-- Optional graphics helpers that depend on Node packages such as `sharp` or
-  `skia-canvas`.
-- Some helper paths invoke Python for contact-sheet generation or reference
-  slide prompt fan-out.
-
-iOS blockers:
-
-- JavaScriptCore is not Node. The current `js-exec` bridge has useful shims,
-  `node:*` builtin aliases, ESM compatibility for minified package output, and
-  sandboxed package resolution. It also handles cached helper script shebangs,
-  dash-prefixed script arguments, Node-style `pathToFileURL(...).href`, and
-  cache-busted dynamic file imports. It does not provide native Node packages.
-- The staged `@oai/artifact-tool` compatibility package covers direct imports,
-  `presentation-jsx`, basic Office export smoke checks, and bounded pure-JS
-  slide PNG/layout previews, but it intentionally does not provide full
-  upstream rendering or Office import behavior.
-- Presentation visual export has a basic pure-JS PNG path for visible shapes,
-  image placeholders, and text, but high-fidelity rendering still needs a real
-  iOS renderer.
-- JavaScript deck-building helpers use `child_process.spawnSync`; the iOS
-  bridge can route those calls to sandbox-provided commands such as `python3`,
-  which covers the contact-sheet launch shape.
-- Same-interpreter Python fan-out through
-  `subprocess.run([sys.executable, script, ...])` is adapted to run staged
-  helper scripts in-process. Arbitrary process spawning remains unavailable on
-  iOS.
-- `ctx.addLucideIcon(...)` can use the staged pure-JS `lucide` compatibility
-  package to produce SVG data URLs. The standalone Lucide PNG renderer can use
-  the staged pure-JS `sharp` compatibility package for SVG icon PNG output.
-  Native `sharp`/`skia-canvas` rendering remains unavailable on iOS.
-- The local Codex runtime cache has the full Node package, but that cache is not
-  part of the iOS app bundle and includes bundled runtime assets such as
-  `skia-canvas` and `@oai/walnut` WASM that need an explicit iOS packaging and
-  execution path.
-- The cached `@oai/artifact-tool` package exposes only its bundled dist
-  entrypoints; it does not provide a `browser`, `ios`, or `react-native` export
-  condition for JavaScriptCore to select.
-- `skia-canvas` includes a native Node addon (`lib/skia.node`), and the browser
-  fallback assumes DOM canvas APIs that are not available in this JavaScriptCore
-  runtime.
-- `@oai/walnut` uses a .NET WASM payload plus `dotnet.js`/`blazor.boot.json`
-  resource loading for Office import/export paths; those resources are not
-  packaged or bridged for iOS JavaScriptCore today.
-- Native rendering dependencies such as `sharp`/`skia-canvas` are not staged for
-  iOS.
-
-Minimum path to support:
-
-- Provide an iOS-compatible artifact-tool runtime surface, either as a
-  JavaScriptCore bundle that avoids Node-only APIs or as a native Swift layer.
-- Replace Node script entrypoints with Swift/JavaScriptCore command wrappers
-  that use `BashFilesystem` and app-local temporary storage.
-- Audit child-process calls so they target sandbox-provided commands only, and
-  replace native Node rendering dependencies.
+The exported Office files contain native OOXML for supported features; they are
+not screenshots in Office containers. Import rejects detected unsupported
+structures rather than flattening them into a misleading successful result.
+The formula engine is intentionally a subset, not the Excel calculation engine.
 
 ### Spreadsheets
 
-The Spreadsheets skill is not iOS-runnable unchanged.
-
-Required pieces found in the skill:
-
-- `@oai/artifact-tool` for workbook creation, inspection, render, and `.xlsx`
-  export.
-- A Node-style workspace dependency loader, package exports, and normal Node
-  module resolution.
-- Optional Python source-processing libraries such as `pandas`, `numpy`,
-  `pypdf`, `python-docx`, and `reportlab`.
-
-iOS blockers:
-
-- The iPhone host exposes a broad pure-JS artifact-tool compatibility package
-  for workbook creation, common structural spreadsheet helpers such as
-  worksheet lookup/range copy/write methods, structural table/chart/comment/
-  sparkline objects, stored and sandbox-extracted compressed `.xlsx`
-  import/export smoke checks, and basic worksheet-range PNG rendering.
-- Sandboxed `node_modules` package resolution is available inside the current
-  JavaScriptCore runtime, but only for package sources and assets that are
-  actually staged into the app-visible filesystem.
-- The JavaScript loader can parse the package's minified ESM import/export shape,
-  so the remaining blocker is not syntax loading; it is the unported
-  full-fidelity artifact-tool runtime dependencies, especially `skia-canvas`
-  native rendering and `@oai/walnut` WASM resources.
-- `Workbook.render(...)` has a bounded pure-JS PNG path for visible cell ranges,
-  and `.xlsx` import/export is a bounded compatibility path for uncompressed
-  OOXML, not a full Excel inspection/render stack.
-- The iOS compatibility package now evaluates common arithmetic/range formulas,
-  scans formula errors, and returns `workbook.trace(...)` dependency trees. This
-  is still a bounded compatibility evaluator, not Excel's full calculation
-  engine.
-- Common source-range line/bar/column charts now export native XLSX chart and
-  drawing parts, and `Workbook.render(...)` draws basic chart previews in the
-  worksheet PNG. This is bounded chart compatibility, not Excel's full chart
-  engine.
-- The optional Python analysis stack is partially staged: `numpy`, `pypdf`, and
-  `reportlab` are available in the current package lane, while `pandas` and
-  `python-docx` remain unavailable for this iOS target because of unresolved
-  native dependencies.
-
-Minimum path to support:
-
-- Bundle an iOS-compatible spreadsheet authoring/export engine.
-- Add a runtime dependency resolver that returns iOS-backed JS/Python runtimes
-  and package locations, matching the skill contract without using system
-  runtimes.
-- Stage any Python analysis dependencies at build time for every device and
-  simulator slice.
-
-## Guardrail
-
-Use `scripts/check_primary_runtime_skills_ios.py` before attempting to register
-these skills in an iOS build. The checker verifies the cached skill bundles and
-reports the iOS blockers above from the actual files in the cache and this repo.
-For cached bundles that include `manifest.txt` or Python helpers, it also
-checks manifest completeness and Python syntax without importing unavailable
-iOS-only dependencies such as `lxml` or `python-docx`. The Documents report also
-scans every Python helper for dependency usage so missing packages are tied to
-the actual helper files, not inferred from a hand-written package list.
-It accepts the primary-runtime cache root by default, or explicit family/version
-paths matching the three skill directories:
-
-```bash
-scripts/check_primary_runtime_skills_ios.py --strict \
-  --documents-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents \
-  --presentations-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations \
-  --spreadsheets-root /Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/spreadsheets \
-  --artifact-tool-root /Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool
+```js
+import { Workbook, SpreadsheetFile } from '@oai/artifact-tool';
+const workbook = Workbook.create();
+const sheet = workbook.worksheets.add('Summary');
+sheet.getRange('A1:B3').values = [['Item', 'Amount'], ['One', 4], ['Two', 6]];
+sheet.getRange('B4').formulas = [['=IF(SUM(B2:B3)=10,10,0)']];
+sheet.getRange('A1:B1').format.font.bold = true;
+sheet.getRange('A1:B1').format.fill.color = '#e8eef8';
+sheet.getRange('B2:B4').setNumberFormat('$#,##0.00');
+sheet.freezePanes.freezeRows(1);
+sheet.tables.add('A1:B3', true, 'SummaryTable');
+await (await SpreadsheetFile.exportXlsx(workbook)).save('/workspace/summary.xlsx');
+await (await workbook.render({ sheetName: 'Summary', range: 'A1:B4' }))
+  .save('/workspace/summary.png');
 ```
 
-The Python-linked iPhone host also exposes an on-device command:
+Formulas support numbers, text, A1 references, ranges, quoted worksheet names,
+arithmetic, percentages, concatenation, comparisons and lazy IF/IFERROR.
+Functions: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, ROUND, ROUNDDOWN, ROUNDUP, ABS,
+POWER, SQRT, IF, IFERROR, AND, OR, NOT, CONCAT, CONCATENATE, LEN, LEFT, RIGHT, MID,
+LOWER, UPPER, TRIM, TODAY and NOW. Errors are returned as Excel-style values and
+included by `workbook.inspect({kind:'formula'})`. Unsupported syntax/functions
+produce an error. Imported and exported cached formula values preserve errors.
+
+Charts export as native line/bar/column OOXML. For cell-only native preview of a
+worksheet containing charts, explicitly pass `chartPreview: 'omit'`; check the
+chart in the exported workbook separately. Preview otherwise rejects unsupported
+chart rendering. Select a range/scale that fits within 1800 pixels per axis.
+
+### Presentations
+
+Use `Presentation.create({slideSize:{width,height}})`, `slides.add()`, and
+`slide.shapes.add({name,position:{left,top,width,height},geometry:'rect',fill,line})`.
+Set `shape.text` to a string, then set `fontSize`, `bold`, `italic`, `color`,
+`typeface`, `alignment`, and `insets` on its text frame. Positions use pixels;
+font size uses points. `slide.images.add({dataUrl,position,alt})` accepts base64
+PNG/JPEG/SVG; `path` can refer to an image already in the sandbox. Export with
+`PresentationFile.exportPptx(deck)` and `deck.export({slide,format:'png'})`.
+
+The native preview renders actual images and mixed-case text. Outside the
+JavaScriptCore host, PNG requests fail unless the caller explicitly requests
+`previewMode:'schematic'`. That legacy diagnostic is not visual-quality evidence.
+
+### Documents
+
+Use `DocumentModel.create()`, `addParagraph(text, {bold,italic,fontSize,color})`,
+`addTable(rows)`, `DocumentFile.exportDocx`, and `DocumentFile.importDocx`.
+For existing files use `replaceText('literal search','replacement')`; matches can
+span text runs. Unchanged ZIP parts, tables, existing formatting and relationships
+are retained. Appended paragraphs/tables are inserted before the final body
+section properties. Rendering and pagination are unavailable; preview the
+exported document through the host's Office-capable viewer.
+
+## Validation
 
 ```bash
-primary-runtime-skills-check
-cat /workspace/primary-runtime-skills-ios-report.json
-```
-
-That command does not install or register the skills. It writes a JSON readiness
-report from inside the iOS host by probing BeeWare Python imports and
-JavaScriptCore module resolution for the runtime pieces these skills expect. It
-exits nonzero if the report is not ready so an on-device agent can use it as a
-readiness gate.
-
-The current expected result is `ready` for the staged iOS compatibility surface:
-the skill bundles are present and parseable, the iPhone host can import the
-broad pure-JS artifact-tool compatibility package, and representative cached
-helper paths run. Full LibreOffice/Poppler rendering plus high-fidelity native
-artifact-tool render/import behavior still require desktop/container runtime
-capabilities that this iOS runtime does not provide.
-
-Use the helper smoke harness to verify representative cached helper entrypoints
-against the same staged JavaScript packages the iPhone host injects:
-
-```bash
+python3 scripts/verify_primary_runtime_snapshot.py --cache-root /path/to/openai-primary-runtime
+python3 scripts/check_primary_runtime_skills_ios.py --strict --json
 python3 scripts/smoke_primary_runtime_skill_helpers.py --json
+swift test --filter 'ArtifactCorrectnessTests|PrimaryRuntime'
 ```
 
-This stages `@oai/artifact-tool`, `@oai/artifact-tool/presentation-jsx`,
-`lucide`, and `sharp` from `Sources/JustBash/OAIPrimaryRuntimeSupport.swift`
-under a temporary Codex
-runtime-shaped `HOME`, then runs:
+The first two checks validate the selected snapshot and declare capabilities;
+their JSON explicitly sets `runtimeVerified: false`. They never install skills.
+Unit tests use synthetic skill bundles and do not depend on a personal Codex
+cache. The Node smoke exercises self-contained API fixtures and inspects native
+OOXML. The JavaScriptCore suite additionally exercises native image previews,
+base64 binary integrity, and the runtime readiness command without Python.
 
-- the cached Presentations `build_artifact_deck.mjs` helper with a generated
-  slide module, preview PNG, layout JSON, and PPTX export
-- the cached Presentations `render_lucide_icon.mjs` helper through the staged
-  pure-JS `sharp` compatibility package
-- a spreadsheet API smoke covering formulas, inspect, trace, chart creation,
-  PNG render, XLSX export, and XLSX import through the staged compatibility
-  package
+`primary-runtime-skills-check` runs representative JavaScript API operations and
+writes its report to `/workspace/primary-runtime-skills-ios-report.json` by
+default. Its `ready` result applies only to the supported mobile API above.
 
-Passing this smoke harness proves those bounded staged paths are runnable. It
-does not mean iOS has full LibreOffice/Poppler render parity or native
-artifact-tool render/import parity.
-
-The Swift JavaScriptCore lane also runs actual cached Presentation helpers
-against the staged iOS compatibility package:
+For manual visual QA, export the test artifacts:
 
 ```bash
-swift test --filter PrimaryRuntimePresentationHelperTests
+JUSTBASH_ARTIFACT_OUTPUT_DIR=/tmp/justbash-artifact-qa \
+  swift test --filter ArtifactCorrectnessTests
 ```
 
-That test stages the iOS `@oai/artifact-tool` and `lucide` shims, loads the
-cached `render_artifact_slide.mjs`, `build_artifact_deck.mjs`, and
-`check_layout_quality.mjs` helpers, then verifies PNG, layout JSON, and PPTX
-artifacts through `js-exec`. It proves the helper CLI/module-loading shape is
-compatible with the iOS JavaScriptCore runtime for that bounded path.
+## Execution limits
 
-The spreadsheet core-authoring path has a matching Swift JavaScriptCore smoke:
+JavaScriptCore's public API cannot interrupt arbitrary synchronous JavaScript.
+`defaultTimeoutMs` and `defaultNetworkTimeoutMs` are cooperative deadlines:
+the engine checks them after synchronous evaluation and while awaiting async
+work. Cancellation stops pending async work and prevents subsequent shell
+commands. A non-yielding synchronous script can still block this backend.
 
-```bash
-swift test --filter PrimaryRuntimeSpreadsheetCompatTests
-```
+Hosts requiring a hard deadline must use
+`BashJavaScriptOptions(executionPolicy: .requirePreemptible)`. This backend rejects
+the request before execution, including infinite loops. A separately implemented
+preemptible backend is still required; SwiftCodexCore's code-mode worker does not
+isolate `js-exec` automatically. See [execution limits and prototype evidence](IOS_EXECUTION_LIMITS.md)
+for the public WebKit/QuickJS options and their remaining constraints.
 
-That test stages the iOS `@oai/artifact-tool` shim, then verifies a workbook
-build with formulas, formula inspection, trace output, a native chart export,
-worksheet PNG render, `.xlsx` export, and `.xlsx` round-trip import. This proves
-the bounded spreadsheet authoring path is executable in JavaScriptCore. The
-native desktop artifact-tool render/import stack remains out of scope on iOS.
-
-## Latest Simulator Smoke
-
-On May 1, 2026, the iPhone host was installed on a booted iPhone simulator and
-launched with `JUSTBASH_SMOKE_PRIMARY_RUNTIME_SKILLS=1`. The app wrote
-`primary-runtime-skills-ios-report.json` with:
-
-- `overall: ready`
-- JavaScriptCore `artifactToolRequire: available`
-- JavaScriptCore `packageExportsCompatibility: available`
-- JavaScriptCore `childProcessPythonBridge: available`
-- Documents status: ready through staged `lxml`, `python-docx`, and bounded
-  render adapters; full LibreOffice/Poppler visual fidelity remains out of
-  scope
-- Presentations and Spreadsheets status: ready through broad pure-JS
-  artifact-tool compatibility, including basic slide PNG/layout previews,
-  Lucide SVG icon data URLs, standalone Lucide PNG icons, common structural
-  spreadsheet helpers, formulas, compressed XLSX import/export, and bounded
-  chart export/previews
-- Import probes: `docx`, `lxml`, `openpyxl`, `PIL`, `pdf2image`, `numpy`,
-  `pypdf`, and `reportlab` import; optional `pandas` does not
+The package CI runs the full Swift suite (including hermetic pinned-snapshot and
+hash-mismatch tests), the self-contained Node artifact fixtures, and iOS Simulator
+library compilation. It uses GitHub's public preview
+[`xcode-27` runner](https://github.blog/changelog/2026-07-16-xcode-27-runner-image-now-in-public-preview/)
+with Node 22. The actual desktop skill cache is deliberately absent from CI;
+verify it with the snapshot command above before regenerating a mobile bundle.
+Adding the workflow does not imply that a hosted run has completed.

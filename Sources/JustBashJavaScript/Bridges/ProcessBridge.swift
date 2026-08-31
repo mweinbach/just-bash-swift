@@ -189,13 +189,16 @@ func installProcessBridge(into context: JSContext, execution: JSCExecutionContex
       if (typeof atob === 'undefined') {
         var b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
         globalThis.atob = function(s) {
+          s = String(s).replace(/\\s/g, '');
+          if (/[^A-Za-z0-9+/=]/.test(s)) throw new Error('Invalid base64');
           s = s.replace(/=+$/, '');
+          if (s.length % 4 === 1) throw new Error('Invalid base64 length');
           var out = '';
           for (var i = 0; i < s.length;) {
             var c1 = b64.indexOf(s.charAt(i++));
             var c2 = b64.indexOf(s.charAt(i++));
-            var c3 = b64.indexOf(s.charAt(i++));
-            var c4 = b64.indexOf(s.charAt(i++));
+            var c3 = i < s.length ? b64.indexOf(s.charAt(i++)) : -1;
+            var c4 = i < s.length ? b64.indexOf(s.charAt(i++)) : -1;
             out += String.fromCharCode((c1 << 2) | (c2 >> 4));
             if (c3 !== -1 && c3 !== 64) out += String.fromCharCode(((c2 & 15) << 4) | (c3 >> 2));
             if (c4 !== -1 && c4 !== 64) out += String.fromCharCode(((c3 & 3) << 6) | c4);
@@ -205,9 +208,10 @@ func installProcessBridge(into context: JSContext, execution: JSCExecutionContex
         globalThis.btoa = function(s) {
           var out = '';
           for (var i = 0; i < s.length;) {
-            var c1 = s.charCodeAt(i++) & 0xff;
-            var c2 = s.charCodeAt(i++) & 0xff;
-            var c3 = s.charCodeAt(i++) & 0xff;
+            var c1 = s.charCodeAt(i++);
+            var c2 = s.charCodeAt(i++);
+            var c3 = s.charCodeAt(i++);
+            if (c1 > 255 || c2 > 255 || c3 > 255) throw new Error('btoa requires binary bytes');
             out += b64.charAt(c1 >> 2);
             out += b64.charAt(((c1 & 3) << 4) | (c2 >> 4));
             out += isNaN(c2) ? '=' : b64.charAt(((c2 & 15) << 2) | (c3 >> 6));

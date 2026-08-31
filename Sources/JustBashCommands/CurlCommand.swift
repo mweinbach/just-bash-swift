@@ -27,19 +27,9 @@ func curl() -> AnyBashCommand {
 
         guard let urlString = urls.first else { return ExecResult.failure("curl: no URL specified") }
 
-        // Enforce URL allow-list for network access.
-        // data: URLs and file: URLs are always allowed (local resources).
-        // Remote URLs require at least one prefix in allowedURLPrefixes to match.
-        if !urlString.hasPrefix("data:") && !urlString.hasPrefix("file:") {
-            let allowed = ctx.allowedURLPrefixes
-            if allowed.isEmpty || !allowed.contains(where: { urlString.hasPrefix($0) }) {
-                return ExecResult.failure("curl: access denied — URL not in allow-list: \(urlString)")
-            }
-        }
-
         let (headers, body): (String, Data)
         do {
-            (headers, body) = try await fetchURLPayload(urlString)
+            (headers, body) = try await fetchURLPayload(urlString, context: ctx)
         } catch {
             return ExecResult.failure("curl: \(error.localizedDescription)")
         }
@@ -79,29 +69,16 @@ func htmlToMarkdown() -> AnyBashCommand {
     }
 }
 
-private func fetchURLPayload(_ urlString: String) async throws -> (String, Data) {
-    if urlString.hasPrefix("data:") {
-        guard let comma = urlString.firstIndex(of: ",") else {
-            throw NSError(domain: "curl", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid data URL"])
-        }
-        let metadata = String(urlString[..<comma])
-        let payload = String(urlString[urlString.index(after: comma)...])
-        if metadata.contains(";base64"), let data = Data(base64Encoded: payload) {
-            return ("HTTP/1.1 200 OK\n", data)
-        }
-        return ("HTTP/1.1 200 OK\n", Data(payload.removingPercentEncoding?.utf8 ?? payload.utf8))
-    }
-
+private func fetchURLPayload(_ urlString: String, context: CommandContext) async throws -> (String, Data) {
     guard let url = URL(string: urlString) else {
         throw NSError(domain: "curl", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid URL"])
     }
 
-    if url.isFileURL {
-        let data = try Data(contentsOf: url)
+    if let data = try CommandNetworkAccess.localData(for: url, context: context) {
         return ("HTTP/1.1 200 OK\n", data)
     }
 
-    let (data, response) = try await URLSession.shared.data(from: url)
+    let (data, response) = try await CommandNetworkAccess.data(for: URLRequest(url: url), allowedURLPrefixes: context.allowedURLPrefixes)
     let headerText: String
     if let http = response as? HTTPURLResponse {
         let lines = ["HTTP/1.1 \(http.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: http.statusCode))"] +

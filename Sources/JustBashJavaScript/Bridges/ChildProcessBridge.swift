@@ -83,13 +83,14 @@ private enum SubshellSyncResult {
 private func runSubshellSync(command: String, timeoutMs: Int, executor: @escaping SubshellExecutor) -> SubshellSyncResult {
     let semaphore = DispatchSemaphore(value: 0)
     let resultBox = ResultBox()
-    Task.detached(priority: .userInitiated) {
+    let task = Task.detached(priority: .userInitiated) {
         let result = await executor(command)
         resultBox.store(result)
         semaphore.signal()
     }
     let timeout: DispatchTime = .now() + .milliseconds(timeoutMs)
     if semaphore.wait(timeout: timeout) == .timedOut {
+        task.cancel()
         return .timeout
     }
     return .completed(resultBox.read() ?? ExecResult(stdout: "", stderr: "subshell returned no result", exitCode: 1))

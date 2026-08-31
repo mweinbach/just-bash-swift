@@ -57,12 +57,17 @@ public struct ExecOptions: Sendable {
     public var replaceEnv: Bool
     public var cwd: String?
     public var stdin: String
+    /// `false` disables network access for this invocation, including nested
+    /// shell commands and embedded runtimes. `true` or `nil` retains the host's
+    /// `BashOptions.allowedURLPrefixes`; it never grants additional URLs.
+    public var allowNetwork: Bool?
 
-    public init(env: [String: String] = [:], replaceEnv: Bool = false, cwd: String? = nil, stdin: String = "") {
+    public init(env: [String: String] = [:], replaceEnv: Bool = false, cwd: String? = nil, stdin: String = "", allowNetwork: Bool? = nil) {
         self.env = env
         self.replaceEnv = replaceEnv
         self.cwd = cwd
         self.stdin = stdin
+        self.allowNetwork = allowNetwork
     }
 }
 
@@ -73,6 +78,7 @@ public actor Bash {
     private let baseCwd: String
     private let parser: ShellParser
     private let interpreter: ShellInterpreter
+    private let networkDisabledInterpreter: ShellInterpreter
 
     public init(options: BashOptions = .init()) {
         let fileSystem = options.filesystem ?? VirtualFileSystem(
@@ -130,6 +136,7 @@ public actor Bash {
         ].merging(options.env, uniquingKeysWith: { _, new in new })
         self.parser = ShellParser(limits: options.executionLimits)
         self.interpreter = ShellInterpreter(fileSystem: fileSystem, registry: registry, limits: options.executionLimits, allowedURLPrefixes: options.allowedURLPrefixes)
+        self.networkDisabledInterpreter = ShellInterpreter(fileSystem: fileSystem, registry: registry, limits: options.executionLimits, allowedURLPrefixes: [])
     }
 
     public func exec(_ script: String, options: ExecOptions = .init()) async -> ExecResult {
@@ -142,7 +149,10 @@ public actor Bash {
             var environment = options.replaceEnv ? [:] : baseEnv
             environment.merge(options.env, uniquingKeysWith: { _, new in new })
             var session = ShellSession(cwd: cwd, environment: environment)
-            return await interpreter.execute(script: parsed, session: &session, stdin: options.stdin)
+            // Both interpreters are immutable. An overlapping invocation cannot
+            // change another invocation's effective network capabilities.
+            let scopedInterpreter = options.allowNetwork == false ? networkDisabledInterpreter : interpreter
+            return await scopedInterpreter.execute(script: parsed, session: &session, stdin: options.stdin)
         } catch {
             return ExecResult(stdout: "", stderr: "bash: syntax error: \(error.localizedDescription)\n", exitCode: 2)
         }

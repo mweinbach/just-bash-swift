@@ -22,6 +22,8 @@ public final class ShellInterpreter: @unchecked Sendable {
             return try await executeScript(script, session: &session, stdin: stdin)
         } catch ControlFlow.exit(let code) {
             return ExecResult(stdout: "", stderr: "", exitCode: code)
+        } catch is CancellationError {
+            return ExecResult.failure("bash: cancelled\n", exitCode: 130)
         } catch {
             return ExecResult(stdout: "", stderr: "bash: \(error.localizedDescription)\n", exitCode: 1)
         }
@@ -32,6 +34,7 @@ public final class ShellInterpreter: @unchecked Sendable {
     func executeScript(_ script: Script, session: inout ShellSession, stdin: String) async throws -> ExecResult {
         var combined = ExecResult()
         for entry in script.entries {
+            try Task.checkCancellation()
             let result = try await executeListEntry(entry, session: &session, stdin: stdin)
             combined.stdout += result.stdout
             combined.stderr += result.stderr
@@ -98,6 +101,7 @@ public final class ShellInterpreter: @unchecked Sendable {
                 return ExecResult.failure("maximum command count exceeded", exitCode: 1)
             }
             let result = enforceOutputLimit(try await executeCommand(command, session: &session, stdin: pipedInput))
+            try Task.checkCancellation()
             let pipeStderr = index < pipeline.pipeStandardError.count ? pipeline.pipeStandardError[index] : false
             if pipeStderr {
                 pipedInput = result.stdout + result.stderr
@@ -125,6 +129,7 @@ public final class ShellInterpreter: @unchecked Sendable {
     // MARK: - Command dispatch
 
     private func executeCommand(_ command: Command, session: inout ShellSession, stdin: String) async throws -> ExecResult {
+        try Task.checkCancellation()
         switch command {
         case .simple(let simple):
             return try await executeSimple(simple, session: &session, stdin: stdin)

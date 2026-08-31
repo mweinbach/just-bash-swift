@@ -335,7 +335,7 @@ private struct PortableGit {
         do {
             var request = URLRequest(url: github.apiURL(path: "git/matching-refs"))
             applyGitHubAuth(to: &request, host: "github.com")
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await CommandNetworkAccess.data(for: request, allowedURLPrefixes: ctx.allowedURLPrefixes)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return .failure("fatal: unable to access '\(remote)': \(httpStatus(response))")
             }
@@ -380,7 +380,7 @@ private struct PortableGit {
         do {
             var repoRequest = URLRequest(url: github.apiURL())
             applyGitHubAuth(to: &repoRequest, host: "github.com")
-            let (repoData, repoResponse) = try await URLSession.shared.data(for: repoRequest)
+            let (repoData, repoResponse) = try await CommandNetworkAccess.data(for: repoRequest, allowedURLPrefixes: ctx.allowedURLPrefixes)
             guard let repoHTTP = repoResponse as? HTTPURLResponse, (200..<300).contains(repoHTTP.statusCode) else {
                 return .failure("fatal: unable to access '\(source)': \(httpStatus(repoResponse))")
             }
@@ -391,7 +391,7 @@ private struct PortableGit {
                 URLQueryItem(name: "recursive", value: "1")
             ]))
             applyGitHubAuth(to: &treeRequest, host: "github.com")
-            let (treeData, treeResponse) = try await URLSession.shared.data(for: treeRequest)
+            let (treeData, treeResponse) = try await CommandNetworkAccess.data(for: treeRequest, allowedURLPrefixes: ctx.allowedURLPrefixes)
             guard let treeHTTP = treeResponse as? HTTPURLResponse, (200..<300).contains(treeHTTP.statusCode) else {
                 return .failure("fatal: unable to read remote tree '\(source)': \(httpStatus(treeResponse))")
             }
@@ -402,7 +402,7 @@ private struct PortableGit {
             for item in tree.tree where item.type == "blob" {
                 var blobRequest = URLRequest(url: github.apiURL(path: "git/blobs/\(item.sha)"))
                 applyGitHubAuth(to: &blobRequest, host: "github.com")
-                let (blobData, blobResponse) = try await URLSession.shared.data(for: blobRequest)
+                let (blobData, blobResponse) = try await CommandNetworkAccess.data(for: blobRequest, allowedURLPrefixes: ctx.allowedURLPrefixes)
                 guard let blobHTTP = blobResponse as? HTTPURLResponse, (200..<300).contains(blobHTTP.statusCode) else {
                     return .failure("fatal: unable to read remote blob '\(item.path)': \(httpStatus(blobResponse))")
                 }
@@ -593,7 +593,7 @@ private struct PortableGit {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await CommandNetworkAccess.data(for: request, allowedURLPrefixes: ctx.allowedURLPrefixes)
         guard let http = response as? HTTPURLResponse else {
             throw GitHubAPIError(message: "non-HTTP response", exitCode: 1)
         }

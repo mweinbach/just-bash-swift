@@ -1,240 +1,67 @@
+import CryptoKit
 import Foundation
 import XCTest
 
+/// Synthetic bundles keep the contract independent of a personal Codex cache.
 final class PrimaryRuntimeSkillsIOSCheckerTests: XCTestCase {
-    func testCheckerReportsConcreteIOSBlockersForCachedPrimaryRuntimeSkills() throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let checker = repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py")
-
-        let payload = try runChecker(checker, repoRoot: repoRoot)
-        assertBlockedSkillReports(in: payload)
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
-
-    func testCheckerAcceptsExplicitSkillFamilyRoots() throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let checker = repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py")
-        let cacheRoot = "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime"
-        let artifactToolRoot = "/Users/mweinbach/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool"
-
-        let payload = try runChecker(
-            checker,
-            repoRoot: repoRoot,
-            extraArguments: [
-                "--documents-root", "\(cacheRoot)/documents",
-                "--presentations-root", "\(cacheRoot)/presentations",
-                "--spreadsheets-root", "\(cacheRoot)/spreadsheets",
-                "--artifact-tool-root", artifactToolRoot,
-            ]
-        )
-        assertBlockedSkillReports(in: payload)
+    func testPinnedSnapshotIgnoresNewerUnverifiedBundle() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let newer = fixture.root.appendingPathComponent("presentations/99.0/skills/presentations")
+        try FileManager.default.createDirectory(at: newer, withIntermediateDirectories: true)
+        try Data("unverified".utf8).write(to: newer.appendingPathComponent("SKILL.md"))
+        let (status, report) = try runChecker(fixture)
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(report["overall"] as? String, "ready")
+        XCTAssertEqual(report["snapshotVersion"] as? String, "1.2.3")
+        XCTAssertEqual(report["runtimeVerified"] as? Bool, false)
+        XCTAssertEqual(report["pythonRequired"] as? Bool, false)
+        let reports = try XCTUnwrap(report["reports"] as? [[String: Any]])
+        XCTAssertTrue(reports.allSatisfy { ($0["root"] as? String)?.hasSuffix("/1.2.3") == true })
     }
-
-    func testStagedCompatibilityCanRunRepresentativeCachedHelpers() throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let smokeScript = repoRoot.appendingPathComponent("scripts/smoke_primary_runtime_skill_helpers.py")
-        let presentationsSkillFamily = URL(
-            fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/presentations"
-        )
-        let documentsSkillFamily = URL(
-            fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents"
-        )
-
-        try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: smokeScript.path)
-                && FileManager.default.fileExists(atPath: presentationsSkillFamily.path)
-                && FileManager.default.fileExists(atPath: documentsSkillFamily.path),
-            "Primary-runtime document/presentation/spreadsheet skill cache is not available on this machine"
-        )
-        try XCTSkipUnless(commandSucceeds("node", "--version"), "Node is required for cached helper smoke")
-
-        let payload = try runJSONCommand(
-            ["python3", smokeScript.path, "--json"],
-            repoRoot: repoRoot
-        )
-
-        XCTAssertEqual(payload["overall"] as? String, "ok")
-        guard let checks = payload["checks"] as? [[String: Any]] else {
-            XCTFail("Missing smoke checks in payload: \(payload)")
-            return
+    func testModifiedSkillFailsClosed() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try Data("changed".utf8).write(to: fixture.root.appendingPathComponent("documents/1.2.3/skills/documents/SKILL.md"))
+        let (status, report) = try runChecker(fixture)
+        XCTAssertEqual(status, 1)
+        XCTAssertEqual(report["overall"] as? String, "blocked")
+    }
+    func testMissingPinnedBundleFailsClosed() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try FileManager.default.removeItem(at: fixture.root.appendingPathComponent("spreadsheets/1.2.3"))
+        let (status, report) = try runChecker(fixture)
+        XCTAssertEqual(status, 1)
+        XCTAssertEqual(report["overall"] as? String, "blocked")
+    }
+    private struct Fixture { let root: URL; let manifest: URL }
+    private func makeFixture() throws -> Fixture {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("justbash-snapshot-\(UUID().uuidString)")
+        var families: [String: [String: String]] = [:]
+        for family in ["documents", "presentations", "spreadsheets"] {
+            let directory = root.appendingPathComponent("\(family)/1.2.3/skills/\(family)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = Data("# \(family)\nSynthetic test skill.\n".utf8)
+            try data.write(to: directory.appendingPathComponent("SKILL.md"))
+            families[family] = ["skillSHA256": SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()]
         }
-        XCTAssertContainsCheck(named: "documents.ooxml_docx_helpers", in: checks)
-        XCTAssertContainsCheck(named: "presentations.build_artifact_deck", in: checks)
-        XCTAssertContainsCheck(named: "presentations.render_lucide_icon", in: checks)
-        XCTAssertContainsCheck(named: "spreadsheets.artifact_tool_api", in: checks)
+        let manifest = root.appendingPathComponent("manifest.json")
+        try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "snapshotVersion": "1.2.3", "supportLevel": "bounded-ios-compatibility", "families": families]).write(to: manifest)
+        return Fixture(root: root, manifest: manifest)
     }
-
-    func testOnDeviceFallbackReportMatchesCurrentIOSCompatibilityClaims() throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let runtimeSupport = repoRoot.appendingPathComponent("Sources/JustBash/OAIPrimaryRuntimeSupport.swift")
-        let text = try String(contentsOf: runtimeSupport, encoding: .utf8)
-
-        XCTAssertTrue(text.contains("bounded iOS formula computation, formula-error scans, and workbook.trace dependency trees are staged"))
-        XCTAssertTrue(text.contains("full Excel calculation semantics still require the native artifact-tool runtime or a broader iOS formula engine"))
-        XCTAssertTrue(text.contains("ctx.addLucideIcon can use the staged pure-JS lucide SVG package"))
-        XCTAssertTrue(text.contains(#""overall": "\(overallStatus)""#))
-        XCTAssertTrue(text.contains(#""status": "\(documentsStatus)""#))
-        XCTAssertTrue(text.contains(#""status": "\(presentationsStatus)""#))
-        XCTAssertTrue(text.contains(#""status": "\(spreadsheetsStatus)""#))
-        XCTAssertFalse(text.contains("only stores formulas structurally"))
-        XCTAssertFalse(text.contains(#""overall": "blocked""#))
-    }
-
-    private func runChecker(
-        _ checker: URL,
-        repoRoot: URL,
-        extraArguments: [String] = []
-    ) throws -> [String: Any] {
-        let documentsSkillFamily = URL(fileURLWithPath: "/Users/mweinbach/.codex/plugins/cache/openai-primary-runtime/documents")
-
-        try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: checker.path)
-                && FileManager.default.fileExists(atPath: documentsSkillFamily.path),
-            "Primary-runtime skill cache is not available on this machine"
-        )
-
-        return try runJSONCommand(["python3", checker.path, "--json"] + extraArguments, repoRoot: repoRoot)
-    }
-
-    private func runJSONCommand(_ arguments: [String], repoRoot: URL) throws -> [String: Any] {
-        let output = try runCommand(arguments, repoRoot: repoRoot)
-        return try XCTUnwrap(JSONSerialization.jsonObject(with: output.stdout) as? [String: Any])
-    }
-
-    private func runCommand(_ arguments: [String], repoRoot: URL) throws -> (stdout: Data, stderr: String) {
-        let process = Process()
+    private func runChecker(_ fixture: Fixture) throws -> (Int32, [String: Any]) {
+        let process = Process(), output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = arguments
-        process.currentDirectoryURL = repoRoot
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
+        process.arguments = ["python3", repoRoot.appendingPathComponent("scripts/check_primary_runtime_skills_ios.py").path,
+                             "--cache-root", fixture.root.path, "--manifest", fixture.manifest.path, "--strict", "--json"]
+        process.standardOutput = output
         try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-
-        let output = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorOutput = String(
-            data: stderr.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-        XCTAssertEqual(process.terminationStatus, 0, errorOutput)
-        return (output, errorOutput)
-    }
-
-    private func commandSucceeds(_ arguments: String...) throws -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = Array(arguments)
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        return process.terminationStatus == 0
-    }
-
-    private func assertBlockedSkillReports(in payload: [String: Any]) {
-        XCTAssertEqual(payload["overall"] as? String, "ready")
-
-        guard let reports = payload["reports"] as? [[String: Any]],
-              let documents = report(named: "documents", in: reports),
-              let presentations = report(named: "presentations", in: reports),
-              let spreadsheets = report(named: "spreadsheets", in: reports) else {
-            XCTFail("Missing one or more skill reports in payload: \(payload)")
-            return
-        }
-
-        XCTAssertEqual(documents["status"] as? String, "ready")
-        XCTAssertContainsFinding(in: documents, containing: "skill manifest is complete")
-        XCTAssertContainsFinding(in: documents, containing: "Python helper scripts parse successfully")
-        XCTAssertContainsFinding(in: documents, containing: "Documents Python dependency scan inspected all helper scripts")
-        XCTAssertContainsFinding(in: documents, containing: "pure-Python lxml.etree compatibility")
-        XCTAssertContainsFinding(in: documents, containing: "pure-Python python-docx compatibility")
-        XCTAssertContainsFinding(in: documents, containing: "pure-Python pdf2image compatibility")
-        XCTAssertContainsFinding(in: documents, containing: "all detected Documents Python imports")
-        XCTAssertContainsFinding(
-            in: documents,
-            containing: "soffice/LibreOffice conversion command shape"
-        )
-        XCTAssertContainsFinding(
-            in: documents,
-            containing: "bounded in-process iOS adapter"
-        )
-
-        XCTAssertEqual(presentations["status"] as? String, "ready")
-        XCTAssertContainsFinding(in: presentations, containing: "Python helper scripts parse successfully")
-        XCTAssertContainsFinding(in: presentations, containing: "no browser/iOS export condition")
-        XCTAssertContainsFinding(in: presentations, containing: "render basic presentation slides to PNG")
-        XCTAssertContainsFinding(in: presentations, containing: "cached helper CLI/runtime conventions")
-        XCTAssertContainsFinding(in: presentations, containing: "lucide compatibility package")
-        XCTAssertContainsFinding(in: presentations, containing: "child_process.spawnSync")
-        XCTAssertContainsFinding(in: presentations, containing: "Python presentation fan-out")
-        XCTAssertContainsFinding(in: presentations, containing: "arbitrary process spawning remains unavailable")
-        XCTAssertContainsFinding(in: presentations, containing: "sharp compatibility package")
-        XCTAssertContainsFinding(in: presentations, containing: "native sharp/skia-canvas rendering remains unavailable")
-        XCTAssertContainsFinding(in: presentations, containing: "skia-canvas")
-        XCTAssertContainsFinding(in: presentations, containing: "Walnut")
-
-        XCTAssertEqual(spreadsheets["status"] as? String, "ready")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "common spreadsheet structural APIs")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "compressed XLSX")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "render basic worksheet ranges to PNG")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "no browser/iOS export condition")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "computes common arithmetic/range formulas")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "Swift JavaScriptCore test covers spreadsheet skill core authoring")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "not the full Excel calculation engine")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "exports native XLSX chart parts")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "not the full Excel chart engine")
-        XCTAssertContainsFinding(in: spreadsheets, containing: "skia-canvas")
-        XCTAssertContainsFinding(
-            in: spreadsheets,
-            containing: "optional spreadsheet extraction packages"
-        )
-    }
-
-    private func report(named name: String, in reports: [[String: Any]]) -> [String: Any]? {
-        reports.first { $0["name"] as? String == name }
-    }
-
-    private func XCTAssertContainsFinding(
-        in report: [String: Any],
-        containing needle: String,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let findings = report["findings"] as? [[String: Any]] ?? []
-        let messages = findings.compactMap { $0["message"] as? String }
-        XCTAssertTrue(
-            messages.contains { $0.contains(needle) },
-            "Expected finding containing '\(needle)' in messages: \(messages)",
-            file: file,
-            line: line
-        )
-    }
-
-    private func XCTAssertContainsCheck(
-        named name: String,
-        in checks: [[String: Any]],
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        guard let check = checks.first(where: { $0["name"] as? String == name }) else {
-            XCTFail("Missing smoke check named \(name): \(checks)", file: file, line: line)
-            return
-        }
-        XCTAssertEqual(check["status"] as? String, "ok", file: file, line: line)
+        return (process.terminationStatus, try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any]))
     }
 }

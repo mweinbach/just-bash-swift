@@ -227,6 +227,8 @@ public protocol BashFilesystem: Sendable {
     /// Lists the entries in a directory.
     ///
     /// Returns the names of entries (not full paths) in the specified directory.
+    /// Includes dotfiles. Presentation helpers such as `ls` apply their own
+    /// hidden-file filtering; archive and runtime callers must see every entry.
     /// The order of entries is implementation-defined.
     ///
     /// - Parameters:
